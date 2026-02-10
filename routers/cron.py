@@ -1,0 +1,58 @@
+from fastapi import APIRouter, HTTPException, Body
+from typing import List, Optional
+from pydantic import BaseModel
+from core.scheduler import scheduler_service, JobDefinition
+
+router = APIRouter(prefix="/cron", tags=["Scheduler"])
+
+class CreateJobRequest(BaseModel):
+    name: str
+    cron: str
+    agent_type: str = "PlannerAgent"
+    query: str
+
+@router.get("/jobs", response_model=List[JobDefinition])
+async def list_jobs():
+    """List all scheduled jobs."""
+    return scheduler_service.list_jobs()
+
+@router.post("/jobs", response_model=JobDefinition)
+async def create_job(request: CreateJobRequest):
+    """Create a new scheduled task."""
+    try:
+        job = scheduler_service.add_job(
+            name=request.name,
+            cron_expression=request.cron,
+            agent_type=request.agent_type,
+            query=request.query
+        )
+        return job
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/jobs/{job_id}/trigger")
+async def trigger_job(job_id: str):
+    """Force run a job immediately."""
+    try:
+        scheduler_service.trigger_job(job_id)
+        return {"status": "triggered", "id": job_id}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Job not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """Delete a scheduled task."""
+    scheduler_service.delete_job(job_id)
+    return {"status": "deleted", "id": job_id}
+
+
+@router.post("/briefing/trigger")
+async def trigger_morning_briefing():
+    """Run the Morning Briefing now (fetch overnight news, summarize, send to Inbox). Combines Scheduler + Inbox + EventBus."""
+    from core.morning_briefing import run_morning_briefing
+    result = await run_morning_briefing()
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result["error"])
+    return {"status": "ok", "notification_id": result["notification_id"], "item_count": result["item_count"], "run_id": result["run_id"]}

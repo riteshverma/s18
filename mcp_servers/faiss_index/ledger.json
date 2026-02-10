@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "last_reconcile": "2026-02-10T18:32:03.177776Z",
+  "files": {
+    "inbox\\notifications.db": {
+      "hash": "a1b48a24b62a400c7d47b035e139e115",
+      "status": "complete",
+      "indexed_at": "2026-02-10T18:37:06.828453Z",
+      "chunk_count": 0,
+      "error": null
+    },
+    "system\\jobs.json": {
+      "hash": "d751713988987e9331980363e24189ce",
+      "status": "complete",
+      "indexed_at": "2026-02-10T18:32:24.169468Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "system\\snapshot.json": {
+      "hash": "e3cb71c3eb223d9848e25934ebb2be83",
+      "status": "complete",
+      "indexed_at": "2026-02-10T18:37:06.742257Z",
+      "chunk_count": 4,
+      "error": null
+    }
+  }
+}

@@ -1,0 +1,6 @@
+mcp_servers:
+  - id: browser
+    script: mcp_servers/server_browser.py
+    cwd: ./
+    transport: stdio
+    description: "Hybrid Browser Search Server (DuckDuckGo + Extraction + Vision)"
