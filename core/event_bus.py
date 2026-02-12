@@ -62,3 +62,7 @@ class EventBus:
         for ref in list(self._subscribers):
             if ref() is q:
                 self._subscribers.discard(ref)
+
+
+# Singleton instance used by all consumers
+event_bus = EventBus()
