@@ -1,60 +1,64 @@
 import asyncio
 import logging
-from typing import Dict, List, Any, Callable, Awaitable
+from typing import Dict, Any
 from datetime import datetime
-import json
 from collections import deque
+import weakref
 
 logger = logging.getLogger("event_bus")
+
 
 class EventBus:
     _instance = None
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(EventBus, cls).__new__(cls)
-            cls._instance._subscribers: List[asyncio.Queue] = []
-            cls._instance._history = deque(maxlen=100) # Keep last 100 events
+            cls._instance = super().__new__(cls)
+            cls._instance._subscribers = set()
+            cls._instance._history = deque(maxlen=100)
         return cls._instance
 
     async def publish(self, event_type: str, source: str, data: Dict[str, Any]):
-        """Publish an event to all subscribers."""
         event = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat(),
             "type": event_type,
             "source": source,
-            "data": data
+            "data": data,
         }
-        
-        # Add to history
+
         self._history.append(event)
-        
-        # Log to console
-        logger.debug(f"Event: {event_type} from {source}")
 
-        # Broadcast to all active queues
-        # Use list copy to avoid modification during iteration issues if sub disconnects
-        for q in list(self._instance._subscribers):
+        dead = []
+
+        for ref in list(self._subscribers):
+            q = ref()
+            if q is None:
+                dead.append(ref)
+                continue
+
             try:
-                await q.put(event)
-            except Exception as e:
-                logger.error(f"Failed to push to subscriber: {e}")
+                q.put_nowait(event)  # Non-blocking
+            except asyncio.QueueFull:
+                logger.warning("Dropping event due to full subscriber queue")
 
-    async def subscribe(self) -> asyncio.Queue:
-        """Subscribe to the event stream."""
-        q = asyncio.Queue()
-        self._subscribers.append(q)
-        
-        # Replay history? Configurable.
-        # For now, let's replay the last 5 events to give context
+        # Cleanup dead references
+        for ref in dead:
+            self._subscribers.discard(ref)
+
+    async def subscribe(self, max_queue_size: int = 100):
+        q = asyncio.Queue(maxsize=max_queue_size)
+        self._subscribers.add(weakref.ref(q))
+
+        # Replay last 5 events
         for event in list(self._history)[-5:]:
-            await q.put(event)
-            
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                break
+
         return q
 
     def unsubscribe(self, q: asyncio.Queue):
-        if q in self._subscribers:
-            self._subscribers.remove(q)
-
-# Global Instance
-event_bus = EventBus()
+        for ref in list(self._subscribers):
+            if ref() is q:
+                self._subscribers.discard(ref)

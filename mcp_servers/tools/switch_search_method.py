@@ -1,6 +1,7 @@
 import random
 import asyncio
 import httpx
+import os
 from typing import List
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
@@ -12,6 +13,46 @@ import sys
 def print(*args, **kwargs):
     sys.stderr.write(" ".join(map(str, args)) + "\n")
     sys.stderr.flush()
+
+# --- Configurable timeouts and retries ---
+def _config_int(name: str, default: int) -> int:
+    val = os.environ.get(name)
+    if val is None or not str(val).strip():
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        return default
+
+SEARCH_ENGINE_TIMEOUT = _config_int("S18_SEARCH_ENGINE_TIMEOUT", 30)
+SEARCH_RETRIES = _config_int("S18_SEARCH_RETRIES", 2)
+SEARCH_BACKOFF_BASE = _config_int("S18_SEARCH_BACKOFF_BASE_SEC", 1)
+
+# --- Shared HTTP client for search ---
+_shared_search_client: httpx.AsyncClient | None = None
+
+def _get_search_client() -> httpx.AsyncClient:
+    global _shared_search_client
+    if _shared_search_client is None or _shared_search_client.is_closed:
+        _shared_search_client = httpx.AsyncClient(
+            timeout=SEARCH_ENGINE_TIMEOUT,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+    return _shared_search_client
+
+async def _retry_search(async_func, max_retries: int = SEARCH_RETRIES, base_delay: float = SEARCH_BACKOFF_BASE):
+    """Retry search with exponential backoff."""
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            return await async_func()
+        except Exception as e:
+            last_exc = e
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                print(f"⚠️ Search retry {attempt + 1}/{max_retries} after {delay:.1f}s: {e}")
+                await asyncio.sleep(delay)
+    raise last_exc
 
 SEARCH_ENGINES = [
     "duck_http",
@@ -59,27 +100,27 @@ async def use_duckduckgo_http(query: str) -> List[str]:
     headers = get_random_headers()
     data = {"q": query}
 
-    async with httpx.AsyncClient() as client:
-        r = await client.post(url, data=data, headers=headers, timeout=30.0)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-        links = []
+    client = _get_search_client()
+    r = await client.post(url, data=data, headers=headers, timeout=float(SEARCH_ENGINE_TIMEOUT))
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    links = []
 
-        for a in soup.select("a.result__a"):
-            href = a.get("href", "")
-            if not href:
-                continue
-            if "uddg=" in href:
-                parts = href.split("uddg=")
-                if len(parts) > 1:
-                    href = urllib.parse.unquote(parts[1].split("&")[0])
-            if href.startswith("http") and href not in links:
-                links.append(href)
+    for a in soup.select("a.result__a"):
+        href = a.get("href", "")
+        if not href:
+            continue
+        if "uddg=" in href:
+            parts = href.split("uddg=")
+            if len(parts) > 1:
+                href = urllib.parse.unquote(parts[1].split("&")[0])
+        if href.startswith("http") and href not in links:
+            links.append(href)
 
-        if not links:
-            print("[duck_http] No links found in results")
+    if not links:
+        print("[duck_http] No links found in results")
 
-        return links
+    return links
 
 async def use_playwright_search(query: str, engine: str) -> List[str]:
     await rate_limiter.acquire(engine)
@@ -164,20 +205,35 @@ async def use_playwright_search(query: str, engine: str) -> List[str]:
     return urls
 
 async def smart_search(query: str, limit: int = 5) -> List[str]:
-    # random.shuffle(SEARCH_ENGINES) # Disable shuffle to prioritize duck_http
+    # Try duck_http and one Playwright engine in parallel first
+    first_batch = ["duck_http", "duck_playwright"]
 
-    for engine in SEARCH_ENGINES:
-        print(f"Trying engine: {engine}")
+    async def try_engine(engine: str) -> List[str] | None:
         try:
             if engine == "duck_http":
-                # Only use duck_http for first attempt if query likely to succeed
                 results = await use_duckduckgo_http(query)
             else:
                 results = await use_playwright_search(query, engine)
+            return results[:limit] if results else None
+        except Exception as e:
+            print(f"Engine {engine} failed: {e}")
+            return None
+
+    # Parallel attempt for first two engines
+    results = await asyncio.gather(*(try_engine(e) for e in first_batch))
+    for r in results:
+        if r:
+            return r
+
+    # Fallback: sequential retries with backoff for remaining engines
+    for engine in SEARCH_ENGINES:
+        if engine in first_batch:
+            continue
+        print(f"Trying engine: {engine}")
+        try:
+            results = await _retry_search(lambda: use_playwright_search(query, engine))
             if results:
                 return results[:limit]
-            else:
-                print(f"No results from {engine}. Trying next...")
         except Exception as e:
             print(f"Engine {engine} failed: {e}. Trying next...")
 

@@ -1,6 +1,7 @@
 # web_tools_async.py
 import asyncio
 import traceback
+import time
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
 from readability import Document
@@ -8,6 +9,7 @@ import trafilatura
 import random
 from pathlib import Path
 import sys
+import os
 
 # MCP Protocol Safety: Redirect print to stderr
 def print(*args, **kwargs):
@@ -15,6 +17,41 @@ def print(*args, **kwargs):
     sys.stderr.flush()
 
 DIFFICULT_WEBSITES_PATH = Path(__file__).parent / "difficult_websites.txt"
+
+# --- Configurable timeouts (env vars) ---
+def _config_int(name: str, default: int) -> int:
+    val = os.environ.get(name)
+    if val is None or not str(val).strip():
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        return default
+
+EXTRACT_FAST_TIMEOUT = _config_int("S18_EXTRACT_FAST_TIMEOUT", 5)
+EXTRACT_PLAYWRIGHT_GOTO = _config_int("S18_EXTRACT_PLAYWRIGHT_GOTO_MS", 15000)
+EXTRACT_PLAYWRIGHT_WAIT = _config_int("S18_EXTRACT_PLAYWRIGHT_WAIT_MS", 15000)
+EXTRACT_CACHE_TTL_SEC = _config_int("S18_EXTRACT_CACHE_TTL_SEC", 300)
+EXTRACT_RETRIES = _config_int("S18_EXTRACT_RETRIES", 2)
+EXTRACT_BACKOFF_BASE = _config_int("S18_EXTRACT_BACKOFF_BASE_SEC", 1)
+
+# --- Short-TTL cache for extract results ---
+_extract_cache: dict[str, tuple[float, dict]] = {}
+_cache_lock = asyncio.Lock()
+
+async def _retry_with_backoff(async_func, max_retries: int = EXTRACT_RETRIES, base_delay: float = EXTRACT_BACKOFF_BASE):
+    """Retry an async function with exponential backoff."""
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            return await async_func()
+        except Exception as e:
+            last_exc = e
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                print(f"⚠️ Retry {attempt + 1}/{max_retries} after {delay:.1f}s: {e}")
+                await asyncio.sleep(delay)
+    raise last_exc
 
 def get_random_headers():
     user_agents = [
@@ -61,15 +98,17 @@ def choose_best_text(visible, main, trafilatura_):
         "trafilatura": trafilatura_
     }[best], best
 
-async def web_tool_playwright(url: str, max_total_wait: int = 15) -> dict:
+async def web_tool_playwright(url: str, max_total_wait: int = None) -> dict:
+    goto_ms = max_total_wait * 1000 if max_total_wait else EXTRACT_PLAYWRIGHT_GOTO
+    wait_ms = EXTRACT_PLAYWRIGHT_WAIT
     result = {"url": url}
 
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True) # changed to headless=True for stability
+            browser = await p.chromium.launch(headless=True)  # changed to headless=True for stability
             page = await browser.new_page()
 
-            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=goto_ms)
 
             # Wait until the page body has significant content (i.e., text is non-trivial)
             try:
@@ -78,7 +117,7 @@ async def web_tool_playwright(url: str, max_total_wait: int = 15) -> dict:
                         const body = document.querySelector('body');
                         return body && (body.innerText || "").length > 1000;
                     }""",
-                    timeout=15000
+                    timeout=wait_ms
                 )
             except Exception as e:
                 print("⚠️ Generic wait failed:", e)
@@ -151,20 +190,32 @@ async def web_tool_playwright(url: str, max_total_wait: int = 15) -> dict:
 
 import httpx
 
-async def smart_web_extract(url: str, timeout: int = 5) -> dict:
+# --- Shared HTTP client (connection reuse) ---
+_shared_http_client: httpx.AsyncClient | None = None
 
+def _get_http_client() -> httpx.AsyncClient:
+    global _shared_http_client
+    if _shared_http_client is None or _shared_http_client.is_closed:
+        _shared_http_client = httpx.AsyncClient(
+            timeout=EXTRACT_FAST_TIMEOUT,
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _shared_http_client
+
+async def _smart_web_extract_impl(url: str, timeout: int = None) -> dict:
+    """Internal implementation without cache."""
+    use_timeout = timeout if timeout is not None else EXTRACT_FAST_TIMEOUT
     headers = get_random_headers()
 
     try:
-
         if is_difficult_website(url):
             print(f"Detected difficult site ({url}) → skipping fast scrape")
             return await web_tool_playwright(url)
 
-
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            response = await client.get(url, headers=headers)
-            html = response.content.decode("utf-8", errors="replace")
+        client = _get_http_client()
+        response = await client.get(url, headers=headers, timeout=use_timeout)
+        html = response.content.decode("utf-8", errors="replace")
 
         doc = Document(html)
         main_html = doc.summary()
@@ -182,7 +233,7 @@ async def smart_web_extract(url: str, timeout: int = 5) -> dict:
                 "main_text": main_text,
                 "trafilatura_text": trafilatura_text,
                 "best_text": ascii_only(best_text),
-                "best_text_source": best_source
+                "best_text_source": best_source,
             }
 
         print("Fast scrape too small, falling back...")
@@ -192,6 +243,27 @@ async def smart_web_extract(url: str, timeout: int = 5) -> dict:
 
     # Fallback
     return await web_tool_playwright(url)
+
+async def smart_web_extract(url: str, timeout: int = None) -> dict:
+    """Extract text from URL with cache, retries, and shared HTTP client."""
+    # Check cache first
+    async with _cache_lock:
+        now = time.time()
+        if url in _extract_cache:
+            cached_at, cached_result = _extract_cache[url]
+            if (now - cached_at) < EXTRACT_CACHE_TTL_SEC:
+                return cached_result.copy()
+            del _extract_cache[url]
+
+    effective_timeout = timeout if timeout is not None else EXTRACT_FAST_TIMEOUT
+
+    async def do_extract():
+        result = await _smart_web_extract_impl(url, timeout=effective_timeout)
+        async with _cache_lock:
+            _extract_cache[url] = (time.time(), result.copy())
+        return result
+
+    return await _retry_with_backoff(do_extract)
 
 
 if __name__ == "__main__":

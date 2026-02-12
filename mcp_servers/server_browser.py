@@ -88,33 +88,32 @@ async def search_web_with_text_content(string: str) -> dict:
                 ]
             }
         
-        # Step 2: Extract text content from each URL
-        results = []
+        # Step 2: Extract text content from each URL (parallel with semaphore to cap concurrency)
         max_extracts = min(len(urls), 5)
-        
-        for i, url in enumerate(urls[:max_extracts]):
-            try:
-                print(f"Link: {url} | Status: Visiting...") 
-                web_result = await asyncio.wait_for(smart_web_extract(url), timeout=20)
-                text_content = web_result.get("best_text", "")[:4000]
-                text_content = text_content.replace('\n', ' ').replace('  ', ' ').strip()
-                token_count = len(text_content) // 4
-                
-                print(f"Link: {url} | Status: Extracted | Tokens: {token_count}")
+        extract_semaphore = asyncio.Semaphore(3)  # Max 3 concurrent extractions
 
-                results.append({
-                    "url": url,
-                    "content": text_content if text_content.strip() else "[error] No readable content found",
-                    "images": web_result.get("images", []),
-                    "rank": i + 1
-                })
-            except Exception as e:
-                print(f"Link: {url} | Status: Failed | Error: {str(e)}")
-                results.append({
-                    "url": url,
-                    "content": f"[error] {str(e)}",
-                    "rank": i + 1
-                })
+        async def extract_one(i: int, url: str) -> dict:
+            async with extract_semaphore:
+                try:
+                    print(f"Link: {url} | Status: Visiting...")
+                    web_result = await asyncio.wait_for(smart_web_extract(url), timeout=20)
+                    text_content = web_result.get("best_text", "")[:4000]
+                    text_content = text_content.replace('\n', ' ').replace('  ', ' ').strip()
+                    token_count = len(text_content) // 4
+                    print(f"Link: {url} | Status: Extracted | Tokens: {token_count}")
+                    return {
+                        "url": url,
+                        "content": text_content if text_content.strip() else "[error] No readable content found",
+                        "images": web_result.get("images", []),
+                        "rank": i + 1,
+                    }
+                except Exception as e:
+                    print(f"Link: {url} | Status: Failed | Error: {str(e)}")
+                    return {"url": url, "content": f"[error] {str(e)}", "rank": i + 1}
+
+        tasks = [extract_one(i, url) for i, url in enumerate(urls[:max_extracts])]
+        raw_results = await asyncio.gather(*tasks, return_exceptions=False)
+        results = sorted(raw_results, key=lambda r: r["rank"])
         
         return {
             "content": [

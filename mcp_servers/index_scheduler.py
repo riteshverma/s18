@@ -346,7 +346,7 @@ class IndexScheduler:
     # File extensions to skip during scanning
     SKIP_EXTENSIONS = {
         '.mp4', '.mov', '.wav', '.mp3', 
-        '.bin', '.exe', '.pyc', '.pyo', '.swp', '.tmp', '.lock'
+        '.bin', '.exe', '.pyc', '.pyo', '.swp', '.tmp', '.lock', '.db'
     }
     SKIP_DIRS = {
         '.git', '.github', 'node_modules', '__pycache__', 

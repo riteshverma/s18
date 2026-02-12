@@ -1450,7 +1450,7 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
         # Improved file discovery: walk and filter
         files_to_process = []
         skip_dirs = {'.git', '.github', 'node_modules', '__pycache__', 'mcp_repos', 'faiss_index'}
-        skip_exts = {'.mp4', '.mov', '.wav', '.mp3', '.bin', '.exe', '.pyc'}
+        skip_exts = {'.mp4', '.mov', '.wav', '.mp3', '.bin', '.exe', '.pyc', '.db'}
         
         for root, dirs, filenames in os.walk(DOC_PATH):
             # Skip junk directories in-place
