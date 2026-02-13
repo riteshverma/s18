@@ -126,6 +126,19 @@ Persistent state is stored on host-mounted folders:
 
 ---
 
+### CI Docker target
+
+This repo now includes a dedicated Docker build target for CI:
+
+```bash
+docker build --target ci -t s18share-ci .
+docker run --rm s18share-ci
+```
+
+The CI target uses pinned dependencies from `requirements-ci.txt` (exported from `uv.lock`) and runs a quick compile sanity check.
+
+---
+
 ## Project structure
 
 | Path | Description |

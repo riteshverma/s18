@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     container_name: s18share-api
     restart: unless-stopped
     ports:

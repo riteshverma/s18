@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -11,20 +11,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+COPY requirements-ci.txt /app/requirements-ci.txt
+
+RUN pip install --upgrade pip && \
+    pip install uv && \
+    pip install -r /app/requirements-ci.txt
+
 COPY . /app
 
-RUN python - <<'PY' && \
-    pip install --upgrade pip && \
-    pip install uv && \
-    pip install -r /tmp/requirements.txt
-import tomllib
-from pathlib import Path
-
-pyproject = Path("/app/pyproject.toml")
-data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-deps = data.get("project", {}).get("dependencies", [])
-Path("/tmp/requirements.txt").write_text("\n".join(deps) + "\n", encoding="utf-8")
-PY
+FROM base AS runtime
 
 RUN useradd --create-home --shell /bin/bash appuser && \
     chown -R appuser:appuser /app
@@ -37,3 +32,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
 
 CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+
+FROM base AS ci
+
+# CI target: lightweight sanity check over the full source tree.
+CMD ["python", "-m", "compileall", "-q", "."]
