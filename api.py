@@ -61,10 +61,20 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(background_smart_scan())
     
     yield
-    
+
     print("🛑 API Shutting down...")
     persistence_manager.save_snapshot()
-    await multi_mcp.stop()
+    try:
+        await asyncio.wait_for(multi_mcp.stop(), timeout=3.0)
+    except asyncio.CancelledError:
+        pass
+    except (RuntimeError, ExceptionGroup, BaseExceptionGroup) as e:
+        if "cancel scope" in str(e).lower() or "TaskGroup" in str(type(e).__name__):
+            pass  # MCP stdio teardown noise on Ctrl+C
+        else:
+            print(f"⚠️ Shutdown warning: {e}")
+    except Exception as e:
+        print(f"⚠️ Shutdown warning: {e}")
 
 app = FastAPI(lifespan=lifespan)
 

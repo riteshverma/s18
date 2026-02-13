@@ -4,6 +4,7 @@ import uuid
 import os
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from pathlib import Path
@@ -82,6 +83,59 @@ def send_to_inbox(source: str, title: str, body: str, priority: int = 1, metadat
     return notif_id
 
 # --- Endpoints ---
+
+INBOX_VIEW_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inbox</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 1.5rem; background: #1a1a1a; color: #e0e0e0; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .sub { color: #888; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    .card { background: #2a2a2a; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 0.75rem; border-left: 4px solid #4a9eff; }
+    .card.read { opacity: 0.75; border-left-color: #555; }
+    .card.high { border-left-color: #e67e22; }
+    .card .source { font-size: 0.8rem; color: #888; margin-bottom: 0.25rem; }
+    .card .title { font-weight: 600; margin-bottom: 0.5rem; }
+    .card .body { font-size: 0.95rem; line-height: 1.5; white-space: pre-wrap; }
+    .card .body a { color: #4a9eff; }
+    .card .time { font-size: 0.8rem; color: #666; margin-top: 0.5rem; }
+    .empty { color: #888; text-align: center; padding: 2rem; }
+    .briefing { border-left-color: #2ecc71; }
+  </style>
+</head>
+<body>
+  <h1>Inbox</h1>
+  <p class="sub">Your morning briefing and other notifications appear here.</p>
+  <div id="list">Loading…</div>
+  <script>
+    async function load() {
+      const res = await fetch('/inbox/');
+      const items = await res.json();
+      const list = document.getElementById('list');
+      if (!items.length) { list.innerHTML = '<p class="empty">No notifications yet. Run the briefing: <code>POST /cron/briefing/trigger</code></p>'; return; }
+      list.innerHTML = items.map(n => {
+        const cls = ['card', n.is_read ? 'read' : '', n.priority >= 2 ? 'high' : '', n.source === 'Morning Briefing' ? 'briefing' : ''].filter(Boolean).join(' ');
+        const time = n.timestamp ? new Date(n.timestamp).toLocaleString() : '';
+        const body = (n.body || '').replace(/\\n/g, '<br>').replace(/\\[([^\\]]+)\\]\\((https?:[^)]+)\\)/g, '<a href="$2" target="_blank">$1</a>');
+        return `<div class="${cls}"><div class="source">${escapeHtml(n.source)}</div><div class="title">${escapeHtml(n.title)}</div><div class="body">${body}</div><div class="time">${escapeHtml(time)}</div></div>`;
+      }).join('');
+    }
+    function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    load();
+  </script>
+</body>
+</html>
+"""
+
+
+@router.get("/view", response_class=HTMLResponse)
+async def inbox_view():
+    """View Inbox in the browser — open this URL to see 'Your morning briefing' and other notifications."""
+    return INBOX_VIEW_HTML
+
 
 @router.get("/", response_model=List[Notification])
 async def get_notifications(unread_only: bool = False, limit: int = 50):

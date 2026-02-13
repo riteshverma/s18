@@ -38,8 +38,8 @@ pip install -e .
 
 ### 2. Environment variables
 
-| Variable | Purpose |
-|----------|---------|
+| Variable         | Purpose                                                                           |
+| ---------------- | --------------------------------------------------------------------------------- |
 | `GEMINI_API_KEY` | Google Gemini API key (used for agents, apps, and some MCP tools when configured) |
 
 Optional:
@@ -59,18 +59,77 @@ Or:
 uv run uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-- **API:** http://localhost:8000  
-- **Health:** http://localhost:8000/health  
-- **Docs:** http://localhost:8000/docs  
+- **API:** [http://localhost:8000](http://localhost:8000)  
+- **Health:** [http://localhost:8000/health](http://localhost:8000/health)  
+- **Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)  
 
 The app expects a frontend at `http://localhost:5173` (CORS is configured for it).
+
+---
+
+## Docker
+
+### 1. Prepare environment file
+
+```bash
+cp .env.example .env
+```
+
+PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Set `GEMINI_API_KEY` in `.env`.
+
+### 2. Run API only (host Ollama)
+
+Set in `.env`:
+
+```bash
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+```
+
+Then:
+
+```bash
+docker compose up --build -d api
+```
+
+### 3. Run API + Ollama in Docker
+
+Keep in `.env`:
+
+```bash
+OLLAMA_BASE_URL=http://ollama:11434
+```
+
+Then:
+
+```bash
+docker compose --profile local-llm up --build -d
+```
+
+### 4. Verify
+
+- API: [http://localhost:8000](http://localhost:8000)
+- Health: [http://localhost:8000/health](http://localhost:8000/health)
+- Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+Persistent state is stored on host-mounted folders:
+
+- `data/`
+- `memory/`
+- `config/`
+- `mcp_servers/faiss_index/`
 
 ---
 
 ## Project structure
 
 | Path | Description |
-|------|-------------|
+| ---- | ----------- |
 | `api.py` | FastAPI app, lifespan, CORS, router includes |
 | `core/` | Agent loop, scheduler, event bus, circuit breaker, persistence, model manager, skills |
 | `remme/` | Memory and preferences pipeline (extractor, store, hubs, normalizer) |
