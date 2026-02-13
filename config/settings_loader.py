@@ -19,6 +19,7 @@ Usage:
 """
 
 import json
+import os
 from pathlib import Path
 
 # Paths
@@ -41,6 +42,15 @@ def load_settings() -> dict:
             save_settings()  # Create settings.json from defaults
         else:
             raise FileNotFoundError(f"No settings files found in {CONFIG_DIR}")
+        # Allow container/runtime override without editing tracked config files.
+        env_ollama_base_url = os.getenv("OLLAMA_BASE_URL")
+        if env_ollama_base_url:
+            _settings_cache.setdefault("ollama", {})
+            _settings_cache["ollama"]["base_url"] = env_ollama_base_url
+        env_ollama_timeout = os.getenv("OLLAMA_TIMEOUT")
+        if env_ollama_timeout and env_ollama_timeout.isdigit():
+            _settings_cache.setdefault("ollama", {})
+            _settings_cache["ollama"]["timeout"] = int(env_ollama_timeout)
     return _settings_cache
 
 def save_settings() -> None:
