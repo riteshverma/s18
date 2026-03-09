@@ -72,3 +72,17 @@ def parse_llm_json(text: str, required_keys: list[str] = None, debug: bool = Fal
             if debug: print(f"[DEBUG] Repair attempt failed.")
 
     raise JsonParsingError("All attempts to parse JSON from LLM output failed.")
+
+
+def parse_llm_json_or_fallback(text: str, required_keys: list[str] = None, fallback_key: str = "response") -> dict:
+    """
+    Like parse_llm_json but if all parsing fails, returns a single-key dict so the pipeline can continue.
+    Use for agents that may return plain text (e.g. ThinkerAgent, simple answers).
+    """
+    try:
+        return parse_llm_json(text, required_keys=required_keys)
+    except JsonParsingError:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            cleaned = "(No output)"
+        return {fallback_key: cleaned}

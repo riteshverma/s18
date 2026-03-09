@@ -574,16 +574,91 @@ def search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]:
         if gate_applied:
             mcp_log("SEARCH", f"Entity gate applied: {len(fused_results)} -> {len(gated_results)} results")
             if not gated_results and analysis.entities:
-                # No exact matches - return message indicating this
-                mcp_log("SEARCH", f"No documents contain '{analysis.entities}'")
-                return [f"⚠️ No documents contain '{', '.join(analysis.entities)}' exactly. Try a broader search."]
+                # For strict lexical constraints (quoted phrases/IDs), preserve exact-match behavior.
+                # For lexical-preferred queries, fall back to hybrid semantic results.
+                if analysis.intent == "LEXICAL_REQUIRED":
+                    mcp_log("SEARCH", f"No strict lexical matches for entities: {analysis.entities}")
+                    return [f"⚠️ No documents contain '{', '.join(analysis.entities)}' exactly. Try a broader search."]
+                mcp_log("SEARCH", "No gated results; falling back to ungated hybrid results")
+                gated_results = fused_results
         
         # 6. Build result list
         chunk_lookup = {e['chunk_id']: e for e in metadata}
         results = []
         seen_docs = set()
-        
-        for chunk_id, score in (gated_results if gate_applied else fused_results)[:TOP_K * 2]:
+
+        candidate_results = (gated_results if gate_applied else fused_results)
+
+        # Query-aware reranking for governance/style exact-lookups:
+        # if users ask with IDs (T91/T94), RACI, or governance terms, prioritize governance docs
+        # and chunks with strong lexical overlap before generic semantic matches.
+        lowered_query = query.lower()
+        governance_hints = {
+            "governance", "accountability", "raci", "stakeholder", "retrospective",
+            "competency", "change management", "sahi", "workflow integration"
+        }
+        id_matches = re.findall(r"\bT\d{2,3}\b", query, flags=re.IGNORECASE)
+        is_governance_lookup = bool(id_matches) or any(h in lowered_query for h in governance_hints)
+
+        if is_governance_lookup:
+            query_terms = [
+                t for t in re.sub(r"[^\w\s-]", " ", lowered_query).split()
+                if len(t) > 2 and t not in {"the", "and", "for", "with", "from", "about", "that", "this"}
+            ]
+
+            # Inject lexical candidates from full metadata so governance docs are considered
+            # even if FAISS/BM25 top slices miss them.
+            injected = []
+            for entry in metadata:
+                chunk_id = entry.get("chunk_id")
+                if not chunk_id:
+                    continue
+                chunk_text = (entry.get("chunk") or "").lower()
+                doc_rel_path = (entry.get("doc") or "").lower()
+
+                overlap = sum(1 for t in query_terms if t in chunk_text or t in doc_rel_path)
+                id_bonus = sum(1 for tid in id_matches if tid.lower() in chunk_text or tid.lower() in doc_rel_path)
+                gov_bonus = 1 if doc_rel_path.startswith("docs/governance/") else 0
+
+                if id_bonus > 0 or overlap >= 2 or (gov_bonus and overlap >= 1):
+                    # Use high synthetic score so explicit lexical matches are not drowned out.
+                    injected_score = 100.0 + (5.0 * id_bonus) + (1.5 * gov_bonus) + (0.3 * overlap)
+                    injected.append((chunk_id, injected_score))
+
+            if injected:
+                merged_scores = {}
+                for cid, score in candidate_results:
+                    merged_scores[cid] = max(merged_scores.get(cid, float("-inf")), score)
+                for cid, score in injected:
+                    merged_scores[cid] = max(merged_scores.get(cid, float("-inf")), score)
+                candidate_results = sorted(merged_scores.items(), key=lambda x: x[1], reverse=True)
+
+            reranked = []
+            for chunk_id, base_score in candidate_results:
+                entry = chunk_lookup.get(chunk_id, {})
+                chunk_text = (entry.get("chunk") or "").lower()
+                doc_rel_path = (entry.get("doc") or "").lower()
+                bonus = 0.0
+
+                if doc_rel_path.startswith("docs/governance/"):
+                    bonus += 2.5
+
+                # Prefer chunks containing explicit task IDs in query
+                for tid in id_matches:
+                    tid_l = tid.lower()
+                    if tid_l in chunk_text or tid_l in doc_rel_path:
+                        bonus += 2.0
+
+                # Lexical overlap bonus
+                overlap = sum(1 for t in query_terms if t in chunk_text or t in doc_rel_path)
+                bonus += 0.25 * overlap
+
+                reranked.append((chunk_id, base_score + bonus))
+
+            candidate_results = sorted(reranked, key=lambda x: x[1], reverse=True)
+
+        max_candidates = max(TOP_K * 10, 40)
+        for chunk_id, score in candidate_results[:max_candidates]:
             data = chunk_lookup.get(chunk_id)
             if not data:
                 continue
@@ -613,6 +688,32 @@ def search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]:
             if len(results) >= TOP_K:
                 break
         
+        # 7. Fallback lexical pass when semantic candidates get filtered out
+        if not results:
+            query_terms = [
+                t for t in re.sub(r"[^\w\s]", " ", query.lower()).split()
+                if len(t) > 2 and t not in {"the", "and", "for", "with", "from", "about", "that", "this"}
+            ]
+            if query_terms:
+                for entry in metadata:
+                    chunk_text = (entry.get("chunk") or "").strip()
+                    if not chunk_text:
+                        continue
+                    chunk_lower = chunk_text.lower()
+                    if not any(term in chunk_lower for term in query_terms):
+                        continue
+                    doc_rel_path = entry.get("doc", "")
+                    if not doc_rel_path:
+                        continue
+                    full_path = ROOT.parent / "data" / doc_rel_path
+                    if not full_path.exists():
+                        continue
+                    page = entry.get("page", 1)
+                    results.append(f"{chunk_text}\n[Source: {doc_rel_path} p{page}]")
+                    seen_docs.add(doc_rel_path)
+                    if len(results) >= TOP_K:
+                        break
+
         mcp_log("SEARCH", f"Returning {len(results)} results from {len(seen_docs)} docs")
         return results if results else ["No relevant documents found."]
         
@@ -1443,8 +1544,23 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
         target_file = DOC_PATH / target_path
         if target_file.exists() and target_file.is_file():
             files_to_process = [target_file]
+        elif target_file.exists() and target_file.is_dir():
+            # Support folder-level reindex target_path (e.g., "docs")
+            for root, dirs, filenames in os.walk(target_file):
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                for f in filenames:
+                    if f.startswith('.'):
+                        continue
+                    files_to_process.append(Path(root) / f)
         else:
             mcp_log("ERROR", f"Target path not found: {target_path}")
+            with INDEXING_LOCK:
+                INDEXING_STATUS["active"] = False
+                INDEXING_STATUS["currentFile"] = ""
+            try:
+                REINDEX_BUSY_LOCK.release()
+            except:
+                pass
             return
     else:
         # Improved file discovery: walk and filter

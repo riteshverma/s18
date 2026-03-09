@@ -76,6 +76,29 @@ async def process_run(run_id: str, query: str):
         except Exception as e:
             print(f"⚠️ Remme Retrieval Failed: {e}")
 
+        # 1b. RAG context: search indexed documents so CBC/lab and document queries get doc context
+        try:
+            rag_result = await multi_mcp.call_tool("rag", "search_stored_documents_rag", {"query": query})
+            if rag_result and hasattr(rag_result, "content") and isinstance(rag_result.content, list):
+                snippets = []
+                for item in rag_result.content:
+                    if hasattr(item, "text"):
+                        try:
+                            import ast
+                            parsed = ast.literal_eval(item.text)
+                            if isinstance(parsed, list):
+                                snippets.extend(parsed[:5])
+                            else:
+                                snippets.append(item.text[:500])
+                        except Exception:
+                            snippets.append((item.text or "")[:500])
+                if snippets:
+                    rag_str = "\n".join(f"- {s[:400]}..." if len(s) > 400 else f"- {s}" for s in snippets[:8])
+                    memory_context += f"\nRELEVANT DOCUMENT SNIPPETS (RAG):\n{rag_str}\n"
+                    print(f"[{run_id}] Injected {len(snippets)} RAG snippets into run context")
+        except Exception as e:
+            print(f"⚠️ RAG context injection failed (non-fatal): {e}")
+
         loop = AgentLoop4(multi_mcp=multi_mcp)
         # Register the LOOP instance immediately so we can stop it
         active_loops[run_id] = loop
@@ -334,7 +357,8 @@ async def process_run(run_id: str, query: str):
 
 @router.post("/runs")
 async def create_run(request: RunRequest, background_tasks: BackgroundTasks):
-    run_id = str(int(datetime.now().timestamp()))
+    # Millisecond precision avoids collisions when multiple runs start in the same second.
+    run_id = str(int(datetime.now().timestamp() * 1000))
     
     # Start background execution
     background_tasks.add_task(process_run, run_id, request.query)
@@ -358,7 +382,7 @@ async def list_runs():
         for date_folder in summaries_dir.glob("*/*/*"):
             for session_file in date_folder.glob("session_*.json"):
                 try:
-                    data = json.loads(session_file.read_text())
+                    data = json.loads(session_file.read_text(encoding="utf-8", errors="ignore"))
                     graph_data = data
                     # Extract meta
                     graph_details = graph_data.get("graph", {})
@@ -423,7 +447,7 @@ async def get_run(run_id: str):
         break
         
     if found_file:
-        data = json.loads(found_file.read_text())
+        data = json.loads(found_file.read_text(encoding="utf-8", errors="ignore"))
         # Reconstruct Graph to use adapter
         import networkx as nx
         if "edges" in data:
@@ -559,7 +583,7 @@ async def test_agent(run_id: str, node_id: str, request: AgentTestRequest = Body
         
         # 2. Load session data
         import networkx as nx
-        session_data = json.loads(found_file.read_text())
+        session_data = json.loads(found_file.read_text(encoding="utf-8", errors="ignore"))
         if "edges" in session_data:
             G = nx.node_link_graph(session_data, edges="edges")
         elif "links" in session_data:
@@ -786,7 +810,7 @@ async def save_agent_test(run_id: str, node_id: str, request: Request):
         
         # 2. Load and update session
         import networkx as nx
-        session_data = json.loads(found_file.read_text())
+        session_data = json.loads(found_file.read_text(encoding="utf-8", errors="ignore"))
         if "edges" in session_data:
             G = nx.node_link_graph(session_data, edges="edges")
         elif "links" in session_data:

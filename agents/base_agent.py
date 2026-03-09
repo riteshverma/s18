@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Optional
 from core.model_manager import ModelManager
-from core.json_parser import parse_llm_json
+from core.json_parser import parse_llm_json, parse_llm_json_or_fallback
 from core.utils import log_step, log_error
 from PIL import Image
 from datetime import datetime
@@ -141,8 +141,11 @@ class AgentRunner:
             (debug_log_dir / f"{timestamp}_{agent_type}_response.txt").write_text(response, encoding="utf-8")
             (debug_log_dir / f"{timestamp}_{agent_type}_prompt.txt").write_text(full_prompt, encoding="utf-8")
 
-            # 6. Parse JSON response dynamically
-            output = parse_llm_json(response)
+            # 6. Parse JSON response dynamically (PlannerAgent must be strict; others allow plain-text fallback)
+            if agent_type == "PlannerAgent":
+                output = parse_llm_json(response)
+            else:
+                output = parse_llm_json_or_fallback(response, fallback_key="response")
             
             # Robustness: Some models (like gemma3) wrap JSON in a list
             if isinstance(output, list) and len(output) > 0 and isinstance(output[0], dict):
