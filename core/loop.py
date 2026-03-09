@@ -3,6 +3,7 @@
 import networkx as nx
 import asyncio
 import time
+import ast
 from memory.context import ExecutionContextManager
 from agents.base_agent import AgentRunner
 from core.utils import log_step, log_error
@@ -181,10 +182,40 @@ class AgentLoop4:
                     self.context.mark_failed("Query", plan_result['error'])
                     raise RuntimeError(f"Planning failed: {plan_result['error']}")
 
-                if 'plan_graph' not in plan_result['output']:
-                    self.context.mark_failed("Query", "Output missing plan_graph")
-                    raise RuntimeError(f"PlannerAgent output missing 'plan_graph' key.")
-                
+                # Normalize planner output: accept "plan" or top-level nodes/edges as plan_graph
+                out = plan_result["output"]
+                if "plan_graph" not in out:
+                    if "plan" in out and isinstance(out["plan"], dict):
+                        p = out["plan"]
+                        out["plan_graph"] = p.get("plan_graph", p) if isinstance(p.get("plan_graph"), dict) else p
+                    elif "nodes" in out:
+                        out["plan_graph"] = {
+                            "nodes": out["nodes"],
+                            "edges": out.get("edges", out.get("links", []))
+                        }
+                    else:
+                        self.context.mark_failed("Query", "Output missing plan_graph")
+                        raise RuntimeError(f"PlannerAgent output missing 'plan_graph' key.")
+                pg = out["plan_graph"]
+                if not isinstance(pg.get("nodes"), list):
+                    pg["nodes"] = list(pg["nodes"]) if pg.get("nodes") else []
+                if "edges" not in pg and "links" in pg:
+                    pg["edges"] = pg["links"]
+                pg.setdefault("edges", [])
+                # Fallback: if planner returned no steps, create a single ThinkerAgent step
+                if not pg["nodes"]:
+                    log_step("Planner returned no steps; using single-step fallback", symbol="🔄")
+                    pg["nodes"] = [{
+                        "id": "T001",
+                        "agent": "ThinkerAgent",
+                        "description": "Answer the user's query",
+                        "reads": ["original_query"],
+                        "writes": ["response"],
+                        "status": "pending"
+                    }]
+                    pg["edges"] = [{"source": "Query", "target": "T001"}]
+                    out["next_step_id"] = "T001"
+
                 # ===== AUTO-CLARIFICATION CHECK =====
                 AUTO_CLARYFY_THRESHOLD = 0.7
                 confidence = plan_result["output"].get("interpretation_confidence", 1.0)
@@ -594,6 +625,15 @@ class AgentLoop4:
         await event_bus.publish("step_start", "AgentLoop4", {"step_id": step_id})
         step_data = context.get_step_data(step_id)
         agent_type = step_data["agent"]
+        # Normalize common planner aliases to configured agent names
+        agent_aliases = {
+            "SummarizationAgent": "SummarizerAgent",
+            "SummaryAgent": "SummarizerAgent",
+            "ResearchAgent": "RetrieverAgent",
+            "RAG": "RetrieverAgent",
+            "RagAgent": "RetrieverAgent",
+        }
+        agent_type = agent_aliases.get(agent_type, agent_type)
         
         # Get inputs from NetworkX graph
         inputs = context.get_inputs(step_data.get("reads", []))
@@ -646,6 +686,51 @@ class AgentLoop4:
                 return result
             
             output = result["output"]
+
+            # Safety net: ensure RetrieverAgent always gets concrete document snippets.
+            # If the model returns plain text without calling tools, we do one direct RAG fetch.
+            if (
+                agent_type == "RetrieverAgent"
+                and not output.get("call_tool")
+                and "retrieved_documents" not in output
+            ):
+                try:
+                    rag_result = await self.multi_mcp.call_tool(
+                        "rag",
+                        "search_stored_documents_rag",
+                        {"query": context.plan_graph.graph["original_query"]},
+                    )
+                    retrieved_docs = []
+                    if hasattr(rag_result, "content") and isinstance(rag_result.content, list):
+                        for item in rag_result.content:
+                            if not hasattr(item, "text"):
+                                continue
+                            raw_text = item.text or ""
+                            try:
+                                parsed = ast.literal_eval(raw_text)
+                                if isinstance(parsed, list):
+                                    retrieved_docs.extend([str(x) for x in parsed])
+                                elif parsed:
+                                    retrieved_docs.append(str(parsed))
+                            except Exception:
+                                if raw_text.strip():
+                                    retrieved_docs.append(raw_text.strip())
+
+                    output["retrieved_documents"] = retrieved_docs
+                    if "response" not in output:
+                        output["response"] = (
+                            f"Retrieved {len(retrieved_docs)} relevant snippets."
+                            if retrieved_docs
+                            else "No relevant documents found."
+                        )
+                    log_step(
+                        f"Retriever fallback injected {len(retrieved_docs)} snippets",
+                        symbol="📚",
+                    )
+                except Exception as e:
+                    output.setdefault("retrieved_documents", [])
+                    output.setdefault("response", "No relevant documents found.")
+                    log_error(f"Retriever fallback search failed: {e}")
             
             # ✅ CHECK FOR CLARIFICATION REQUEST (HALT)
             if output.get("clarificationMessage"):

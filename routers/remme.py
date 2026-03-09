@@ -67,7 +67,7 @@ async def background_smart_scan():
                 run_id = sess_path.stem.replace("session_", "")
                 print(f"🧠 RemMe: Auto-Scanning Run {run_id}...")
                 
-                data = json.loads(sess_path.read_text())
+                data = json.loads(sess_path.read_text(encoding="utf-8", errors="ignore"))
                 # Fix: Query is deeply nested in graph attributes for NetworkX adjacency format
                 query = data.get("graph", {}).get("original_query", "")
                 if not query:
