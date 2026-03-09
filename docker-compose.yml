@@ -12,6 +12,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
+      DEBUG_LOG_PATH: ${DEBUG_LOG_PATH:-/app/data/debug-f905fa.log}
     volumes:
       - ./data:/app/data
       - ./memory:/app/memory
