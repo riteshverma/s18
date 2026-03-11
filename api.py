@@ -9,9 +9,11 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest  # type: ignore[reportMissingImports]
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +25,8 @@ from core.graph_adapter import nx_to_reactflow
 from memory.context import ExecutionContextManager
 from remme.utils import get_embedding
 from config.settings_loader import settings, save_settings, reset_settings, reload_settings
+from core.supabase_auth import is_auth_enabled
+from core.supabase_logging import is_logging_enabled
 
 
 # Import shared state
@@ -34,6 +38,15 @@ from shared.state import (
     PROJECT_ROOT,
 )
 from routers.remme import background_smart_scan  # Needed for lifespan startup
+from core.prometheus_metrics import (
+    API_REQUEST_LATENCY_MS,
+    API_REQUESTS_SUCCESS_TOTAL,
+    API_REQUESTS_TOTAL,
+    elapsed_ms,
+    normalize_status_class,
+    now_ms,
+    route_template,
+)
 
 from contextlib import asynccontextmanager
 
@@ -41,30 +54,54 @@ from contextlib import asynccontextmanager
 multi_mcp = get_multi_mcp()
 remme_store = get_remme_store()
 remme_extractor = get_remme_extractor()
+_mcp_start_task: Optional[asyncio.Task] = None
+
+
+async def _start_mcp_with_timeout(timeout_seconds: float = 5.0) -> None:
+    """
+    Start MCP servers without blocking API readiness for long boot phases.
+    If startup exceeds timeout, continue startup in background.
+    """
+    global _mcp_start_task
+    _mcp_start_task = asyncio.create_task(multi_mcp.start())
+    try:
+        await asyncio.wait_for(asyncio.shield(_mcp_start_task), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        print(f"⚠️ MCP startup exceeded {timeout_seconds}s; continuing in background.")
+    except Exception:
+        # Re-raise non-timeout failures so startup still surfaces real errors.
+        raise
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 API Starting up...")
+    print("API starting up...")
     scheduler_service.initialize()
     scheduler_service.register_morning_briefing()
     persistence_manager.load_snapshot()
-    await multi_mcp.start()
+    await _start_mcp_with_timeout()
     
     # Check git
     try:
         subprocess.run(["git", "--version"], capture_output=True, check=True)
-        print("✅ Git found.")
+        print("Git found.")
     except Exception:
-        print("⚠️ Git NOT found. GitHub explorer features will fail.")
+        print("WARNING: Git NOT found. GitHub explorer features will fail.")
     
     # 🧠 Start Smart Sync in background
     asyncio.create_task(background_smart_scan())
     
     yield
 
-    print("🛑 API Shutting down...")
+    print("API shutting down...")
     persistence_manager.save_snapshot()
+    global _mcp_start_task
     try:
+        if _mcp_start_task and not _mcp_start_task.done():
+            _mcp_start_task.cancel()
+            try:
+                await _mcp_start_task
+            except Exception:
+                pass
         await asyncio.wait_for(multi_mcp.stop(), timeout=3.0)
     except asyncio.CancelledError:
         pass
@@ -87,6 +124,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def prometheus_http_metrics(request: Request, call_next):
+    start_ms = now_ms()
+    response = await call_next(request)
+    route = route_template(request.url.path, request.scope.get("route"))
+    method = request.method
+    status_code = response.status_code
+
+    API_REQUESTS_TOTAL.labels(
+        method=method,
+        route=route,
+        status_class=normalize_status_class(status_code),
+    ).inc()
+    API_REQUEST_LATENCY_MS.labels(method=method, route=route).observe(elapsed_ms(start_ms))
+    if status_code < 400:
+        API_REQUESTS_SUCCESS_TOTAL.labels(method=method, route=route).inc()
+    return response
+
 
 # Global State is now managed in shared/state.py
 # active_loops, multi_mcp, remme_store, remme_extractor are imported from there
@@ -147,8 +204,38 @@ async def health_check():
         "mcp_ready": True # Since lifespan finishes multi_mcp.start()
     }
 
+
+@app.get("/health/auth")
+async def health_auth():
+    """Quick auth/logging diagnostics without exposing secrets."""
+    auth_cfg = settings.get("auth", {})
+    log_cfg = settings.get("supabase_logging", {})
+
+    supabase_url = os.getenv("SUPABASE_URL") or auth_cfg.get("supabase_url", "")
+    supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or auth_cfg.get("supabase_anon_key", "")
+    supabase_jwt_audience = os.getenv("SUPABASE_JWT_AUDIENCE") or auth_cfg.get("supabase_jwt_audience", "")
+    supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or log_cfg.get("service_role_key", "")
+
+    return {
+        "status": "ok",
+        "auth_enabled": is_auth_enabled(),
+        "supabase_logging_enabled": is_logging_enabled(),
+        "supabase_url_configured": bool(supabase_url),
+        "supabase_jwt_audience_configured": bool(supabase_jwt_audience),
+        "supabase_anon_key_configured": bool(supabase_anon_key),
+        "supabase_service_role_key_configured": bool(supabase_service_key),
+        "request_table": log_cfg.get("request_table", "ehr_request_log"),
+        "result_table": log_cfg.get("result_table", "ehr_clinical_result"),
+    }
+
+
+@app.get("/metrics/prometheus")
+async def prometheus_metrics():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 if __name__ == "__main__":
     import uvicorn
     # Enable reload=True for development if needed, but here we'll just keep it simple
     # or actually enable it to avoid these restart issues.
-    uvicorn.run("api:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("api:app", host="0.0.0.0", port=8001, reload=True, timeout_keep_alive=75)

@@ -2,7 +2,8 @@
 import json
 import re
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from typing import Any, Dict
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 import hashlib
 from PIL import Image
@@ -11,6 +12,15 @@ import requests
 import io
 
 from shared.state import get_multi_mcp, PROJECT_ROOT
+from core.supabase_auth import require_supabase_user
+from core.prometheus_metrics import (
+    RAG_EMPTY_RESULT_TOTAL,
+    RAG_REQUESTS_TOTAL,
+    RAG_RESULTS_COUNT,
+    RAG_SEARCH_LATENCY_MS,
+    elapsed_ms,
+    now_ms,
+)
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
@@ -388,12 +398,17 @@ async def upload_rag_file(
 @router.post("/reindex")
 async def reindex_rag_documents(path: str = None, force: bool = False):
     """Trigger re-indexing of documents via RAG MCP tool"""
+    start_ms = now_ms()
     try:
         # Pass the path to the tool if provided
         args = {"target_path": path, "force": force}
         result = await multi_mcp.call_tool("rag", "reindex_documents", args)
+        RAG_REQUESTS_TOTAL.labels(endpoint="reindex", status="success").inc()
+        RAG_SEARCH_LATENCY_MS.labels(endpoint="reindex").observe(elapsed_ms(start_ms))
         return {"status": "success", "result": result}
     except Exception as e:
+        RAG_REQUESTS_TOTAL.labels(endpoint="reindex", status="error").inc()
+        RAG_SEARCH_LATENCY_MS.labels(endpoint="reindex").observe(elapsed_ms(start_ms))
         raise HTTPException(status_code=500, detail=f"Failed to trigger reindex: {str(e)}")
 
 
@@ -449,8 +464,9 @@ def find_page_for_chunk(doc_path: str, chunk_text: str) -> int:
 
 
 @router.get("/search")
-async def rag_search(query: str):
+async def rag_search(query: str, user: Dict[str, Any] = Depends(require_supabase_user)):
     """Semantic search against indexed RAG documents with page numbers"""
+    start_ms = now_ms()
     try:
         args = {"query": query}
         result = await multi_mcp.call_tool("rag", "search_stored_documents_rag", args)
@@ -502,17 +518,26 @@ async def rag_search(query: str):
                     "page": 1
                 })
         
+        result_count = len(structured_results)
+        RAG_REQUESTS_TOTAL.labels(endpoint="search", status="success").inc()
+        RAG_SEARCH_LATENCY_MS.labels(endpoint="search").observe(elapsed_ms(start_ms))
+        RAG_RESULTS_COUNT.labels(endpoint="search").observe(result_count)
+        if result_count == 0:
+            RAG_EMPTY_RESULT_TOTAL.labels(endpoint="search").inc()
         return {"status": "success", "results": structured_results}
     except Exception as e:
         import traceback
         print(f"RAG SEARCH ERROR: {e}")
         print(traceback.format_exc())
+        RAG_REQUESTS_TOTAL.labels(endpoint="search", status="error").inc()
+        RAG_SEARCH_LATENCY_MS.labels(endpoint="search").observe(elapsed_ms(start_ms))
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/keyword_search")
-async def rag_keyword_search(query: str):
+async def rag_keyword_search(query: str, user: Dict[str, Any] = Depends(require_supabase_user)):
     """Keyword search across document chunks (exact match)"""
+    start_ms = now_ms()
     try:
         args = {"query": query}
         result = await multi_mcp.call_tool("rag", "keyword_search", args)
@@ -530,12 +555,26 @@ async def rag_keyword_search(query: str):
                     except:
                         matches.append(item.text)
         
+        match_count = len(matches)
+        RAG_REQUESTS_TOTAL.labels(endpoint="keyword_search", status="success").inc()
+        RAG_SEARCH_LATENCY_MS.labels(endpoint="keyword_search").observe(elapsed_ms(start_ms))
+        RAG_RESULTS_COUNT.labels(endpoint="keyword_search").observe(match_count)
+        if match_count == 0:
+            RAG_EMPTY_RESULT_TOTAL.labels(endpoint="keyword_search").inc()
         return {"status": "success", "matches": matches}
     except Exception as e:
+        RAG_REQUESTS_TOTAL.labels(endpoint="keyword_search", status="error").inc()
+        RAG_SEARCH_LATENCY_MS.labels(endpoint="keyword_search").observe(elapsed_ms(start_ms))
         raise HTTPException(status_code=500, detail=f"Keyword search failed: {str(e)}")
 
 @router.get("/ripgrep_search")
-async def rag_ripgrep_search(query: str, regex: bool = False, case_sensitive: bool = False, target_dir: str = None):
+async def rag_ripgrep_search(
+    query: str,
+    regex: bool = False,
+    case_sensitive: bool = False,
+    target_dir: str = None,
+    user: Dict[str, Any] = Depends(require_supabase_user),
+):
     """Deep pattern search using ripgrep"""
     try:
         args = {"query": query, "regex": regex, "case_sensitive": case_sensitive, "target_dir": target_dir}
@@ -817,7 +856,7 @@ async def get_document_preview(path: str):
 
 
 @router.post("/ask")
-async def ask_rag_document(request: Request):
+async def ask_rag_document(request: Request, user: Dict[str, Any] = Depends(require_supabase_user)):
     """Interactive chat with a document via RAG with real-time streaming (SSE)"""
     try:
         body = await request.json()

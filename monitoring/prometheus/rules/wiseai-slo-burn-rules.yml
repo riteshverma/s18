@@ -1,0 +1,28 @@
+groups:
+  - name: wiseai_slo_burn_rules
+    rules:
+      - alert: WiseAIAPIErrorBudgetBurnFast
+        expr: |
+          (
+            (1 - sum(rate(wiseai_api_requests_success_total[5m])) / sum(rate(wiseai_api_requests_total[5m])))
+            / 0.005
+          ) > 14.4
+        for: 5m
+        labels:
+          severity: p1
+        annotations:
+          summary: API error budget fast burn
+          description: API is burning error budget at fast-burn threshold.
+
+      - alert: WiseAIAPIErrorBudgetBurnSlow
+        expr: |
+          (
+            (1 - sum(rate(wiseai_api_requests_success_total[1h])) / sum(rate(wiseai_api_requests_total[1h])))
+            / 0.005
+          ) > 6
+        for: 1h
+        labels:
+          severity: p2
+        annotations:
+          summary: API error budget slow burn
+          description: API is burning error budget at slow-burn threshold.

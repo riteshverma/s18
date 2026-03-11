@@ -1,0 +1,47 @@
+groups:
+  - name: wiseai_alert_rules
+    rules:
+      - alert: WiseAIApiAvailabilityLow
+        expr: wiseai:sli_api_availability:ratio_5m < 0.995
+        for: 10m
+        labels:
+          severity: p1
+        annotations:
+          summary: API availability below 99.5%
+          description: API availability is below SLO threshold.
+
+      - alert: WiseAIOrchestratorSuccessLow
+        expr: wiseai:sli_agent_run_success:ratio_5m < 0.97
+        for: 10m
+        labels:
+          severity: p1
+        annotations:
+          summary: Orchestrator success below 97%
+          description: Orchestrator success ratio is below threshold.
+
+      - alert: WiseAIOrchestratorLatencyHigh
+        expr: wiseai:orchestrator_run_latency_p95_ms:5m > 18000
+        for: 15m
+        labels:
+          severity: p2
+        annotations:
+          summary: Orchestrator p95 latency above 18s
+          description: Orchestrator latency exceeded SLO.
+
+      - alert: WiseAIRetrievalCoverageLow
+        expr: wiseai:sli_retrieval_coverage:ratio_5m < 0.99
+        for: 15m
+        labels:
+          severity: p2
+        annotations:
+          summary: Retrieval coverage below 99%
+          description: Too many retrieval calls return empty results.
+
+      - alert: WiseAIMcpReliabilityLow
+        expr: wiseai:sli_mcp_reliability:ratio_5m < 0.98
+        for: 15m
+        labels:
+          severity: p2
+        annotations:
+          summary: MCP reliability below 98%
+          description: MCP tool success ratio is below threshold.

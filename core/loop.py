@@ -9,6 +9,12 @@ from agents.base_agent import AgentRunner
 from core.utils import log_step, log_error
 from core.event_bus import event_bus
 from core.model_manager import ModelManager
+from core.prometheus_metrics import (
+    ORCHESTRATOR_RUNS_TOTAL,
+    ORCHESTRATOR_RUN_LATENCY_MS,
+    elapsed_ms,
+    now_ms,
+)
 from ui.visualizer import ExecutionVisualizer
 from rich.live import Live
 from rich.console import Console
@@ -99,6 +105,8 @@ class AgentLoop4:
             self._tasks.discard(task)
 
     async def run(self, query, file_manifest, globals_schema, uploaded_files, session_id=None, memory_context=None):
+        run_start_ms = now_ms()
+        final_status = "failed"
         # 🟢 PHASE 0: BOOTSTRAP CONTEXT (Immediate VS Code feedback)
         # We create a temporary graph with just a "Query" node (running Planner) so the UI sees meaningful start
         bootstrap_graph = {
@@ -194,14 +202,31 @@ class AgentLoop4:
                             "edges": out.get("edges", out.get("links", []))
                         }
                     else:
-                        self.context.mark_failed("Query", "Output missing plan_graph")
-                        raise RuntimeError(f"PlannerAgent output missing 'plan_graph' key.")
+                        # Hard fallback so planner output contract is always satisfied.
+                        out["plan_graph"] = {"nodes": [], "edges": []}
                 pg = out["plan_graph"]
                 if not isinstance(pg.get("nodes"), list):
                     pg["nodes"] = list(pg["nodes"]) if pg.get("nodes") else []
                 if "edges" not in pg and "links" in pg:
                     pg["edges"] = pg["links"]
                 pg.setdefault("edges", [])
+                # Normalize edge sources so downstream callers never see planner aliases.
+                normalized_edges = []
+                for edge in pg["edges"]:
+                    if not isinstance(edge, dict):
+                        continue
+                    source = edge.get("source")
+                    target = edge.get("target")
+                    if source in {"ROOT", "root", "original_query", "query", "user_query"}:
+                        source = "Query"
+                    if not source or not target:
+                        continue
+                    normalized_edges.append({"source": source, "target": target})
+                pg["edges"] = normalized_edges
+                if not out.get("next_step_id") and pg["nodes"]:
+                    first_node = pg["nodes"][0]
+                    if isinstance(first_node, dict) and first_node.get("id"):
+                        out["next_step_id"] = first_node["id"]
                 # Fallback: if planner returned no steps, create a single ThinkerAgent step
                 if not pg["nodes"]:
                     log_step("Planner returned no steps; using single-step fallback", symbol="🔄")
@@ -298,6 +323,7 @@ class AgentLoop4:
                         continue
                     else:
                         # No more work or re-planning needed
+                        final_status = "success"
                         return self.context
 
                 except (Exception, asyncio.CancelledError) as e:
@@ -324,7 +350,11 @@ class AgentLoop4:
                 self.context._save_session()
             if not isinstance(e, asyncio.CancelledError) and not self.context.stop_requested:
                 raise e
+            final_status = "stopped"
             return self.context
+        finally:
+            ORCHESTRATOR_RUNS_TOTAL.labels(status=final_status).inc()
+            ORCHESTRATOR_RUN_LATENCY_MS.observe(elapsed_ms(run_start_ms))
 
     def _should_replan(self):
         """
@@ -352,6 +382,7 @@ class AgentLoop4:
         """Merge the planned nodes into the existing bootstrap context"""
         new_nodes = new_plan_graph.get("nodes", [])
         new_edges = new_plan_graph.get("edges", [])
+        known_new_node_ids = {n.get("id") for n in new_nodes if isinstance(n, dict) and n.get("id")}
         
         # Track which new nodes have incoming edges to detect orphans
         nodes_with_incoming_edges = set()
@@ -391,8 +422,12 @@ class AgentLoop4:
                 log_step(f"⚠️ Skipping malformed edge: {edge}", symbol="⚠️")
                 continue
             
-            # Redirect dependencies: If a node depends on ROOT, make it depend on Query
-            if source == "ROOT":
+            # Redirect common planner aliases to the real planner node id.
+            if source in {"ROOT", "root", "original_query", "query", "user_query"}:
+                source = "Query"
+            # Guard against dangling/unknown edge sources by attaching to Query.
+            elif source not in known_new_node_ids and source != "Query":
+                log_step(f"🔧 Rewriting unknown edge source '{source}' -> Query", symbol="🔧")
                 source = "Query"
 
             self.context.plan_graph.add_edge(source, target)

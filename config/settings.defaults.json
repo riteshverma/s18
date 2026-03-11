@@ -36,5 +36,18 @@
     },
     "gemini": {
         "api_key_env": "GEMINI_API_KEY"
+  },
+  "auth": {
+    "enabled": false,
+    "supabase_url": "",
+    "supabase_anon_key": "",
+    "supabase_jwt_audience": "authenticated"
+  },
+  "supabase_logging": {
+    "enabled": false,
+    "supabase_url": "",
+    "service_role_key": "",
+    "request_table": "ehr_request_log",
+    "result_table": "ehr_clinical_result"
     }
 }

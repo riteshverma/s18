@@ -7,9 +7,10 @@ services:
     container_name: s18share-api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AUTH_ENABLED: ${S18_AUTH_ENABLED:-false}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
       DEBUG_LOG_PATH: ${DEBUG_LOG_PATH:-/app/data/debug-f905fa.log}
@@ -20,6 +21,11 @@ services:
       - ./mcp_servers/faiss_index:/app/mcp_servers/faiss_index
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - ollama
+    networks:
+      - default
+      - shared_wise_net
 
   ollama:
     image: ollama/ollama:latest
@@ -29,8 +35,14 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    profiles:
-      - local-llm
+    networks:
+      - default
+      - shared_wise_net
 
 volumes:
   ollama_data:
+
+networks:
+  shared_wise_net:
+    external: true
+    name: docker_default

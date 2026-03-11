@@ -38,14 +38,36 @@ pip install -e .
 
 ### 2. Environment variables
 
-| Variable         | Purpose                                                                           |
-| ---------------- | --------------------------------------------------------------------------------- |
+| Variable | Purpose |
+| --- | --- |
 | `GEMINI_API_KEY` | Google Gemini API key (used for agents, apps, and some MCP tools when configured) |
+| `AUTH_ENABLED` | Enable backend bearer-token verification (`true`/`false`) |
+| `S18_AUTH_ENABLED` | Docker-only override mapped to `AUTH_ENABLED` for this service (prevents cross-repo env collisions) |
+| `SUPABASE_URL` | Supabase project URL (used for auth verify and optional logging) |
+| `SUPABASE_ANON_KEY` | Supabase anon key (optional for frontend/public client flows) |
+| `SUPABASE_JWT_AUDIENCE` | Expected access-token `aud` claim for backend verification (default `authenticated`) |
+| `SUPABASE_LOGGING_ENABLED` | Enable request/result persistence to Supabase tables (`true`/`false`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key for backend writes to Supabase tables |
 
 Optional:
 
 - **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
+
+### Supabase integration contract (S18)
+
+- Frontend/S18 performs login with Supabase Auth and sends `Authorization: Bearer <access_token>`.
+- Backend verifies the JWT on protected endpoints using Supabase JWKS (`/auth/v1/.well-known/jwks.json`) with issuer/audience checks (no backend-managed Supabase session).
+- If S18 is called through another backend/proxy, it also accepts `X-Forwarded-Authorization: Bearer <access_token>`.
+- Optional persistence can write to two Supabase tables:
+  - `ehr_request_log` (inbound request/audit trail)
+  - `ehr_clinical_result` (normalized RAC/CBC/ABDM/FHIR-aligned outcome)
+- Reference SQL schema: `docs/supabase_ehr_schema.sql`
+- Quick environment/table readiness check:
+
+```bash
+python scripts/check_supabase_integration.py
+```
 
 ### 3. Run the API
 
@@ -108,14 +130,15 @@ OLLAMA_BASE_URL=http://ollama:11434
 Then:
 
 ```bash
-docker compose --profile local-llm up --build -d
+docker compose up --build -d
 ```
 
-### 4. Verify
+### 4. Verify (Docker mapping)
 
-- API: [http://localhost:8000](http://localhost:8000)
-- Health: [http://localhost:8000/health](http://localhost:8000/health)
-- Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+- API: [http://localhost:8001](http://localhost:8001)
+- Health: [http://localhost:8001/health](http://localhost:8001/health)
+- Docs: [http://localhost:8001/docs](http://localhost:8001/docs)
+- Prometheus scrape: [http://localhost:8001/metrics/prometheus](http://localhost:8001/metrics/prometheus)
 
 Persistent state is stored on host-mounted folders:
 
@@ -123,6 +146,55 @@ Persistent state is stored on host-mounted folders:
 - `memory/`
 - `config/`
 - `mcp_servers/faiss_index/`
+
+---
+
+## Monitoring (Dev + Staging Baseline)
+
+Monitoring assets are in `monitoring/` and run as an additive stack:
+
+- Prometheus config/rules: `monitoring/prometheus/`
+- Alertmanager config: `monitoring/alertmanager/`
+- Grafana provisioning/dashboard: `monitoring/grafana/`
+
+### Start API + Monitoring
+
+```bash
+docker compose up --build -d api
+docker compose -f monitoring/docker-compose.monitoring.yml up -d
+```
+
+If you want local Ollama in Docker too:
+
+```bash
+docker compose up --build -d
+docker compose -f monitoring/docker-compose.monitoring.yml up -d
+```
+
+### Validate Monitoring
+
+- Prometheus target page: [http://localhost:9090/targets](http://localhost:9090/targets)
+- Alertmanager: [http://localhost:9093](http://localhost:9093)
+- Grafana: [http://localhost:3000](http://localhost:3000) (`admin` / `admin`)
+
+Expected key metric families:
+
+- `wiseai_api_requests_total`
+- `wiseai_api_requests_success_total`
+- `wiseai_api_request_latency_ms`
+- `wiseai_orchestrator_runs_total`
+- `wiseai_orchestrator_run_latency_ms`
+- `wiseai_rag_requests_total`
+- `wiseai_mcp_tool_calls_total`
+- `wiseai_memory_operations_total`
+
+### Port Overrides
+
+If local ports conflict, override host mappings in `monitoring/docker-compose.monitoring.yml`:
+
+- Prometheus: `9090`
+- Alertmanager: `9093`
+- Grafana: `3000`
 
 ---
 
