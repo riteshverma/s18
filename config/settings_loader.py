@@ -51,6 +51,35 @@ def load_settings() -> dict:
         if env_ollama_timeout and env_ollama_timeout.isdigit():
             _settings_cache.setdefault("ollama", {})
             _settings_cache["ollama"]["timeout"] = int(env_ollama_timeout)
+        # Supabase/Auth runtime overrides
+        env_auth_enabled = os.getenv("AUTH_ENABLED")
+        if env_auth_enabled is not None:
+            _settings_cache.setdefault("auth", {})
+            _settings_cache["auth"]["enabled"] = env_auth_enabled.strip().lower() in {"1", "true", "yes", "on"}
+        env_supabase_url = os.getenv("SUPABASE_URL")
+        if env_supabase_url:
+            _settings_cache.setdefault("auth", {})
+            _settings_cache.setdefault("supabase_logging", {})
+            _settings_cache["auth"]["supabase_url"] = env_supabase_url
+            _settings_cache["supabase_logging"]["supabase_url"] = env_supabase_url
+        env_supabase_anon = os.getenv("SUPABASE_ANON_KEY")
+        if env_supabase_anon:
+            _settings_cache.setdefault("auth", {})
+            _settings_cache["auth"]["supabase_anon_key"] = env_supabase_anon
+        env_supabase_aud = os.getenv("SUPABASE_JWT_AUDIENCE")
+        if env_supabase_aud:
+            _settings_cache.setdefault("auth", {})
+            _settings_cache["auth"]["supabase_jwt_audience"] = env_supabase_aud
+        env_logging_enabled = os.getenv("SUPABASE_LOGGING_ENABLED")
+        if env_logging_enabled is not None:
+            _settings_cache.setdefault("supabase_logging", {})
+            _settings_cache["supabase_logging"]["enabled"] = (
+                env_logging_enabled.strip().lower() in {"1", "true", "yes", "on"}
+            )
+        env_service_role = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        if env_service_role:
+            _settings_cache.setdefault("supabase_logging", {})
+            _settings_cache["supabase_logging"]["service_role_key"] = env_service_role
     return _settings_cache
 
 def save_settings() -> None:

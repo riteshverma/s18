@@ -40,4 +40,6 @@ dependencies = [
     "langchain-google-genai>=2.1.2",
     "rank_bm25>=0.2.2",
     "apscheduler>=3.11.2",
+    "prometheus-client>=0.21.1",
+    "pyjwt[crypto]>=2.10.1",
 ]

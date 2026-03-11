@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s18share-api
+  namespace: s18share
+  labels:
+    app: s18share-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: s18share-api
+  template:
+    metadata:
+      labels:
+        app: s18share-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: api
+          image: ghcr.io/your-org/s18share:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: s18share-config
+            - secretRef:
+                name: s18share-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 45
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: data-storage
+              mountPath: /app/data
+            - name: memory-storage
+              mountPath: /app/memory
+            - name: faiss-storage
+              mountPath: /app/mcp_servers/faiss_index
+      volumes:
+        - name: data-storage
+          persistentVolumeClaim:
+            claimName: s18share-data-pvc
+        - name: memory-storage
+          persistentVolumeClaim:
+            claimName: s18share-memory-pvc
+        - name: faiss-storage
+          persistentVolumeClaim:
+            claimName: s18share-faiss-pvc

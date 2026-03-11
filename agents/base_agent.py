@@ -43,6 +43,81 @@ class AgentRunner:
             "total_tokens": input_tokens + output_tokens
         }
 
+    def _ensure_planner_plan_graph(self, output, raw_response: str) -> dict:
+        """
+        Ensure PlannerAgent output always contains a plan_graph key.
+        """
+        if isinstance(output, list) and output and isinstance(output[0], dict):
+            output = output[0]
+        if not isinstance(output, dict):
+            output = {"response": str(output) if output is not None else raw_response}
+
+        if "plan_graph" not in output:
+            if isinstance(output.get("plan"), dict):
+                plan = output["plan"]
+                output["plan_graph"] = (
+                    plan.get("plan_graph", plan)
+                    if isinstance(plan.get("plan_graph"), dict)
+                    else plan
+                )
+            elif "nodes" in output:
+                output["plan_graph"] = {
+                    "nodes": output.get("nodes", []),
+                    "edges": output.get("edges", output.get("links", [])),
+                }
+            else:
+                output["plan_graph"] = {"nodes": [], "edges": []}
+
+        pg = output.get("plan_graph")
+        if not isinstance(pg, dict):
+            pg = {"nodes": [], "edges": []}
+        if not isinstance(pg.get("nodes"), list):
+            pg["nodes"] = []
+        if "edges" not in pg:
+            pg["edges"] = pg.get("links", []) if isinstance(pg.get("links"), list) else []
+        if not isinstance(pg.get("edges"), list):
+            pg["edges"] = []
+
+        # Normalize planner edge sources to the runtime bootstrap planner node.
+        for edge in pg["edges"]:
+            if not isinstance(edge, dict):
+                continue
+            source = edge.get("source")
+            if source in {"ROOT", "root", "original_query", "query", "user_query"}:
+                edge["source"] = "Query"
+
+        # Ensure a valid next step id exists for downstream consumers.
+        if not output.get("next_step_id"):
+            if pg["nodes"] and isinstance(pg["nodes"][0], dict):
+                output["next_step_id"] = pg["nodes"][0].get("id", "T001")
+            else:
+                output["next_step_id"] = "T001"
+        output["plan_graph"] = pg
+        return output
+
+    def _ensure_wise_output_schema(self, output, raw_response: str) -> dict:
+        """
+        Ensure ThinkerAgent output includes risk_level, confidence, flags for WISE integration.
+        """
+        if isinstance(output, list) and output and isinstance(output[0], dict):
+            output = output[0]
+        if not isinstance(output, dict):
+            output = {"response": str(output) if output is not None else raw_response}
+        if "risk_level" not in output or output["risk_level"] not in ("low", "moderate", "high"):
+            output["risk_level"] = output.get("risk_level", "moderate")
+            if output["risk_level"] not in ("low", "moderate", "high"):
+                output["risk_level"] = "moderate"
+        if output.get("confidence") is None:
+            output["confidence"] = 0.5
+        else:
+            try:
+                output["confidence"] = float(output["confidence"])
+            except (TypeError, ValueError):
+                output["confidence"] = 0.5
+        if not isinstance(output.get("flags"), list):
+            output["flags"] = []
+        return output
+
     async def run_agent(self, agent_type: str, input_data: dict, image_path: Optional[str] = None) -> dict:
         """Run a specific agent with input data and optional image"""
         
@@ -143,7 +218,14 @@ class AgentRunner:
 
             # 6. Parse JSON response dynamically (PlannerAgent must be strict; others allow plain-text fallback)
             if agent_type == "PlannerAgent":
-                output = parse_llm_json(response)
+                try:
+                    output = parse_llm_json(response)
+                except Exception:
+                    output = parse_llm_json_or_fallback(response, fallback_key="response")
+                output = self._ensure_planner_plan_graph(output, response)
+            elif agent_type == "ThinkerAgent":
+                output = parse_llm_json_or_fallback(response, fallback_key="response")
+                output = self._ensure_wise_output_schema(output, response)
             else:
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
             

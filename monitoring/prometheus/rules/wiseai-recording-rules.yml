@@ -1,0 +1,52 @@
+groups:
+  - name: wiseai_sli_rules
+    interval: 30s
+    rules:
+      - record: wiseai:sli_api_availability:ratio_5m
+        expr: |
+          sum(rate(wiseai_api_requests_success_total[5m]))
+          /
+          sum(rate(wiseai_api_requests_total[5m]))
+
+      - record: wiseai:sli_agent_run_success:ratio_5m
+        expr: |
+          sum(rate(wiseai_orchestrator_runs_total{status="success"}[5m]))
+          /
+          sum(rate(wiseai_orchestrator_runs_total[5m]))
+
+      - record: wiseai:sli_retrieval_coverage:ratio_5m
+        expr: |
+          1 - (
+            sum(rate(wiseai_rag_empty_result_total[5m]))
+            /
+            sum(rate(wiseai_rag_requests_total[5m]))
+          )
+
+      - record: wiseai:sli_mcp_reliability:ratio_5m
+        expr: |
+          sum(rate(wiseai_mcp_tool_calls_total{status="success"}[5m]))
+          /
+          sum(rate(wiseai_mcp_tool_calls_total[5m]))
+
+      - record: wiseai:sli_memory_write_integrity:ratio_5m
+        expr: |
+          sum(rate(wiseai_memory_operations_total{status="success"}[5m]))
+          /
+          sum(rate(wiseai_memory_operations_total[5m]))
+
+  - name: wiseai_latency_rules
+    interval: 30s
+    rules:
+      - record: wiseai:api_latency_p95_ms:5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(wiseai_api_request_latency_ms_bucket[5m]))
+          )
+
+      - record: wiseai:orchestrator_run_latency_p95_ms:5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(wiseai_orchestrator_run_latency_ms_bucket[5m]))
+          )

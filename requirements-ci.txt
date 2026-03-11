@@ -1786,6 +1786,10 @@ posthog==7.8.5 \
     --hash=sha256:979d306f07e61a8e837746e5dc432aafc49827fecac91bd6c624dcf3a1967448 \
     --hash=sha256:e4f3796ce18323d8e05139bf419a04d318ccc4ad77b210f4d9d7c7546aea4f35
     # via browser-use
+prometheus-client==0.24.1 \
+    --hash=sha256:150db128af71a5c2482b36e588fc8a6b95e498750da4b17065947c16070f4055 \
+    --hash=sha256:7e0ced7fbbd40f7b84962d5d2ab6f17ef88a72504dcf7c0b40737b43b2a461f9
+    # via s15a
 prompt-toolkit==3.0.52 \
     --hash=sha256:28cde192929c8e7321de85de1ddbe736f1375148b02f2e17edd840042b1be855 \
     --hash=sha256:9aac639a3bbd33284347de5ad8d68ecc044b91a762dc39b7c21095fcd6a19955
@@ -2079,6 +2083,7 @@ pyjwt==2.10.1 \
     # via
     #   mcp
     #   msal
+    #   s15a
 pymupdf==1.26.7 \
     --hash=sha256:07085718dfdae5ab83b05eb5eb397f863bcc538fe05135318a01ea353e7a1353 \
     --hash=sha256:1d5106f46e1ca0d64d46bd51892372a4f82076bdc14a9678d33d630702abca36 \

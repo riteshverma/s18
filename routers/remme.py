@@ -13,6 +13,12 @@ from shared.state import (
 )
 from remme.utils import get_embedding
 from core.model_manager import ModelManager
+from core.prometheus_metrics import (
+    MEMORY_OPERATIONS_TOTAL,
+    MEMORY_OPERATION_LATENCY_MS,
+    elapsed_ms,
+    now_ms,
+)
 
 router = APIRouter(prefix="/remme", tags=["RemMe"])
 
@@ -162,6 +168,7 @@ async def background_smart_scan():
 @router.get("/memories")
 async def get_memories():
     """Get all stored memories with source existence check"""
+    start_ms = now_ms()
     try:
         memories = remme_store.get_all()
         summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
@@ -197,8 +204,12 @@ async def get_memories():
             
             m["source_exists"] = exists
             
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="get_memories", status="success").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="get_memories").observe(elapsed_ms(start_ms))
         return {"status": "success", "memories": memories}
     except Exception as e:
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="get_memories", status="error").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="get_memories").observe(elapsed_ms(start_ms))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -237,6 +248,7 @@ async def cleanup_dangling_memories():
 @router.post("/add")
 async def add_memory(request: AddMemoryRequest):
     """Manually add a memory and auto-extract to UserModel hubs."""
+    start_ms = now_ms()
     try:
         emb = get_embedding(request.text, task_type="search_query")
         memory = remme_store.add(request.text, emb, category=request.category, source="manual")
@@ -258,28 +270,39 @@ async def add_memory(request: AddMemoryRequest):
             print(f"⚠️ Auto-extraction failed (memory still saved): {e}")
             memory["extracted_preferences"] = []
         
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="add_memory", status="success").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="add_memory").observe(elapsed_ms(start_ms))
         return {"status": "success", "memory": memory}
     except Exception as e:
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="add_memory", status="error").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="add_memory").observe(elapsed_ms(start_ms))
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/memories/{memory_id}")
 async def delete_memory(memory_id: str):
     """Delete a memory"""
+    start_ms = now_ms()
     try:
         remme_store.delete(memory_id)
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="delete_memory", status="success").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="delete_memory").observe(elapsed_ms(start_ms))
         return {"status": "success", "id": memory_id}
     except Exception as e:
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="delete_memory", status="error").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="delete_memory").observe(elapsed_ms(start_ms))
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/scan")
 async def manual_remme_scan(background_tasks: BackgroundTasks):
     """Manually trigger RemMe Smart Sync."""
+    start_ms = now_ms()
     print("🔎 RemMe: Manual Smart Scan Triggered")
     # We run this in background so UI returns immediately
     background_tasks.add_task(background_smart_scan)
-    
+    MEMORY_OPERATIONS_TOTAL.labels(endpoint="manual_scan", status="success").inc()
+    MEMORY_OPERATION_LATENCY_MS.labels(endpoint="manual_scan").observe(elapsed_ms(start_ms))
     return {"status": "success", "message": "Smart Sync started in background. Check logs/UI updates."}
 
 
