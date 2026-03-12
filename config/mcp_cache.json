@@ -3942,5 +3942,101 @@
         ]
       }
     }
+  ],
+  "mockehr": [
+    {
+      "name": "get_patient_records",
+      "description": "\n    Retrieve patient demographic/meta record with runtime cache, privacy, and delta handling.\n    Returns \"No record found\" for 404/empty responses.\n    ",
+      "inputSchema": {
+        "properties": {
+          "patient_id": {
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "fresh_sync": {
+            "default": false,
+            "title": "Fresh Sync",
+            "type": "boolean"
+          },
+          "session_state": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Session State"
+          }
+        },
+        "required": [
+          "patient_id"
+        ],
+        "title": "get_patient_recordsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_labs",
+      "description": "\n    Retrieve patient labs with query/time filtering plus privacy and delta tracking.\n    Returns \"No record found\" for 404/empty responses.\n    ",
+      "inputSchema": {
+        "properties": {
+          "patient_id": {
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Query"
+          },
+          "from_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "From Ts"
+          },
+          "fresh_sync": {
+            "default": false,
+            "title": "Fresh Sync",
+            "type": "boolean"
+          },
+          "session_state": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Session State"
+          }
+        },
+        "required": [
+          "patient_id"
+        ],
+        "title": "search_labsArguments",
+        "type": "object"
+      }
+    }
   ]
 }

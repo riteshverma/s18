@@ -9,6 +9,34 @@ from PIL import Image
 from datetime import datetime
 import os
 
+# Alias map: planner-invented agent names -> actual agents in agent_config.yaml
+# Includes WISE CDSS architecture names so plans can use doc terminology (no refactor needed).
+AGENT_ALIASES = {
+    # General / planner-invented
+    "SearchLabsAgent": "RetrieverAgent",
+    "SummarizationAgent": "SummarizerAgent",
+    "NoteWriterAgent": "FormatterAgent",
+    "NoteWriter": "FormatterAgent",
+    "RAG": "RetrieverAgent",
+    "QA": "QAAgent",
+    "ParserAgent": "DistillerAgent",
+    "ReportGeneratorAgent": "FormatterAgent",
+    "NameExtractorAgent": "RetrieverAgent",
+    "InterpretationAgent": "ThinkerAgent",
+    "System": "ThinkerAgent",
+    # WISE CDSS architecture names -> existing S18 agents
+    "ClinicalReasoningAgent": "ThinkerAgent",
+    "ContextSynthesisAgent": "DistillerAgent",
+    "ResearchAgent": "RetrieverAgent",
+    "SafetyExplainabilityAgent": "ThinkerAgent",
+    "ConfidenceScoringAgent": "ThinkerAgent",
+    "SymptomAgent": "ThinkerAgent",
+    "CBCAgent": "EHRDataMinerAgent",
+    "TrendAgent": "EHRDataMinerAgent",
+    "ActionAgent": "FormatterAgent",
+}
+
+
 class AgentRunner:
     def __init__(self, multi_mcp):
         self.multi_mcp = multi_mcp
@@ -17,6 +45,8 @@ class AgentRunner:
         config_path = Path(__file__).parent.parent / "config/agent_config.yaml"
         with open(config_path, "r") as f:
             self.agent_configs = yaml.safe_load(f)["agents"]
+
+        self._agent_aliases = AGENT_ALIASES
     
     def calculate_cost(self, input_text: str, output_text: str) -> dict:
         """Calculate cost and token usage"""
@@ -120,7 +150,9 @@ class AgentRunner:
 
     async def run_agent(self, agent_type: str, input_data: dict, image_path: Optional[str] = None) -> dict:
         """Run a specific agent with input data and optional image"""
-        
+        # Resolve planner-invented aliases to actual configured agents
+        agent_type = self._agent_aliases.get(agent_type, agent_type)
+
         if agent_type not in self.agent_configs:
             raise ValueError(f"Unknown agent type: {agent_type}")
             

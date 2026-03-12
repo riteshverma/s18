@@ -71,3 +71,9 @@ agents:
     mcp_servers: []
     description: "Fixes code based on test failures."
 
+  EHRDataMinerAgent:
+    prompt_file: "prompts/ehr_data_miner.md"
+    model: "gemini"
+    mcp_servers: ["mockehr"]
+    description: "Extracts, filters, and summarizes patient data from mockehr with 100% accuracy."
+

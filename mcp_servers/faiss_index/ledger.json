@@ -1,26 +1,1027 @@
 {
   "version": 2,
-  "last_reconcile": "2026-02-10T18:32:03.177776Z",
+  "last_reconcile": "2026-03-12T16:31:01.282895Z",
   "files": {
-    "inbox\\notifications.db": {
-      "hash": "a1b48a24b62a400c7d47b035e139e115",
+    "conversation_history/2026/03/10/session_1773150742443.json": {
+      "hash": "f9f227281090d26b2e319aa437313f9c",
       "status": "complete",
-      "indexed_at": "2026-02-10T18:37:06.828453Z",
-      "chunk_count": 0,
-      "error": null
-    },
-    "system\\jobs.json": {
-      "hash": "d751713988987e9331980363e24189ce",
-      "status": "complete",
-      "indexed_at": "2026-02-10T18:32:24.169468Z",
+      "indexed_at": "2026-03-10T14:48:48.615343Z",
       "chunk_count": 1,
       "error": null
     },
-    "system\\snapshot.json": {
-      "hash": "e3cb71c3eb223d9848e25934ebb2be83",
+    "conversation_history/2026/03/09/session_1773061984.json": {
+      "hash": "d0b60f32191a72a17cd632517583a914",
       "status": "complete",
-      "indexed_at": "2026-02-10T18:37:06.742257Z",
+      "indexed_at": "2026-03-10T14:50:14.846036Z",
+      "chunk_count": 3,
+      "error": null
+    },
+    "docs/governance/sprint-1-review-retrospective-T20.md": {
+      "hash": "aa8067726a6e330573eaf0b754c6a70e",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:58.058694Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773062038485.json": {
+      "hash": "e6c1643b92aeadf23f848842f7ddf6b9",
+      "status": "complete",
+      "indexed_at": "2026-03-10T14:51:20.538658Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/governance/change-management-guidelines-T94.md": {
+      "hash": "827a6e3dd84c822c7ae26b7c65e5971e",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:58:07.169680Z",
+      "chunk_count": 11,
+      "error": null
+    },
+    "docs/architecture/WISE_AI_Architecture_Diagram-2026-02-05-045305.mmd": {
+      "hash": "0e284b1ac2af4857545f925a1cfb5a31",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:55:59.770664Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/Capstopne_WISE_AI_CDSS_Kickoff_14Feb2026.pptx": {
+      "hash": "aa5c74de3e51576b3e9df34a0f0a34e3",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:55:46.815028Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "docs/architecture/WISE_AI_CDSS_Architecture.md": {
+      "hash": "60fdb478964247496aebe541fb82574d",
+      "status": "complete",
+      "indexed_at": "2026-03-10T14:56:24.648351Z",
       "chunk_count": 4,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773149992563.json": {
+      "hash": "9e70c942cbe1fc7f27e7ba1cb9896335",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:54:58.697154Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150598501.json": {
+      "hash": "46bc7e87b2146450f0a35d07960b2864",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:20:58.462455Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773151955914.json": {
+      "hash": "5923b64f8200f7c1b5ea031ac091e817",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:54:47.489113Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/architecture/wise-ai-cdss-architecture.mmd": {
+      "hash": "ab2f7f4d69fce82a6ef3783ecefd53e8",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:54:46.644932Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/product/clinical-workflow-mapping-T13.md": {
+      "hash": "7d8fa303716f3a145a74def6c940844f",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:54:41.971625Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773063074471.json": {
+      "hash": "462a0f16cbe97c121bad3673d8945731",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:54:34.532162Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/compliance/india-regulatory-landscape-T03.md": {
+      "hash": "b3fc76f73c531e2a82b962df2fac363f",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:52:32.266337Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/compliance/T98-BODH-Readiness-Alignment-Plan.md": {
+      "hash": "1af2a33cd04c47079aa45cc258465ff4",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:13:30.894712Z",
+      "chunk_count": 16,
+      "error": null
+    },
+    "docs/architecture/WISE_AI_Architecture_Diagram-2026-02-05-045256.png": {
+      "hash": "23bfbe09ebc17adcc07d833d0bf07010",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:40:59.211596Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773062038605.json": {
+      "hash": "0dc78448856a1e1cb384780d5f1e8b2d",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:39:04.681904Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773060970.json": {
+      "hash": "0b464cbf4c3a2405ee03d456394bd5d8",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:38:57.070519Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/architecture/wise-ai-cdss-architecture.svg": {
+      "hash": "f7b3ed21dca09173d7336c8f755c4397",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:37:11.527658Z",
+      "chunk_count": 0,
+      "error": null
+    },
+    "docs/compliance/dpdp-framework-T11.md": {
+      "hash": "ebeb6d9c6bbb8623f1df7b315ee8c607",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:37:02.471741Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773063142625.json": {
+      "hash": "19338573175e71f5dff7bdfcf098950c",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:34:55.360550Z",
+      "chunk_count": 4,
+      "error": null
+    },
+    "docs/governance/governance-accountability-model-T91.md": {
+      "hash": "6dd3d839be4ee4d5e3161ad46f3b5850",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:33:32.430371Z",
+      "chunk_count": 10,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150513577.json": {
+      "hash": "e7ac50f7d571830392001d778a0f12de",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:31:01.093200Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/architecture/WISE_AI_Business_Architecture.png": {
+      "hash": "5c8cde890e0076c38b3f2c9656cfc877",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:31:00.400307Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/governance/stakeholder-communication-plan-T16.md": {
+      "hash": "3d8b38a8f06ace630fc46d417d5a5337",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:29:05.863156Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773152438503.json": {
+      "hash": "ac67e31e23080e91501b2c9e37ac926f",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:28:56.162495Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/07/session_1772869185.json": {
+      "hash": "d1e0fcdd596dd3beabe951149083fed7",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:28:55.384373Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150758119.json": {
+      "hash": "e470020b7111ffb9286ee26e64809da1",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:28:46.488972Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/compliance/T02-SAHI-BODH-Compliance-Mapping.md": {
+      "hash": "b087ddf533a4b199c20a3700f690aaa6",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:28:29.748221Z",
+      "chunk_count": 12,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773062938451.json": {
+      "hash": "4039412effa081c31cb2b3712f1fba5b",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:22:13.490803Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773151600522.json": {
+      "hash": "283eeb1bd7c0fe9e2b672c6a2994000d",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:13:31.752535Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/WISE_AI_ExplainerDoc.docx": {
+      "hash": "dcf60b80f394448aa4a26a5ae84cc89e",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:22:02.263304Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150615149.json": {
+      "hash": "92a0545cb2e00f838cbfca5b8ca3709f",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:36:55.327934Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/product/product-vision-T17.md": {
+      "hash": "df7991463a4c2e766c54324454e06a5f",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:36:53.719370Z",
+      "chunk_count": 4,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773061855.json": {
+      "hash": "5d0d78055537dba8d3d5b7b9028355c1",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:21:24.922893Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773061861.json": {
+      "hash": "c2a1c7cc74ec70c32bebf2b41da122b2",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:21:13.046674Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773152430092.json": {
+      "hash": "593ff1878ffb9d38fa0d47eecdb23a6a",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:21:00.076769Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/07/session_1772868779.json": {
+      "hash": "20834951b17cfd2877a81bc023759a96",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:20:59.277792Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/product/cbc-triage-use-cases.md": {
+      "hash": "ff5bc6dc7979529a50642da5e8792a20",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:59:30.400981Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "docs/compliance/responsible-ai-principles-T15.md": {
+      "hash": "000e8bafe2aa47927c1e3a36e08414ff",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:59:13.341887Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150699409.json": {
+      "hash": "308bfbd325c1c60c27b6cec1a706f82e",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:55:00.254063Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773151890574.json": {
+      "hash": "924eec4b2fdbfd77e11238c1672b9030",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:54:59.518077Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "system/jobs.json": {
+      "hash": "d751713988987e9331980363e24189ce",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:54:57.785037Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773061407.json": {
+      "hash": "1df7fb48348ac33d2f772f422d59ea00",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:54:57.119358Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "docs/architecture/wise-ai-cdss-architecture.png": {
+      "hash": "cd5c25af71b2e827b8bf3dc1b95ee3b4",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:54:33.924672Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773063278242.json": {
+      "hash": "336cdbeb341794c75ffc4c4a8dd0ad8a",
+      "status": "indexing",
+      "indexed_at": "2026-03-10T15:52:46.222906Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150545185.json": {
+      "hash": "2925d3233b0630e0d138986c08d77083",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:59:31.067056Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/product/use-case-definition-T04.md": {
+      "hash": "72ee65eeb3ae6bc449ae79e71b315836",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:51:26.702128Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "system/snapshot.json": {
+      "hash": "01925a4371ed5819697764cdfc77f94c",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:07:43.036717Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773061150.json": {
+      "hash": "4aec036e0c28d0de17e079da36f8a633",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:43:33.555677Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773152800760.json": {
+      "hash": "9d99b260ad51e5165b2cf4e285906285",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:43:32.944469Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/governance/SAHI_Recommendations.md": {
+      "hash": "f9eae4afd1c2a61c8709eb8c75a41f77",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:43:32.222725Z",
+      "chunk_count": 9,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150726973.json": {
+      "hash": "90fd5c5cf168afd75d5962983b377609",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:42:18.490739Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/paper/section-1-introduction-background-T19.md": {
+      "hash": "cbda0781e7e88acd4e3be3e284b3cca9",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:42:17.853790Z",
+      "chunk_count": 3,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773151723865.json": {
+      "hash": "7c5d565bceeddfa751bee67d4154ca4b",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:38:56.358418Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150711715.json": {
+      "hash": "c1c19a2c431486226b582eba3e82be41",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:38:55.671708Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773151278900.json": {
+      "hash": "d5d30e0549dd8b70801706ca5e4d8224",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:38:54.967294Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/governance/ai-competency-matrix-T93.md": {
+      "hash": "a70e76d8c0eaaf77cc529bf4bbd35bc9",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:38:54.326254Z",
+      "chunk_count": 10,
+      "error": null
+    },
+    "docs/testing/bias-fairness-framework-T10.md": {
+      "hash": "eb3ee4cee7d44eea9ce784c57c5ae024",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:37:10.875212Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150582163.json": {
+      "hash": "1858661f49612505f8b842e947881676",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:37:04.051467Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773152783788.json": {
+      "hash": "da46eea08899db07e22e2eaa91095340",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:37:03.338839Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773152451150.json": {
+      "hash": "8e52fa0889b103bb4d1c8b21d8b2bc3d",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:36:54.599480Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/architecture/WISE_AI_Architecture_Diagram-2026-02-05-045247.svg": {
+      "hash": "775c3e1fded15d5708a049a1e11192ea",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:13:33.096994Z",
+      "chunk_count": 0,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773152861933.json": {
+      "hash": "371c969738df97c8f35ea284d53d00ed",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:28:54.567288Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/compliance/fhir-abdm-gap-analysis-T14.md": {
+      "hash": "351a582fe8d4a997751d10028a013282",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:28:53.849515Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773062038383.json": {
+      "hash": "684acbc8388884875eef823d6f0eaf4b",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:28:45.846069Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/architecture/WISE_AI_Architecture_Diagram.md": {
+      "hash": "5156822e4cbf471dce006eed4dc6b399",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:28:40.149536Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773152775522.json": {
+      "hash": "ad7ebab3ff3afffa0c41e2eb7b28b78b",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:24:09.263536Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "docs/compliance/# SAHI & BODH Evidence Index \u2013 WISE AI-C.md": {
+      "hash": "7dc345ee253ea4dfec8d19d868c0fd8d",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:24:08.574914Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773152452396.json": {
+      "hash": "8b2817f01eae3e000f29a4a253a4ae1a",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:21:49.360955Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/09/session_1773061387.json": {
+      "hash": "e527bcb07bdeac99f849d334d8ac21c0",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:21:48.639270Z",
+      "chunk_count": 3,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773152891896.json": {
+      "hash": "30cc6e9935e9ee1757fccdaa0d1becb0",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:13:34.440695Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773150565704.json": {
+      "hash": "77231c6bc062cebe0c0ef825ce548b72",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:13:33.751110Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773154070979.json": {
+      "hash": "315199b21113c0ed038fd775439cb1ef",
+      "status": "complete",
+      "indexed_at": "2026-03-10T15:52:25.262934Z",
+      "chunk_count": 4,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161690099.json": {
+      "hash": "b9bc080441eaf9940a5c89b5a7abded6",
+      "status": "complete",
+      "indexed_at": "2026-03-10T17:29:00.255206Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773159084633.json": {
+      "hash": "6b3f4f85354738ed1fc93ae965183aa9",
+      "status": "complete",
+      "indexed_at": "2026-03-10T17:30:19.176981Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161689437.json": {
+      "hash": "f07302e5a701a3eef2e2ca037f84d48a",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:34.780614Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773160122030.json": {
+      "hash": "262c243443db6ebbd61db8bbb02fd679",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:27:05.640599Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773159757421.json": {
+      "hash": "dd4021cce30f270a79cee383ba5132b5",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:43.892510Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773158402164.json": {
+      "hash": "3a608e5f1d61718c0a416d3dd8d6cc24",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:23.464892Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773159991368.json": {
+      "hash": "a78d3b6b21ceeabd2807f637998c9c21",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:09.061136Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773160863308.json": {
+      "hash": "459a5d95dafedda1564ae783420b47a3",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:43.190343Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161043312.json": {
+      "hash": "8d95074527dfee3ad2f0a4275da0ece0",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:42.488574Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161690166.json": {
+      "hash": "d03e79397405e171922538963dbd597a",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:22.668827Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773163018851.json": {
+      "hash": "869ec609cb76fedfbe3c915eb8c2be37",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:17.591574Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773160961189.json": {
+      "hash": "3a77d6afb97e8d90c7d5f048490d28fb",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:24.346362Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773158942631.json": {
+      "hash": "80f0695ffbfb2b3c736e8b5dae33da77",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:35.478418Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161063834.json": {
+      "hash": "a0b06ddd79af0e8273a26b4e48d0c090",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:18.427031Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773160661066.json": {
+      "hash": "84fc4b77f6cb9e4ff5ab714b02f9076f",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:59.026452Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773159827219.json": {
+      "hash": "2b6491aea531896ef181f1738c5cc28e",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:33.434508Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773158933360.json": {
+      "hash": "483191ee6c040099c23d0137adc52cac",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:24:54.869668Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161051804.json": {
+      "hash": "1a9b304f43b3824605aff4d5e59a709b",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:24:53.958667Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161690489.json": {
+      "hash": "bcd7dc2fa7ca2183bc04afa596bdb10f",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:22.803168Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773158714664.json": {
+      "hash": "a28570ac871ab541eafd8857acfa350c",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:21.793960Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161227232.json": {
+      "hash": "8cdc08b9287a9c4a599364713a4b9034",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:32.015279Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773160770875.json": {
+      "hash": "967cd40e75bc7edb82ae849e39e62639",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:27:06.726676Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161690335.json": {
+      "hash": "d662adf67b59d81a54818637e2ce317f",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:25.080679Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161921303.json": {
+      "hash": "b1f1a848be4b18d7f56d001d63395962",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:20.874945Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773161687877.json": {
+      "hash": "dfa3193e1da590b1ae2fabb5cef25809",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:41.692656Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773162233330.json": {
+      "hash": "e1dde59381c11e99d8cb6aefcb439ba7",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:26:59.604578Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773159519341.json": {
+      "hash": "24cdae73d93331df31aa70c4b24cd70e",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:25:08.215465Z",
+      "chunk_count": 3,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773164262250.json": {
+      "hash": "db0ae7b8c263138dd5a5af0f48125243",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:24:30.400421Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773164065013.json": {
+      "hash": "8dcbe01c7e6dc67863d2dd3607de51c9",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:24:40.801999Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773164932867.json": {
+      "hash": "3064b7d71ced448123e12744c94afadf",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:27:32.620664Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773164857254.json": {
+      "hash": "7216c550cffcc1f56ca9be836c3835a2",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:24:48.130398Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773164245295.json": {
+      "hash": "7c4e6ecf4fd980b18d848242abee64fa",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:27:44.253609Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773163596225.json": {
+      "hash": "3b42623d180dfc406766688669a04a47",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:27:31.388862Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773164320619.json": {
+      "hash": "92eaa743665ddf533da151fc0c08640e",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:27:17.791847Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773164218280.json": {
+      "hash": "93698ec45a737c5cf72d3fdecb077c03",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:24:52.975128Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773163860861.json": {
+      "hash": "8cbfdde057fb5878937643ac37f0ff96",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:27:23.492776Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/10/session_1773163983661.json": {
+      "hash": "99c9d97b6fae2d88fdb481458ab8a8dd",
+      "status": "complete",
+      "indexed_at": "2026-03-10T18:27:11.828392Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773191786468.json": {
+      "hash": "4e1d5f97a53924965e7d769aff1a49fe",
+      "status": "complete",
+      "indexed_at": "2026-03-11T01:24:53.212767Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773190557096.json": {
+      "hash": "43975e9f1c899d9e1d1d369f31730dae",
+      "status": "complete",
+      "indexed_at": "2026-03-11T01:25:11.493351Z",
+      "chunk_count": 4,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193706170.json": {
+      "hash": "ee22910075b1f181a4afe345e0444641",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:13:58.533681Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193180374.json": {
+      "hash": "104ee0f60a74d06d9dbc2e28d1080c61",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:14:24.719417Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193470384.json": {
+      "hash": "79a6588c331e2b69fddf714a5284cc75",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:22:09.526934Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193244429.json": {
+      "hash": "21df41f60a5618235f4f882b0fbdf3d2",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:15:07.051298Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193755541.json": {
+      "hash": "4708ccea91255eee1e93ad8226c9f33a",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:22:10.270689Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773194226388.json": {
+      "hash": "557e73a8bf616a63e1bb48000413be7c",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:21:58.230326Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193744711.json": {
+      "hash": "8951fa27d6b99946c6fa075e26e43c02",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:21:48.576701Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193170395.json": {
+      "hash": "d9e8da99b60cfe5e287b6a8ddedfdd29",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:15:59.503700Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193254480.json": {
+      "hash": "c01f5ef6f5e9ffb615aacc3bf692ff17",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:21:53.999592Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773194001292.json": {
+      "hash": "52660215bdd98acfc99528d3d6439cc1",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:21:47.474748Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193748163.json": {
+      "hash": "6f7cef7320ab13f8ac815abc41737298",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:21:42.301877Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773194039065.json": {
+      "hash": "a94e55ef39a2a071d0cc803b60c328bc",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:21:41.523466Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773192670544.json": {
+      "hash": "fba0ba7fc04f2a655c0dce771d577686",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:21:31.419996Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193696235.json": {
+      "hash": "88b4986c42dbbbc3080945125a021cfe",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:21:24.431460Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773193195902.json": {
+      "hash": "24dba82a7b22ee6329c3f046ab57bb46",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:16:25.238113Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773194889602.json": {
+      "hash": "f8c3999d077c29599531e2e19c926e31",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:16:00.540549Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773196437568.json": {
+      "hash": "cf696ae8bc484dda6412b7b48f30c94d",
+      "status": "complete",
+      "indexed_at": "2026-03-11T02:44:06.401128Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/11/session_1773212892044.json": {
+      "hash": "9a20aeb4ae78d824cf816c0e53909710",
+      "status": "complete",
+      "indexed_at": "2026-03-11T07:41:40.220544Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773322000547.json": {
+      "hash": "7a89a154a9cea19069e85c3c7fcc8fb7",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:05:57.072124Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773318703172.json": {
+      "hash": "606e64fee3bde49c8b9bbeebe0a196f9",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:07:17.036285Z",
+      "chunk_count": 4,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773319063432.json": {
+      "hash": "31c2fe17424a0fb3f49eda235e495ed9",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:14:14.387443Z",
+      "chunk_count": 5,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773329945692.json": {
+      "hash": "da61f26b513d6d086adff3cdedfb6594",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:07:41.660380Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773329748759.json": {
+      "hash": "48046c8013a4b75d7228626e5246bd71",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:14:58.451041Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773318484673.json": {
+      "hash": "20fd279fff17f2dfed578528fa53902c",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:13:03.473069Z",
+      "chunk_count": 4,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773314090650.json": {
+      "hash": "22b2f20c257bbef90ca4273ac4f8e2df",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:11:19.738980Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773320139352.json": {
+      "hash": "bda28246e2c814911d342c6416071f0b",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:07:42.433354Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773320971910.json": {
+      "hash": "f7b3127bdad96dce539dd5d6914099f1",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:11:45.814518Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773321479559.json": {
+      "hash": "6c4b496dd1b1adc1fd75ba1ce6e40188",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:10:38.524687Z",
+      "chunk_count": 4,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773320762814.json": {
+      "hash": "1bf3be1fad070abe2da2cc56e9c5168c",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:09:45.108397Z",
+      "chunk_count": 4,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773320589664.json": {
+      "hash": "c8295648f07a375394b5fed7a91963ea",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:07:58.537304Z",
+      "chunk_count": 2,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773319949538.json": {
+      "hash": "b3c0a5cd96ab61e0dbc85ddc60aad7f7",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:07:44.569161Z",
+      "chunk_count": 1,
+      "error": null
+    },
+    "conversation_history/2026/03/12/session_1773320239072.json": {
+      "hash": "a8e85b6c86b3a76936ebd49ab6349140",
+      "status": "complete",
+      "indexed_at": "2026-03-12T16:07:43.787062Z",
+      "chunk_count": 1,
       "error": null
     }
   }

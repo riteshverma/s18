@@ -156,13 +156,15 @@ from routers import apps as apps_router
 from routers import settings as settings_router
 from routers import explorer as explorer_router
 from routers import mcp as mcp_router
+
+# MCP router mounted first with explicit empty prefix so /mcp/* routes are reachable
+app.include_router(mcp_router.router, tags=["MCP"])
 app.include_router(runs_router.router)
 app.include_router(rag_router.router)
 app.include_router(remme_router.router)
 app.include_router(apps_router.router)
 app.include_router(settings_router.router)
 app.include_router(explorer_router.router)
-app.include_router(mcp_router.router)
 from routers import prompts as prompts_router
 from routers import news as news_router
 from routers import git as git_router

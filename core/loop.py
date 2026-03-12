@@ -9,6 +9,7 @@ from agents.base_agent import AgentRunner
 from core.utils import log_step, log_error
 from core.event_bus import event_bus
 from core.model_manager import ModelManager
+from config.settings_loader import get_timeout
 from core.prometheus_metrics import (
     ORCHESTRATOR_RUNS_TOTAL,
     ORCHESTRATOR_RUN_LATENCY_MS,
@@ -708,11 +709,15 @@ class AgentLoop4:
             log_step(f"🔄 {agent_type} Iteration {turn}/{max_turns}", symbol="🔄")
             
             # Run Agent (with retry for transient failures like rate limits)
+            # Per-step timeout: 1.5x Ollama timeout so one slow LLM call + overhead can complete
+            step_timeout = int(1.5 * get_timeout())
             async def run_agent_step():
                 return await self.agent_runner.run_agent(agent_type, current_input)
-            
+
             try:
-                result = await retry_with_backoff(run_agent_step)
+                result = await retry_with_backoff(
+                    lambda: asyncio.wait_for(run_agent_step(), timeout=step_timeout)
+                )
             except Exception as e:
                 # All retries exhausted, return failure
                 return {"success": False, "error": f"Agent failed after retries: {str(e)}"}

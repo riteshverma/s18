@@ -15,6 +15,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import Tool
 from rich import print
+from core.prometheus_metrics import MCP_TOOL_CALLS_TOTAL, MCP_TOOL_LATENCY_MS, elapsed_ms, now_ms
 
 class MultiMCP:
     def __init__(self):
@@ -362,6 +363,7 @@ class MultiMCP:
     # Helper to route tool call by finding which server has it
     async def route_tool_call(self, tool_name: str, arguments: dict):
         from core.circuit_breaker import get_breaker, CircuitOpenError
+        start_ms = now_ms()
         
         # Get or create circuit breaker for this tool
         breaker = get_breaker(tool_name, failure_threshold=5, recovery_timeout=60.0)
@@ -375,18 +377,43 @@ class MultiMCP:
             )
         
         try:
+            matching_servers = []
             for name, tools in self.tools.items():
                 for tool in tools:
-                    if tool.name == tool_name:
-                        result = await self.call_tool(name, tool_name, arguments)
-                        breaker.record_success()
-                        return result
-            raise ValueError(f"Tool '{tool_name}' not found in any server")
+                    if tool.name != tool_name:
+                        continue
+                    key = f"{name}:{tool_name}"
+                    if key in self.disabled_tools:
+                        continue
+                    matching_servers.append(name)
+
+            if not matching_servers:
+                raise ValueError(f"Tool '{tool_name}' not found in any enabled server")
+
+            # Deterministic conflict resolution for EHR retrieval tools.
+            if tool_name in {"get_patient_records", "search_labs"} and "mockehr" in matching_servers:
+                selected_server = "mockehr"
+            else:
+                selected_server = sorted(matching_servers)[0]
+                if len(matching_servers) > 1:
+                    print(
+                        f"  ⚠️ Tool collision for '{tool_name}', "
+                        f"choosing '{selected_server}' from {matching_servers}"
+                    )
+
+            result = await self.call_tool(selected_server, tool_name, arguments)
+            breaker.record_success()
+            MCP_TOOL_CALLS_TOTAL.labels(tool=tool_name, status="success").inc()
+            return result
         except CircuitOpenError:
+            MCP_TOOL_CALLS_TOTAL.labels(tool=tool_name, status="circuit_open").inc()
             raise  # Re-raise circuit errors without recording failure
         except Exception as e:
             breaker.record_failure()
+            MCP_TOOL_CALLS_TOTAL.labels(tool=tool_name, status="error").inc()
             raise
+        finally:
+            MCP_TOOL_LATENCY_MS.labels(tool=tool_name).observe(elapsed_ms(start_ms))
 
     def _load_cache(self) -> dict:
         """Load metadata cache from file"""

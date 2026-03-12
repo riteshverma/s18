@@ -9,7 +9,25 @@ import os
 # Import shared state
 from shared.state import get_multi_mcp
 
-router = APIRouter()
+router = APIRouter(tags=["MCP"])
+
+# --- Discovery / Health ---
+
+@router.get("/mcp")
+async def mcp_discovery():
+    """MCP router health check. Use this to verify MCP endpoints are reachable."""
+    return {
+        "status": "ok",
+        "message": "MCP router is active",
+        "endpoints": [
+            "GET /mcp/tools",
+            "GET /mcp/connected_tools",
+            "GET /mcp/servers",
+            "POST /mcp/call",
+            "POST /mcp/refresh/{server_name}",
+            "POST /mcp/tool_state",
+        ],
+    }
 
 # --- Data Models ---
 

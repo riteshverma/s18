@@ -53,6 +53,7 @@ Optional:
 
 - **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
+- **WISE_MOCKEHR_BASE_URL** – Base URL of wise-ai Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from wise-ai for end-to-end integration. Example: `http://backend:8000` (Docker) or `http://localhost:8000` (host).
 
 ### Supabase integration contract (S18)
 

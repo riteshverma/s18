@@ -84,6 +84,14 @@ class ModelManager:
                 self.client = genai.Client(api_key=api_key)
             # Ollama doesn't need a persistent client
 
+        # Ollama timeout from config (used for completion stage; must allow ~240s+ per step)
+        if self.model_type == "ollama":
+            try:
+                from config.settings_loader import get_timeout
+                self._ollama_timeout_seconds = get_timeout()
+            except Exception:
+                self._ollama_timeout_seconds = 300
+
     async def generate_text(self, prompt: str) -> str:
         if self.model_type == "gemini":
             return await self._gemini_generate(prompt)
@@ -155,7 +163,8 @@ class ModelManager:
         """Generate with Ollama using images (for multimodal models)."""
         try:
             import aiohttp
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=getattr(self, "_ollama_timeout_seconds", 300))
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     self.model_info["url"]["generate"],
                     json={
@@ -225,9 +234,10 @@ class ModelManager:
 
     async def _ollama_generate(self, prompt: str) -> str:
         try:
-            # ✅ Use aiohttp for truly async requests
+            # ✅ Use aiohttp for truly async requests (timeout from config for run completion)
             import aiohttp
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=getattr(self, "_ollama_timeout_seconds", 300))
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     self.model_info["url"]["generate"],
                     json = {"model": self.model_info["model"], "prompt": prompt, "stream": False}
