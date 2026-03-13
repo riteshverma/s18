@@ -24,7 +24,7 @@ from core.persistence import persistence_manager
 from core.graph_adapter import nx_to_reactflow
 from memory.context import ExecutionContextManager
 from remme.utils import get_embedding
-from config.settings_loader import settings, save_settings, reset_settings, reload_settings
+from config.settings_loader import settings, save_settings, reset_settings, reload_settings, get_run_poll_timeout
 from core.supabase_auth import is_auth_enabled
 from core.supabase_logging import is_logging_enabled
 
@@ -203,7 +203,8 @@ async def health_check():
     return {
         "status": "ok",
         "version": "1.0.0",
-        "mcp_ready": True # Since lifespan finishes multi_mcp.start()
+        "mcp_ready": True,  # Since lifespan finishes multi_mcp.start()
+        "run_poll_timeout_seconds": get_run_poll_timeout(),
     }
 
 

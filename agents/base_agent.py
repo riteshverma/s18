@@ -1,3 +1,4 @@
+import re
 import yaml
 import json
 from pathlib import Path
@@ -125,27 +126,94 @@ class AgentRunner:
         output["plan_graph"] = pg
         return output
 
+    def _extract_wise_from_text(self, text: str) -> dict:
+        """
+        Extract risk_level, confidence, and flags from raw LLM response text
+        (e.g. markdown with "Risk Level: High", "Flags: [...]") for WISE integration.
+        Returns a dict with keys risk_level, confidence, flags; missing keys or None
+        mean "not found".
+        """
+        if not text or not isinstance(text, str):
+            return {}
+        out = {}
+        # risk_level: "Risk Level: High", "*Risk Level:* moderate", risk_level": "low"
+        for pattern in (
+            r"(?i)risk_level[\"']?\s*:\s*[\"']?(\w+)",
+            r"(?i)\*?\s*Risk\s+Level\s*\*?\s*:\s*(\w+)",
+            r"(?i)Risk\s+Level:\s*(\w+)",
+        ):
+            m = re.search(pattern, text)
+            if m:
+                raw = m.group(1).lower().strip()
+                if raw in ("low", "moderate", "high"):
+                    out["risk_level"] = raw
+                elif raw in ("normal", "medium"):
+                    out["risk_level"] = "moderate"
+                else:
+                    out["risk_level"] = "moderate"
+                break
+        # confidence: "Confidence: 0.85", "*Confidence:* 0.85", "85%"
+        for pattern in (
+            r"(?i)confidence[\"']?\s*:\s*([\d.]+)",
+            r"(?i)\*?\s*Confidence\s*\*?\s*:\s*([\d.]+)",
+            r"(?i)Confidence:\s*([\d.]+)",
+            r"(\d+)\s*%",
+        ):
+            m = re.search(pattern, text)
+            if m:
+                try:
+                    v = float(m.group(1))
+                    if v > 1:
+                        v = v / 100.0
+                    out["confidence"] = max(0.0, min(1.0, v))
+                except (TypeError, ValueError):
+                    pass
+                if "confidence" in out:
+                    break
+        # flags: "Flags: [\"low_hemoglobin\", \"high_wbc\"]" or "Flags: ['low_hemoglobin', 'high_wbc']"
+        for pattern in (
+            r"(?i)flags[\"']?\s*:\s*\[\s*([^\]]*)\s*\]",
+            r"(?i)Flags:\s*\[\s*([^\]]*)\s*\]",
+        ):
+            m = re.search(pattern, text)
+            if m:
+                inner = m.group(1).strip()
+                if not inner:
+                    out["flags"] = []
+                else:
+                    parts = [p.strip().strip('"\'') for p in re.split(r",", inner)]
+                    out["flags"] = [p for p in parts if p]
+                break
+        return out
+
     def _ensure_wise_output_schema(self, output, raw_response: str) -> dict:
         """
         Ensure ThinkerAgent output includes risk_level, confidence, flags for WISE integration.
+        When parsed output is missing these (e.g. fallback to {response: "..."}), extract from
+        raw text before applying defaults.
         """
         if isinstance(output, list) and output and isinstance(output[0], dict):
             output = output[0]
         if not isinstance(output, dict):
             output = {"response": str(output) if output is not None else raw_response}
-        if "risk_level" not in output or output["risk_level"] not in ("low", "moderate", "high"):
-            output["risk_level"] = output.get("risk_level", "moderate")
+        source = (raw_response or "").strip() or (output.get("response") if isinstance(output.get("response"), str) else "")
+        extracted = self._extract_wise_from_text(source) if source else {}
+        # risk_level
+        if output.get("risk_level") not in ("low", "moderate", "high"):
+            output["risk_level"] = extracted.get("risk_level") or output.get("risk_level") or "moderate"
             if output["risk_level"] not in ("low", "moderate", "high"):
                 output["risk_level"] = "moderate"
+        # confidence
         if output.get("confidence") is None:
-            output["confidence"] = 0.5
+            output["confidence"] = extracted.get("confidence") if extracted.get("confidence") is not None else 0.5
         else:
             try:
                 output["confidence"] = float(output["confidence"])
             except (TypeError, ValueError):
-                output["confidence"] = 0.5
+                output["confidence"] = extracted.get("confidence") if extracted.get("confidence") is not None else 0.5
+        # flags
         if not isinstance(output.get("flags"), list):
-            output["flags"] = []
+            output["flags"] = extracted.get("flags") if isinstance(extracted.get("flags"), list) else []
         return output
 
     async def run_agent(self, agent_type: str, input_data: dict, image_path: Optional[str] = None) -> dict:
@@ -258,6 +326,16 @@ class AgentRunner:
             elif agent_type == "ThinkerAgent":
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
                 output = self._ensure_wise_output_schema(output, response)
+            elif agent_type == "SummarizerAgent":
+                output = parse_llm_json_or_fallback(response, fallback_key="response")
+                output = self._ensure_wise_output_schema(output, response)
+                # Ensure machine-readable flags are always present in markdown output
+                # so downstream WISE adapters can parse consistently.
+                if isinstance(output.get("response"), str) and "Flags:" not in output["response"]:
+                    output["response"] = (
+                        output["response"].rstrip()
+                        + f"\n\nFlags: {json.dumps(output.get('flags', []))}"
+                    )
             else:
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
             

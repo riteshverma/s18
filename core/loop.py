@@ -4,6 +4,7 @@ import networkx as nx
 import asyncio
 import time
 import ast
+import json
 from memory.context import ExecutionContextManager
 from agents.base_agent import AgentRunner
 from core.utils import log_step, log_error
@@ -387,6 +388,47 @@ class AgentLoop4:
         
         # Track which new nodes have incoming edges to detect orphans
         nodes_with_incoming_edges = set()
+
+        def _sanitize_io_keys(keys, field_name, node_id):
+            """
+            Normalize planner-provided reads/writes to non-empty string keys.
+            Prevents runtime crashes like "unhashable type: 'dict'" when planners
+            accidentally emit structured objects in reads/writes.
+            """
+            if keys is None:
+                return []
+            if not isinstance(keys, list):
+                keys = [keys]
+
+            sanitized = []
+            for item in keys:
+                if isinstance(item, str):
+                    key = item.strip()
+                elif isinstance(item, dict):
+                    # Keep shape information without breaking hashability.
+                    key = json.dumps(item, sort_keys=True, default=str)
+                else:
+                    key = str(item).strip()
+
+                if not key:
+                    continue
+                if key not in sanitized:
+                    sanitized.append(key)
+
+            if sanitized != keys:
+                log_step(
+                    f"🧹 Sanitized {field_name} for {node_id}: {sanitized}",
+                    symbol="🧹",
+                )
+            return sanitized
+
+        # Sanitize node IO fields in-place so all later merge wiring sees safe keys.
+        for node in new_nodes:
+            if not isinstance(node, dict):
+                continue
+            node_id = node.get("id", "unknown")
+            node["reads"] = _sanitize_io_keys(node.get("reads", []), "reads", node_id)
+            node["writes"] = _sanitize_io_keys(node.get("writes", []), "writes", node_id)
 
         # Add new nodes
         for node in new_nodes:

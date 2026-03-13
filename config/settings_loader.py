@@ -51,6 +51,9 @@ def load_settings() -> dict:
         if env_ollama_timeout and env_ollama_timeout.isdigit():
             _settings_cache.setdefault("ollama", {})
             _settings_cache["ollama"]["timeout"] = int(env_ollama_timeout)
+        env_run_poll = os.getenv("RUN_POLL_TIMEOUT_SECONDS")
+        if env_run_poll and env_run_poll.isdigit():
+            _settings_cache["run_poll_timeout_seconds"] = int(env_run_poll)
         # Supabase/Auth runtime overrides
         env_auth_enabled = os.getenv("AUTH_ENABLED")
         if env_auth_enabled is not None:
@@ -125,6 +128,10 @@ def get_model(purpose: str) -> str:
 def get_timeout() -> int:
     """Get Ollama timeout in seconds."""
     return load_settings()["ollama"]["timeout"]
+
+def get_run_poll_timeout() -> int:
+    """Recommended timeout in seconds for clients polling GET /runs/{id}. Runs can take ~2 min; use this so the client does not abort too early."""
+    return load_settings().get("run_poll_timeout_seconds", 300)
 
 # --- Initialize on import ---
 settings = load_settings()
