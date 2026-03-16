@@ -25,7 +25,7 @@ from core.supabase_logging import (
     update_request_status,
 )
 from remme.utils import get_embedding
-from config.settings_loader import settings
+from config.settings_loader import settings, get_run_poll_timeout
 
 router = APIRouter(tags=["Runs"])
 
@@ -258,10 +258,11 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
                 from remme.extractor import apply_preferences_to_hubs
                 apply_preferences_to_hubs(preferences)
                 print(f"✅ Remme: Processed {len(preferences)} preference updates.")
-                
+            
+            if commands:
                 print(f"✅ Remme: Processed {len(commands)} memory updates.")
-            else:
-                 print(f"ℹ️ Remme: No new facts extracted from run {run_id}.")
+            elif not preferences:
+                print(f"ℹ️ Remme: No new facts extracted from run {run_id}.")
 
         except Exception as e:
             print(f"⚠️ Remme Extraction Failed: {e}")
@@ -508,6 +509,7 @@ async def create_run(
         "created_at": datetime.now().isoformat(),
         "query": request.query,
         "idempotency_key": idempotency_key,
+        "poll_timeout_seconds": get_run_poll_timeout(),
     }
 
 
@@ -602,6 +604,7 @@ async def get_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_u
                 "id": run_id,
                 "status": status,
                 "graph": react_flow,
+                "poll_timeout_seconds": get_run_poll_timeout(),
             }
 
         # Run exists but graph has not been initialized yet; avoid transient 404.
@@ -609,6 +612,7 @@ async def get_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_u
             "id": run_id,
             "status": "running",
             "graph": {"nodes": [], "edges": []},
+            "poll_timeout_seconds": get_run_poll_timeout(),
         }
     
     # Search disk
@@ -637,7 +641,8 @@ async def get_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_u
         return {
             "id": run_id,
             "status": status,
-            "graph": react_flow
+            "graph": react_flow,
+            "poll_timeout_seconds": get_run_poll_timeout(),
         }
 
     # Bridge short startup races before background task registers active loop/session file.
@@ -651,6 +656,7 @@ async def get_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_u
                     "id": run_id,
                     "status": "starting",
                     "graph": {"nodes": [], "edges": []},
+                    "poll_timeout_seconds": get_run_poll_timeout(),
                 }
         except (OverflowError, ValueError):
             pass

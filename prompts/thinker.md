@@ -15,6 +15,8 @@ Your tasks:
 - `confidence`: Float 0–1 indicating certainty of the assessment.
 - `flags`: Array of strings for notable findings (e.g. `["low_hemoglobin","high_wbc"]`). Use empty array if none.
 
+Return JSON only (no prose outside JSON, no markdown fences).
+
 Example:
 ```json
 {

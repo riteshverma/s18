@@ -106,7 +106,7 @@ async def use_duckduckgo_http(query: str) -> List[str]:
     soup = BeautifulSoup(r.text, "html.parser")
     links = []
 
-    for a in soup.select("a.result__a"):
+    for a in soup.select("a.result__a") or soup.select('a[href*="uddg="]'):
         href = a.get("href", "")
         if not href:
             continue
@@ -144,8 +144,13 @@ async def use_playwright_search(query: str, engine: str) -> List[str]:
             await asyncio.sleep(3)
 
             if engine == "duck_playwright":
-                await page.wait_for_selector("a.result__a", timeout=10000)
-                results = await page.query_selector_all("a.result__a")
+                # DuckDuckGo HTML may use a.result__a or serve different markup; fallback to link pattern
+                try:
+                    await page.wait_for_selector("a.result__a", timeout=8000)
+                    results = await page.query_selector_all("a.result__a")
+                except Exception:
+                    await page.wait_for_selector('a[href*="uddg="]', timeout=8000)
+                    results = await page.query_selector_all('a[href*="uddg="]')
 
             elif engine == "bing_playwright":
                 results = await page.query_selector_all("li.b_algo h2 a")
@@ -171,7 +176,7 @@ async def use_playwright_search(query: str, engine: str) -> List[str]:
                 await asyncio.sleep(5)
                 # Retry logic
                 if engine == "duck_playwright":
-                    results = await page.query_selector_all("a.result__a")
+                    results = await page.query_selector_all("a.result__a") or await page.query_selector_all('a[href*="uddg="]')
                 elif engine == "bing_playwright":
                     results = await page.query_selector_all("li.b_algo h2 a")
                 elif engine == "yahoo_playwright":

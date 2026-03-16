@@ -23,6 +23,29 @@ from rich.console import Console
 from datetime import datetime
 
 
+def sanitize_io_keys_list(keys):
+    """Normalize reads/writes to string keys to avoid unhashable dict errors."""
+    if keys is None:
+        return []
+    if not isinstance(keys, list):
+        keys = [keys]
+    out = []
+    for item in keys:
+        if isinstance(item, str):
+            key = item.strip()
+        elif isinstance(item, dict):
+            if len(item) == 1:
+                _, v = next(iter(item.items()))
+                key = v.strip() if isinstance(v, str) and v.strip() else json.dumps(item, sort_keys=True, default=str)
+            else:
+                key = json.dumps(item, sort_keys=True, default=str)
+        else:
+            key = str(item).strip()
+        if key and key not in out:
+            out.append(key)
+    return out
+
+
 # ===== EXPONENTIAL BACKOFF FOR TRANSIENT FAILURES =====
 
 async def retry_with_backoff(
@@ -171,19 +194,43 @@ class AgentLoop4:
                     break
 
                 # Note: The "Query" node is already 'running' in our bootstrap context
-                async def run_planner():
-                    return await self.agent_runner.run_agent(
-                        "PlannerAgent",
-                        {
-                            "original_query": query,
-                            "planning_strategy": self.strategy,
-                            "globals_schema": self.context.plan_graph.graph.get("globals_schema", {}),
-                            "file_manifest": file_manifest,
-                            "file_profiles": file_profiles,
-                            "memory_context": memory_context
-                        }
-                    )
-                plan_result = await self._track_task(retry_with_backoff(run_planner))
+                if self._is_wise_cbc_payload_query(query):
+                    plan_result = {
+                        "success": True,
+                        "output": {
+                            "plan_graph": {
+                                "nodes": [
+                                    {
+                                        "id": "T001",
+                                        "agent": "ThinkerAgent",
+                                        "description": "Analyze CBC payload and return risk/confidence/flags.",
+                                        "reads": ["original_query"],
+                                        "writes": ["response"],
+                                        "status": "pending",
+                                    }
+                                ],
+                                "edges": [{"source": "Query", "target": "T001"}],
+                            },
+                            "next_step_id": "T001",
+                            "interpretation_confidence": 1.0,
+                            "ambiguity_notes": [],
+                        },
+                    }
+                    log_step("⚡ Skipped Planner for CBC payload query", symbol="⚡")
+                else:
+                    async def run_planner():
+                        return await self.agent_runner.run_agent(
+                            "PlannerAgent",
+                            {
+                                "original_query": query,
+                                "planning_strategy": self.strategy,
+                                "globals_schema": self.context.plan_graph.graph.get("globals_schema", {}),
+                                "file_manifest": file_manifest,
+                                "file_profiles": file_profiles,
+                                "memory_context": memory_context
+                            }
+                        )
+                    plan_result = await self._track_task(retry_with_backoff(run_planner))
 
                 if self.context.stop_requested:
                     break
@@ -229,6 +276,26 @@ class AgentLoop4:
                     first_node = pg["nodes"][0]
                     if isinstance(first_node, dict) and first_node.get("id"):
                         out["next_step_id"] = first_node["id"]
+
+                # Fast-path for WISE CBC payloads:
+                # avoid expensive multi-step plans that frequently exceed frontend timeout windows.
+                if self._is_wise_cbc_payload_query(query):
+                    out["plan_graph"] = {
+                        "nodes": [
+                            {
+                                "id": "T001",
+                                "agent": "ThinkerAgent",
+                                "description": "Analyze CBC payload and return risk/confidence/flags.",
+                                "reads": ["original_query"],
+                                "writes": ["response"],
+                                "status": "pending",
+                            }
+                        ],
+                        "edges": [{"source": "Query", "target": "T001"}],
+                    }
+                    out["next_step_id"] = "T001"
+                    log_step("⚡ Applied CBC fast-path plan (single ThinkerAgent step)", symbol="⚡")
+                    pg = out["plan_graph"]
                 # Fallback: if planner returned no steps, create a single ThinkerAgent step
                 if not pg["nodes"]:
                     log_step("Planner returned no steps; using single-step fallback", symbol="🔄")
@@ -358,6 +425,17 @@ class AgentLoop4:
             ORCHESTRATOR_RUNS_TOTAL.labels(status=final_status).inc()
             ORCHESTRATOR_RUN_LATENCY_MS.observe(elapsed_ms(run_start_ms))
 
+    def _is_wise_cbc_payload_query(self, query: str) -> bool:
+        q = (query or "").lower()
+        return (
+            "[patient id:" in q
+            and "[execution mode: fast]" in q
+            and "request:" in q
+            and "hemoglobin" in q
+            and "wbc" in q
+            and "platelets" in q
+        )
+
     def _should_replan(self):
         """
         Check if the graph needs expansion (re-planning).
@@ -389,46 +467,19 @@ class AgentLoop4:
         # Track which new nodes have incoming edges to detect orphans
         nodes_with_incoming_edges = set()
 
-        def _sanitize_io_keys(keys, field_name, node_id):
-            """
-            Normalize planner-provided reads/writes to non-empty string keys.
-            Prevents runtime crashes like "unhashable type: 'dict'" when planners
-            accidentally emit structured objects in reads/writes.
-            """
-            if keys is None:
-                return []
-            if not isinstance(keys, list):
-                keys = [keys]
-
-            sanitized = []
-            for item in keys:
-                if isinstance(item, str):
-                    key = item.strip()
-                elif isinstance(item, dict):
-                    # Keep shape information without breaking hashability.
-                    key = json.dumps(item, sort_keys=True, default=str)
-                else:
-                    key = str(item).strip()
-
-                if not key:
-                    continue
-                if key not in sanitized:
-                    sanitized.append(key)
-
-            if sanitized != keys:
-                log_step(
-                    f"🧹 Sanitized {field_name} for {node_id}: {sanitized}",
-                    symbol="🧹",
-                )
-            return sanitized
-
         # Sanitize node IO fields in-place so all later merge wiring sees safe keys.
         for node in new_nodes:
             if not isinstance(node, dict):
                 continue
             node_id = node.get("id", "unknown")
-            node["reads"] = _sanitize_io_keys(node.get("reads", []), "reads", node_id)
-            node["writes"] = _sanitize_io_keys(node.get("writes", []), "writes", node_id)
+            raw_reads = node.get("reads", [])
+            raw_writes = node.get("writes", [])
+            node["reads"] = sanitize_io_keys_list(raw_reads)
+            node["writes"] = sanitize_io_keys_list(raw_writes)
+            if node["reads"] != raw_reads:
+                log_step(f"🧹 Sanitized reads for {node_id}: {node['reads']}", symbol="🧹")
+            if node["writes"] != raw_writes:
+                log_step(f"🧹 Sanitized writes for {node_id}: {node['writes']}", symbol="🧹")
 
         # Add new nodes
         for node in new_nodes:
@@ -476,12 +527,43 @@ class AgentLoop4:
             self.context.plan_graph.add_edge(source, target)
             nodes_with_incoming_edges.add(target)
         
-        # 🛡️ AUTO-CONNECT: If a new node has NO incoming edges, connect it to "Query"
-        # This fixes cases where PlannerAgent returns nodes but forgets the edges
+        # Build reverse index of produced keys -> producer nodes for dependency inference.
+        produced_key_to_nodes = {}
         for node in new_nodes:
-            if node["id"] not in nodes_with_incoming_edges:
-                log_step(f"🔗 Auto-connected orphan node {node['id']} to Query", symbol="🔗")
-                self.context.plan_graph.add_edge("Query", node["id"])
+            if not isinstance(node, dict):
+                continue
+            node_id = node.get("id")
+            if not node_id:
+                continue
+            for write_key in sanitize_io_keys_list(node.get("writes", [])):
+                produced_key_to_nodes.setdefault(write_key, set()).add(node_id)
+
+        # 🛡️ AUTO-CONNECT:
+        # If a new node has no incoming edges, infer missing edges from reads->writes first.
+        # Only fall back to Query when there are no inferred producer dependencies.
+        for node in new_nodes:
+            node_id = node.get("id")
+            if not node_id or node_id in nodes_with_incoming_edges:
+                continue
+
+            inferred_sources = set()
+            for read_key in sanitize_io_keys_list(node.get("reads", [])):
+                for source_node in produced_key_to_nodes.get(read_key, set()):
+                    if source_node != node_id:
+                        inferred_sources.add(source_node)
+
+            if inferred_sources:
+                for source_node in sorted(inferred_sources):
+                    self.context.plan_graph.add_edge(source_node, node_id)
+                    nodes_with_incoming_edges.add(node_id)
+                    log_step(
+                        f"🔗 Inferred missing edge {source_node} -> {node_id} from read dependency",
+                        symbol="🔗",
+                    )
+                continue
+
+            log_step(f"🔗 Auto-connected orphan node {node_id} to Query", symbol="🔗")
+            self.context.plan_graph.add_edge("Query", node_id)
         
         # 🔧 SAFETY NET: Ensure ClarificationAgent outputs are wired to successor nodes
         # This fixes cases where Planner adds a ClarificationAgent but forgets to wire reads
@@ -702,6 +784,14 @@ class AgentLoop4:
         # 📡 EMIT EVENT
         await event_bus.publish("step_start", "AgentLoop4", {"step_id": step_id})
         step_data = context.get_step_data(step_id)
+        # Sanitize reads/writes to string keys (handles planner dicts and session load; prevents unhashable type: 'dict')
+        reads = sanitize_io_keys_list(step_data.get("reads", []))
+        writes = sanitize_io_keys_list(step_data.get("writes", []))
+        context.plan_graph.nodes[step_id]["reads"] = reads
+        context.plan_graph.nodes[step_id]["writes"] = writes
+        step_data["reads"] = reads
+        step_data["writes"] = writes
+
         agent_type = step_data["agent"]
         # Normalize common planner aliases to configured agent names
         agent_aliases = {

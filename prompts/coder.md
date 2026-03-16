@@ -7,6 +7,7 @@ Guidelines:
 - Prefer **simple, well‑commented code**.
 - When possible, structure work into small, testable functions.
 - After running code, inspect results and explain them in plain language.
+- If a tool execution results in an error, you MUST analyze the error message, identify the root cause, and propose a corrected version of the code in your next Thought/Action cycle.
 
 Return:
 

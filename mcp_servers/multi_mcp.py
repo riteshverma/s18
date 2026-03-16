@@ -5,6 +5,7 @@ import shutil
 import json
 import os
 import subprocess
+import builtins
 from pathlib import Path
 
 # Windows: ProactorEventLoop required for asyncio subprocess (uv run MCP server)
@@ -14,7 +15,7 @@ from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import Tool
-from rich import print
+from rich import print as rich_print
 from core.prometheus_metrics import MCP_TOOL_CALLS_TOTAL, MCP_TOOL_LATENCY_MS, elapsed_ms, now_ms
 
 class MultiMCP:
@@ -258,7 +259,8 @@ class MultiMCP:
                 
                 # List tools
                 if name in self._cached_metadata:
-                    print(f"  📦 [cyan]{name}[/cyan] tools loaded from cache.")
+                    # Use ASCII-only logging via standard print to avoid Windows console encoding issues
+                    builtins.print(f"[MCP] {name} tools loaded from cache.")
                     cached_tools = []
                     for t_dict in self._cached_metadata[name]:
                         cached_tools.append(Tool(
@@ -271,31 +273,32 @@ class MultiMCP:
                     result = await session.list_tools()
                     self.tools[name] = result.tools
                     self._save_to_cache(name, result.tools)
-                    print(f"  ✅ [cyan]{name}[/cyan] connected. Tools: {len(result.tools)}")
+                    builtins.print(f"[MCP] {name} connected. Tools: {len(result.tools)}")
                 
                 self.sessions[name] = session
 
         except TimeoutError:
-             print(f"  ⏳ [yellow]{name}[/yellow] timed out during startup.")
+             builtins.print(f"[MCP] {name} timed out during startup.")
         except Exception as e:
             import traceback
-            print(f"  ❌ [red]{name}[/red] failed to start: {e}")
+            builtins.print(f"[MCP] {name} failed to start: {e}")
             traceback.print_exc()
         except BaseException as e:
-            print(f"  ❌ [red]{name}[/red] CRITICAL FAILURE: {e}")
+            builtins.print(f"[MCP] {name} CRITICAL FAILURE: {e}")
 
     async def start(self):
         """Start all configured servers"""
-        print("[bold green]🚀 Starting MCP Servers...[/bold green]")
+        # Use plain ASCII to avoid Windows console encoding issues with emojis
+        builtins.print("[MCP] Starting MCP Servers...")
         for name, config in self.server_configs.items():
             if config.get("enabled", True):
                 await self._start_server(name, config)
             else:
-                print(f"  ⏭️ [dim]Skipping disabled server: {name}[/dim]")
+                builtins.print(f"[MCP] Skipping disabled server: {name}")
 
     async def stop(self):
         """Stop all servers"""
-        print("[bold yellow]🛑 Stopping MCP Servers...[/bold yellow]")
+        builtins.print("[MCP] Stopping MCP Servers...")
         await self.exit_stack.aclose()
 
     def get_all_tools(self) -> list:

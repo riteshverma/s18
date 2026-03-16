@@ -10,6 +10,11 @@ Output format (Markdown):
 - **Clinical summary** – 2–4 sentences.
 - **Key findings** – bullet list of the most important labs, vitals, or history points.
 - **Risk / concern level** – if applicable, state whether risk appears low / moderate / high and why.
+- Include this machine-readable footer exactly (always include all 3 lines):
+  - `Risk Level: <low|moderate|high>`
+  - `Confidence: <0.0-1.0>`
+  - `Flags: ["finding1", "finding2"]` or `Flags: []` if none
+- Prefer stable clinical flag names where possible (e.g. `low_hemoglobin`, `high_wbc`, `low_platelets`).
 
 Do **not** invent data that is not present in the context. If something is unknown, say so explicitly.
 

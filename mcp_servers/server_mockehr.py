@@ -107,6 +107,15 @@ def _extract_payload_from_query(query: str) -> Dict[str, Any]:
         return {}
 
 
+def _original_query_from_session(content: Dict[str, Any]) -> str:
+    """Read original_query from session JSON (context or graph)."""
+    ctx = _normalize_dict(content.get("context"))
+    if ctx.get("original_query"):
+        return ctx.get("original_query", "")
+    graph = _normalize_dict(content.get("graph"))
+    return graph.get("original_query", "")
+
+
 def _internal_patient_from_history(patient_id: str) -> Optional[Dict[str, Any]]:
     if not CONVERSATION_ROOT.exists():
         return None
@@ -117,8 +126,7 @@ def _internal_patient_from_history(patient_id: str) -> Optional[Dict[str, Any]]:
         content = _safe_load_json(path)
         if not content:
             continue
-        context = _normalize_dict(content.get("context"))
-        original_query = context.get("original_query", "")
+        original_query = _original_query_from_session(content)
         found_id = _extract_patient_id_from_query(original_query)
         if found_id != patient_id:
             continue
@@ -164,8 +172,7 @@ def _internal_labs_from_history(patient_id: str) -> List[Dict[str, Any]]:
         content = _safe_load_json(path)
         if not content:
             continue
-        context = _normalize_dict(content.get("context"))
-        original_query = context.get("original_query", "")
+        original_query = _original_query_from_session(content)
         found_id = _extract_patient_id_from_query(original_query)
         if found_id != patient_id:
             continue
@@ -173,7 +180,8 @@ def _internal_labs_from_history(patient_id: str) -> List[Dict[str, Any]]:
         payload = _extract_payload_from_query(original_query)
         if not payload:
             continue
-        timestamp = content.get("timestamp") or _now_iso()
+        graph = _normalize_dict(content.get("graph"))
+        timestamp = content.get("timestamp") or graph.get("created_at") or _now_iso()
         rows.extend(_map_payload_to_labs(patient_id, payload, timestamp))
 
     # Deduplicate by (name, date) while preserving order.

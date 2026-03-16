@@ -139,6 +139,12 @@ EXISTING RELEVANT MEMORIES:
                 # Legacy: single action object
                 elif "action" in parsed:
                     memories = [parsed]
+                
+                # Fallback: model returned {"Hub": "..."} or similar single-key format
+                if not memories:
+                    hub_val = parsed.get("Hub")
+                    if isinstance(hub_val, str) and hub_val.strip():
+                        memories.append({"action": "add", "text": hub_val.strip()})
             
             # Legacy: list of commands
             elif isinstance(parsed, list):

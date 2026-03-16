@@ -13,6 +13,30 @@ from rich.prompt import Prompt
 from rich.panel import Panel
 from rich.text import Text
 
+
+def sanitize_io_keys_list(keys):
+    """Normalize reads/writes to string keys to avoid unhashable dict errors."""
+    if keys is None:
+        return []
+    if not isinstance(keys, list):
+        keys = [keys]
+    out = []
+    for item in keys:
+        if isinstance(item, str):
+            key = item.strip()
+        elif isinstance(item, dict):
+            if len(item) == 1:
+                _, v = next(iter(item.items()))
+                key = v.strip() if isinstance(v, str) and v.strip() else json.dumps(item, sort_keys=True, default=str)
+            else:
+                key = json.dumps(item, sort_keys=True, default=str)
+        else:
+            key = str(item).strip()
+        if key and key not in out:
+            out.append(key)
+    return out
+
+
 class ExecutionContextManager:
     def __init__(self, plan_graph: dict, session_id: str = None, original_query: str = None, file_manifest: list = None, debug_mode: bool = False, api_mode: bool = True):
         # 🎯 Build NetworkX graph with ALL data
@@ -185,8 +209,8 @@ class ExecutionContextManager:
         
         # Get node data for context
         node_data = self.plan_graph.nodes[step_id]
-        reads = node_data.get("reads", [])
-        
+        reads = sanitize_io_keys_list(node_data.get("reads", []))
+
         # Get globals_schema for injection
         globals_schema = self.plan_graph.graph['globals_schema'].copy()
         
@@ -421,7 +445,8 @@ class ExecutionContextManager:
         
         # EXTRACTION LOGIC - Handle both code execution results AND direct agent outputs
         globals_schema = self.plan_graph.graph['globals_schema']
-        
+        writes = sanitize_io_keys_list(node_data.get("writes", []))
+
         if writes:
             for write_key in writes:
                 extracted = False
@@ -505,8 +530,9 @@ class ExecutionContextManager:
     def get_inputs(self, reads):
         """Get input data from graph globals_schema"""
         inputs = {}
+        reads = sanitize_io_keys_list(reads)
         globals_schema = self.plan_graph.graph['globals_schema']
-        
+
         for read_key in reads:
             if read_key in globals_schema:
                 inputs[read_key] = globals_schema[read_key]
@@ -562,11 +588,11 @@ class ExecutionContextManager:
         final_outputs = {}
         all_reads = set()
         all_writes = set()
-        
+
         for node_id in self.plan_graph.nodes:
             node_data = self.plan_graph.nodes[node_id]
-            all_reads.update(node_data.get("reads", []))
-            all_writes.update(node_data.get("writes", []))
+            all_reads.update(sanitize_io_keys_list(node_data.get("reads", [])))
+            all_writes.update(sanitize_io_keys_list(node_data.get("writes", [])))
         
         final_write_keys = all_writes - all_reads
         globals_schema = self.plan_graph.graph['globals_schema']
