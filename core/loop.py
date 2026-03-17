@@ -9,6 +9,7 @@ from memory.context import ExecutionContextManager
 from agents.base_agent import AgentRunner
 from core.utils import log_step, log_error
 from core.event_bus import event_bus
+from core.schemas.clinical import extract_request_payload_from_query, validate_cbc_payload
 from core.model_manager import ModelManager
 from config.settings_loader import get_timeout
 from core.prometheus_metrics import (
@@ -195,6 +196,12 @@ class AgentLoop4:
 
                 # Note: The "Query" node is already 'running' in our bootstrap context
                 if self._is_wise_cbc_payload_query(query):
+                    payload = extract_request_payload_from_query(query)
+                    validated, cbc_err = validate_cbc_payload(payload)
+                    if cbc_err is not None:
+                        msg = f"CBC payload invalid: {cbc_err}"
+                        self.context.mark_failed("Query", msg)
+                        raise RuntimeError(msg)
                     plan_result = {
                         "success": True,
                         "output": {

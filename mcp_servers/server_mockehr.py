@@ -9,6 +9,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from mcp.server.fastmcp import FastMCP
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.schemas.clinical import validate_cbc_payload
+
 
 # MCP protocol safety: avoid stdout noise.
 def print(*args, **kwargs):
@@ -17,7 +23,6 @@ def print(*args, **kwargs):
 
 
 mcp = FastMCP("mockehr")
-PROJECT_ROOT = Path(__file__).parent.parent
 CONVERSATION_ROOT = PROJECT_ROOT / "data" / "conversation_history"
 WISE_MOCKEHR_BASE_URL = os.getenv("WISE_MOCKEHR_BASE_URL", "").rstrip("/")
 HTTP_TIMEOUT_SECONDS = float(os.getenv("MOCKEHR_HTTP_TIMEOUT_SECONDS", "6"))
@@ -180,9 +185,13 @@ def _internal_labs_from_history(patient_id: str) -> List[Dict[str, Any]]:
         payload = _extract_payload_from_query(original_query)
         if not payload:
             continue
+        validated, err = validate_cbc_payload(payload)
+        if err is not None:
+            print(f"[mockehr] CBC payload validation failed (session skipped): {err}")
+            continue
         graph = _normalize_dict(content.get("graph"))
         timestamp = content.get("timestamp") or graph.get("created_at") or _now_iso()
-        rows.extend(_map_payload_to_labs(patient_id, payload, timestamp))
+        rows.extend(_map_payload_to_labs(patient_id, validated.model_dump(), timestamp))
 
     # Deduplicate by (name, date) while preserving order.
     deduped: List[Dict[str, Any]] = []

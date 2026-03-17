@@ -8,7 +8,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from mcp_servers.multi_mcp import MultiMCP
-from mcp_servers.server_mockehr import get_patient_records, search_labs
+from mcp_servers.server_mockehr import get_patient_records, search_labs, _map_payload_to_labs
+from core.schemas.clinical import validate_cbc_payload
 
 
 class _DummyTool:
@@ -145,6 +146,23 @@ def test_search_labs_internal_fallback_from_conversation_history():
     if payload["status"] == "ok":
         assert len(payload["labs"]) > 0
         assert any("Hemoglobin" in str(r.get("name")) for r in payload["labs"])
+
+
+def test_cbc_payload_validation_normalizes_g_l_to_g_dl_in_labs():
+    """Validated CBC payload with unit g/L is normalized; _map_payload_to_labs then gets 14.5 g/dL."""
+    raw = {"hemoglobin": 145, "unit": "g/L", "wbc": 7.0, "platelets": 250000}
+    validated, err = validate_cbc_payload(raw)
+    assert err is None
+    assert validated.hemoglobin == 14.5
+    rows = _map_payload_to_labs(
+        "p-123",
+        validated.model_dump(),
+        "2026-03-17T00:00:00+00:00",
+    )
+    hemoglobin_rows = [r for r in rows if r.get("name") == "Hemoglobin"]
+    assert len(hemoglobin_rows) == 1
+    assert hemoglobin_rows[0]["value"] == 14.5
+    assert hemoglobin_rows[0]["unit"] == "g/dL"
 
 
 def test_route_tool_call_prefers_mockehr_for_ehr_tools():
