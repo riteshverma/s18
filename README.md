@@ -21,6 +21,11 @@
 - **Kept open for future/compliance stage** - `#155`, `#210`, `#211`, and `#183+`
 - Detailed matrix and evidence links: `docs/governance/WISE_S18_issue_reconciliation_2026-03-17.md`
 
+### Fresh architecture reference (latest)
+
+- **Canonical (Mar 2026 sync)** - `docs/architecture/WISE_AI_CDSS_Architecture_2026-03.md`
+- **Previous conceptual baseline** - `docs/architecture/WISE_AI_CDSS_Architecture.md` in wise-ai/TSAI-EAG-Capstone
+
 ### Quick verification (local)
 
 Run API:
