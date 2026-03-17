@@ -150,10 +150,12 @@ def test_search_labs_internal_fallback_from_conversation_history():
 
 def test_cbc_payload_validation_normalizes_g_l_to_g_dl_in_labs():
     """Validated CBC payload with unit g/L is normalized; _map_payload_to_labs then gets 14.5 g/dL."""
-    raw = {"hemoglobin": 145, "unit": "g/L", "wbc": 7.0, "platelets": 250000}
+    raw = {"hemoglobin": 145, "unit": "g/L", "wbc": 7000, "platelets": 250}
     validated, err = validate_cbc_payload(raw)
     assert err is None
     assert validated.hemoglobin == 14.5
+    assert validated.wbc == 7.0
+    assert validated.platelets == 250000.0
     rows = _map_payload_to_labs(
         "p-123",
         validated.model_dump(),

@@ -90,16 +90,46 @@ class CBCPayload(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def normalize_hemoglobin_to_g_dl(cls, data: any) -> any:
-        """If unit is g/L, convert hemoglobin to g/dL before field validation so range check sees g/dL."""
+    def normalize_input_units(cls, data: Any) -> Any:
+        """
+        Normalize supported unit variants before field validation.
+        Canonical internal units:
+        - hemoglobin: g/dL
+        - wbc: 10^3/uL
+        - rbc: 10^6/uL
+        - platelets: /uL
+        """
         if not isinstance(data, dict):
             return data
-        unit = (data.get("unit") or "g/dL")
+        normalized = dict(data)
+
+        # Hemoglobin: g/L -> g/dL
+        unit = (normalized.get("unit") or "g/dL")
         if isinstance(unit, str) and unit.lower().strip() in ("g/l", "g/liter"):
-            hb = data.get("hemoglobin")
+            hb = normalized.get("hemoglobin")
             if hb is not None and isinstance(hb, (int, float)):
-                data = {**data, "hemoglobin": float(hb) / 10.0, "unit": "g/dL"}
-        return data
+                normalized["hemoglobin"] = float(hb) / 10.0
+                normalized["unit"] = "g/dL"
+
+        # WBC canonical: 10^3/uL. Accept common /uL values and convert.
+        # Example: 7000 /uL -> 7.0 10^3/uL
+        wbc = normalized.get("wbc")
+        if isinstance(wbc, (int, float)) and 100.0 < float(wbc) <= 100000.0:
+            normalized["wbc"] = float(wbc) / 1000.0
+
+        # RBC canonical: 10^6/uL. Accept /uL absolute values and convert.
+        # Example: 4_500_000 /uL -> 4.5 10^6/uL
+        rbc = normalized.get("rbc")
+        if isinstance(rbc, (int, float)) and 1000.0 < float(rbc) <= 10000000.0:
+            normalized["rbc"] = float(rbc) / 1_000_000.0
+
+        # Platelets canonical: /uL. Accept 10^3/uL style and convert.
+        # Example: 250 10^3/uL -> 250_000 /uL
+        platelets = normalized.get("platelets")
+        if isinstance(platelets, (int, float)) and 0.0 < float(platelets) <= 10000.0:
+            normalized["platelets"] = float(platelets) * 1000.0
+
+        return normalized
 
 
 def extract_request_payload_from_query(query: str) -> Dict[str, Any]:

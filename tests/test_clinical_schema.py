@@ -53,6 +53,24 @@ def test_cbc_payload_valid_g_l_normalized():
     assert m.unit == "g/dL"
 
 
+def test_cbc_payload_wbc_absolute_normalized():
+    """WBC absolute /uL input is normalized to canonical 10^3/uL."""
+    m = CBCPayload(wbc=7000)
+    assert m.wbc == 7.0
+
+
+def test_cbc_payload_rbc_absolute_normalized():
+    """RBC absolute /uL input is normalized to canonical 10^6/uL."""
+    m = CBCPayload(rbc=4_500_000)
+    assert m.rbc == 4.5
+
+
+def test_cbc_payload_platelets_k_normalized():
+    """Platelets in 10^3/uL style are normalized to /uL."""
+    m = CBCPayload(platelets=250)
+    assert m.platelets == 250_000
+
+
 def test_cbc_payload_partial_empty():
     """Empty or partial payload is valid (all optional)."""
     m = CBCPayload.model_validate({})
@@ -90,22 +108,28 @@ def test_cbc_payload_hemoglobin_g_l_out_of_range_after_normalization():
 
 def test_cbc_payload_wbc_out_of_range():
     with pytest.raises(ValidationError):
-        CBCPayload(wbc=200.0)
+        CBCPayload(wbc=200_000.0)
+
+
+def test_cbc_payload_rbc_out_of_range():
+    with pytest.raises(ValidationError):
+        CBCPayload(rbc=12.0)
 
 
 def test_cbc_payload_platelets_out_of_range():
     with pytest.raises(ValidationError):
-        CBCPayload(platelets=100)
+        CBCPayload(platelets=0.1)
 
 
 # --- validate_cbc_payload helper ---
 
 
 def test_validate_cbc_payload_success():
-    model, err = validate_cbc_payload({"hemoglobin": 12.0, "wbc": 7.0})
+    model, err = validate_cbc_payload({"hemoglobin": 12.0, "wbc": 7000})
     assert err is None
     assert model is not None
     assert model.hemoglobin == 12.0
+    assert model.wbc == 7.0
 
 
 def test_validate_cbc_payload_success_g_l():
