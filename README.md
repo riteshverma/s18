@@ -5,6 +5,42 @@
 - **Python:** 3.11+
 - **Version:** 0.2.0
 
+## Wise-AI Integration Sync (Mar 2026)
+
+### Integration-focused technical changes completed
+
+- **MockEHR + Wise adapter path** - Wise-side MockEHR adapter and S18-compatible tool stubs were integrated for cross-repo interoperability, with S18 consuming MockEHR data through MCP flows.
+- **CBC schema hardening** - Added Pydantic clinical schema validation and follow-up fixes for CBC unit normalization and stable fast/full CDSS payload handling.
+- **MCP routing/tool-calling robustness** - Improved MCP routing, timeout handling, retry/error behavior, and agent alias support for more reliable tool execution.
+- **Supabase integration touchpoints** - Added/expanded Supabase-backed auth verification and optional request/result logging paths used by S18 integration flows.
+
+### Capstone issue-sync status (Wise-AI + S18 reconciliation)
+
+- **Closed as implemented** - `#69`, `#127`, `#128`
+- **Progress-updated and intentionally open** - `#67`, `#73`, `#129`, `#130`, `#156`, `#202`, `#205`, `#206`
+- **Kept open for future/compliance stage** - `#155`, `#210`, `#211`, and `#183+`
+- Detailed matrix and evidence links: `docs/governance/WISE_S18_issue_reconciliation_2026-03-17.md`
+
+### Quick verification (local)
+
+Run API:
+
+```bash
+uv run python api.py
+```
+
+Run targeted integration tests:
+
+```bash
+uv run pytest tests/test_mockehr_mcp.py tests/test_clinical_schema.py test_e2e.py
+```
+
+Optional Supabase readiness check:
+
+```bash
+python scripts/check_supabase_integration.py
+```
+
 ---
 
 ## Features
