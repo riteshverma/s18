@@ -195,13 +195,16 @@ class AgentLoop4:
                     break
 
                 # Note: The "Query" node is already 'running' in our bootstrap context
-                if self._is_wise_cbc_payload_query(query):
+                # Validate CBC payloads for both fast AND full modes
+                if self._is_cbc_payload_query(query):
                     payload = extract_request_payload_from_query(query)
                     validated, cbc_err = validate_cbc_payload(payload)
                     if cbc_err is not None:
                         msg = f"CBC payload invalid: {cbc_err}"
                         self.context.mark_failed("Query", msg)
                         raise RuntimeError(msg)
+
+                if self._is_cbc_payload_query(query) and self._is_fast_mode(query):
                     plan_result = {
                         "success": True,
                         "output": {
@@ -223,7 +226,7 @@ class AgentLoop4:
                             "ambiguity_notes": [],
                         },
                     }
-                    log_step("⚡ Skipped Planner for CBC payload query", symbol="⚡")
+                    log_step("⚡ Skipped Planner for CBC payload query (fast mode)", symbol="⚡")
                 else:
                     async def run_planner():
                         return await self.agent_runner.run_agent(
@@ -284,9 +287,9 @@ class AgentLoop4:
                     if isinstance(first_node, dict) and first_node.get("id"):
                         out["next_step_id"] = first_node["id"]
 
-                # Fast-path for WISE CBC payloads:
+                # Fast-path for WISE CBC payloads (fast mode only):
                 # avoid expensive multi-step plans that frequently exceed frontend timeout windows.
-                if self._is_wise_cbc_payload_query(query):
+                if self._is_cbc_payload_query(query) and self._is_fast_mode(query):
                     out["plan_graph"] = {
                         "nodes": [
                             {
@@ -432,16 +435,19 @@ class AgentLoop4:
             ORCHESTRATOR_RUNS_TOTAL.labels(status=final_status).inc()
             ORCHESTRATOR_RUN_LATENCY_MS.observe(elapsed_ms(run_start_ms))
 
-    def _is_wise_cbc_payload_query(self, query: str) -> bool:
+    def _is_cbc_payload_query(self, query: str) -> bool:
+        """Detect any CBC payload query (fast or full mode)."""
         q = (query or "").lower()
         return (
             "[patient id:" in q
-            and "[execution mode: fast]" in q
             and "request:" in q
             and "hemoglobin" in q
             and "wbc" in q
             and "platelets" in q
         )
+
+    def _is_fast_mode(self, query: str) -> bool:
+        return "[execution mode: fast]" in (query or "").lower()
 
     def _should_replan(self):
         """
@@ -807,6 +813,7 @@ class AgentLoop4:
             "ResearchAgent": "RetrieverAgent",
             "RAG": "RetrieverAgent",
             "RagAgent": "RetrieverAgent",
+            "ResponseAgent": "FormatterAgent",
         }
         agent_type = agent_aliases.get(agent_type, agent_type)
         

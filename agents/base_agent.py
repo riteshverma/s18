@@ -35,6 +35,7 @@ AGENT_ALIASES = {
     "CBCAgent": "EHRDataMinerAgent",
     "TrendAgent": "EHRDataMinerAgent",
     "ActionAgent": "FormatterAgent",
+    "ResponseAgent": "FormatterAgent",
 }
 
 
@@ -222,7 +223,13 @@ class AgentRunner:
         agent_type = self._agent_aliases.get(agent_type, agent_type)
 
         if agent_type not in self.agent_configs:
-            raise ValueError(f"Unknown agent type: {agent_type}")
+            import sys
+            fallback = "ThinkerAgent"
+            print(
+                f"[WARN] Unknown agent type '{agent_type}'; falling back to {fallback}",
+                file=sys.stderr,
+            )
+            agent_type = fallback
             
         config = self.agent_configs[agent_type]
         

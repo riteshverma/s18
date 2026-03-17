@@ -12,7 +12,9 @@ from pydantic import ValidationError
 
 from core.schemas.clinical import (
     CBCPayload,
+    ClinicalAssessment,
     extract_request_payload_from_query,
+    try_parse_clinical_assessment,
     validate_cbc_payload,
 )
 
@@ -156,3 +158,75 @@ def test_validate_cbc_payload_failure_invalid_value():
     assert model is None
     assert err is not None
     assert "outside" in (err or "").lower()
+
+
+# --- normalization_notes audit trail ---
+
+
+def test_normalization_notes_wbc():
+    m = CBCPayload(wbc=7000)
+    assert m.wbc == 7.0
+    assert any("wbc:" in n and "7000" in n for n in m.normalization_notes)
+
+
+def test_normalization_notes_hemoglobin_g_l():
+    m = CBCPayload(hemoglobin=145, unit="g/L")
+    assert m.hemoglobin == 14.5
+    assert any("hemoglobin:" in n and "g/L" in n for n in m.normalization_notes)
+
+
+def test_normalization_notes_platelets():
+    m = CBCPayload(platelets=250)
+    assert m.platelets == 250_000
+    assert any("platelets:" in n and "250" in n for n in m.normalization_notes)
+
+
+def test_normalization_notes_empty_when_no_conversion():
+    m = CBCPayload(hemoglobin=12.0, wbc=7.0, rbc=4.5, platelets=250000)
+    assert m.normalization_notes == []
+
+
+# --- ClinicalAssessment output schema ---
+
+
+def test_clinical_assessment_valid():
+    a = ClinicalAssessment(
+        response="Patient shows mild anemia.",
+        risk_level="moderate",
+        confidence=0.9,
+        flags=["low_hemoglobin"],
+    )
+    assert a.risk_level == "moderate"
+    assert a.confidence == 0.9
+
+
+def test_clinical_assessment_invalid_risk_level():
+    with pytest.raises(ValidationError):
+        ClinicalAssessment(
+            response="text", risk_level="unknown", confidence=0.5
+        )
+
+
+def test_clinical_assessment_confidence_out_of_range():
+    with pytest.raises(ValidationError):
+        ClinicalAssessment(
+            response="text", risk_level="low", confidence=1.5
+        )
+
+
+def test_try_parse_clinical_assessment_valid_dict():
+    raw = {
+        "response": "OK",
+        "risk_level": "low",
+        "confidence": 0.8,
+        "flags": [],
+    }
+    result = try_parse_clinical_assessment(raw)
+    assert result is not None
+    assert result.risk_level == "low"
+
+
+def test_try_parse_clinical_assessment_invalid_returns_none():
+    assert try_parse_clinical_assessment({"bad": "data"}) is None
+    assert try_parse_clinical_assessment(None) is None
+    assert try_parse_clinical_assessment("not json {{{") is None

@@ -4,7 +4,7 @@ Provides validation, physiological bounds, and unit normalization (e.g. g/L -> g
 """
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -34,6 +34,7 @@ class CBCPayload(BaseModel):
     rbc: Optional[float] = Field(None, description="RBC in 10^6/uL")
     platelets: Optional[float] = Field(None, description="Platelets per uL")
     unit: Optional[str] = Field("g/dL", description="Unit for hemoglobin: g/dL or g/L (normalized to g/dL)")
+    normalization_notes: List[str] = Field(default_factory=list, description="Audit trail of unit conversions applied")
 
     @field_validator("hemoglobin")
     @classmethod
@@ -102,34 +103,81 @@ class CBCPayload(BaseModel):
         if not isinstance(data, dict):
             return data
         normalized = dict(data)
+        notes: List[str] = list(normalized.get("normalization_notes") or [])
 
         # Hemoglobin: g/L -> g/dL
         unit = (normalized.get("unit") or "g/dL")
         if isinstance(unit, str) and unit.lower().strip() in ("g/l", "g/liter"):
             hb = normalized.get("hemoglobin")
             if hb is not None and isinstance(hb, (int, float)):
-                normalized["hemoglobin"] = float(hb) / 10.0
+                converted = float(hb) / 10.0
+                notes.append(f"hemoglobin: {hb} g/L -> {converted} g/dL")
+                normalized["hemoglobin"] = converted
                 normalized["unit"] = "g/dL"
 
         # WBC canonical: 10^3/uL. Accept common /uL values and convert.
-        # Example: 7000 /uL -> 7.0 10^3/uL
         wbc = normalized.get("wbc")
         if isinstance(wbc, (int, float)) and 100.0 < float(wbc) <= 100000.0:
-            normalized["wbc"] = float(wbc) / 1000.0
+            converted = float(wbc) / 1000.0
+            notes.append(f"wbc: {wbc} /uL -> {converted} 10^3/uL")
+            normalized["wbc"] = converted
 
         # RBC canonical: 10^6/uL. Accept /uL absolute values and convert.
-        # Example: 4_500_000 /uL -> 4.5 10^6/uL
         rbc = normalized.get("rbc")
         if isinstance(rbc, (int, float)) and 1000.0 < float(rbc) <= 10000000.0:
-            normalized["rbc"] = float(rbc) / 1_000_000.0
+            converted = float(rbc) / 1_000_000.0
+            notes.append(f"rbc: {rbc} /uL -> {converted} 10^6/uL")
+            normalized["rbc"] = converted
 
         # Platelets canonical: /uL. Accept 10^3/uL style and convert.
-        # Example: 250 10^3/uL -> 250_000 /uL
         platelets = normalized.get("platelets")
         if isinstance(platelets, (int, float)) and 0.0 < float(platelets) <= 10000.0:
-            normalized["platelets"] = float(platelets) * 1000.0
+            converted = float(platelets) * 1000.0
+            notes.append(f"platelets: {platelets} 10^3/uL -> {converted} /uL")
+            normalized["platelets"] = converted
 
+        normalized["normalization_notes"] = notes
         return normalized
+
+
+class ClinicalAssessment(BaseModel):
+    """
+    Structured output schema for clinical reasoning agents.
+    Validates that agent responses have the expected shape and value ranges.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    response: str = Field(..., description="Clinical narrative / interpretation text")
+    risk_level: Literal["low", "moderate", "high", "critical"] = Field(
+        ..., description="Overall risk classification"
+    )
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Model confidence 0-1")
+    flags: List[str] = Field(default_factory=list, description="Clinical flags (e.g. low_hemoglobin)")
+    normalization_notes: List[str] = Field(
+        default_factory=list, description="Unit conversion notes from input normalization"
+    )
+
+
+def try_parse_clinical_assessment(raw: Any) -> Optional["ClinicalAssessment"]:
+    """
+    Best-effort parse of agent output into ClinicalAssessment.
+    Returns the model on success, None if the output doesn't match the schema.
+    """
+    if raw is None:
+        return None
+    data = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return ClinicalAssessment.model_validate(data)
+    except Exception:
+        return None
 
 
 def extract_request_payload_from_query(query: str) -> Dict[str, Any]:
