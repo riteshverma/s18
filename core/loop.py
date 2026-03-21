@@ -6,15 +6,22 @@ import time
 import ast
 import json
 from memory.context import ExecutionContextManager
-from agents.base_agent import AgentRunner
+from agents.base_agent import AgentRunner, resolve_agent_alias
 from core.utils import log_step, log_error
+from core.plan_graph_validate import validate_merged_plan_graph
 from core.event_bus import event_bus
 from core.schemas.clinical import extract_request_payload_from_query, validate_cbc_payload
 from core.model_manager import ModelManager
-from config.settings_loader import get_timeout
+from config.settings_loader import get_timeout, reload_settings
 from core.prometheus_metrics import (
     ORCHESTRATOR_RUNS_TOTAL,
     ORCHESTRATOR_RUN_LATENCY_MS,
+    ORCHESTRATOR_PLANNER_LATENCY_MS,
+    ORCHESTRATOR_STEP_LATENCY_MS,
+    ORCHESTRATOR_DAG_ITERATIONS,
+    ORCHESTRATOR_REPLAN_TOTAL,
+    ORCHESTRATOR_STEP_RETRIES_TOTAL,
+    ORCHESTRATOR_DAG_STALL_ITERATIONS,
     elapsed_ms,
     now_ms,
 )
@@ -130,7 +137,52 @@ class AgentLoop4:
         finally:
             self._tasks.discard(task)
 
-    async def run(self, query, file_manifest, globals_schema, uploaded_files, session_id=None, memory_context=None):
+    def _orchestrator_settings(self):
+        s = reload_settings().get("orchestrator", {})
+        return {
+            "max_dag_iterations": int(s.get("max_dag_iterations", 40)),
+            "max_react_turns_per_step": int(s.get("max_react_turns_per_step", 15)),
+            "step_timeout_multiplier": float(s.get("step_timeout_multiplier", 1.5)),
+            "max_failure_replans": int(s.get("max_failure_replans", 2)),
+            "max_step_retries": int(s.get("max_step_retries", 2)),
+        }
+
+    def _summarize_completed_for_replan(self, context):
+        """Compact summary of finished steps for failure replanning prompts."""
+        rows = []
+        for nid, data in context.plan_graph.nodes(data=True):
+            if nid in ("ROOT", "Query"):
+                continue
+            if data.get("status") != "completed":
+                continue
+            agent = data.get("agent", "?")
+            desc = (data.get("description") or "")[:120]
+            writes = sanitize_io_keys_list(data.get("writes", []))
+            rows.append({"id": nid, "agent": agent, "description": desc, "writes": writes})
+        return rows
+
+    async def run(
+        self,
+        query,
+        file_manifest,
+        globals_schema,
+        uploaded_files,
+        session_id=None,
+        memory_context=None,
+        source_system: str = "s18",
+    ):
+        """Run the agent loop; ``source_system`` tags the run (e.g. Wise) for Ollama model routing."""
+        from config.run_context import reset_run_source_system, set_run_source_system
+
+        token = set_run_source_system(source_system)
+        try:
+            return await self._run_inner(
+                query, file_manifest, globals_schema, uploaded_files, session_id, memory_context
+            )
+        finally:
+            reset_run_source_system(token)
+
+    async def _run_inner(self, query, file_manifest, globals_schema, uploaded_files, session_id=None, memory_context=None):
         run_start_ms = now_ms()
         final_status = "failed"
         # 🟢 PHASE 0: BOOTSTRAP CONTEXT (Immediate VS Code feedback)
@@ -228,19 +280,29 @@ class AgentLoop4:
                     }
                     log_step("⚡ Skipped Planner for CBC payload query (fast mode)", symbol="⚡")
                 else:
+                    planner_input = {
+                        "original_query": query,
+                        "planning_strategy": self.strategy,
+                        "globals_schema": self.context.plan_graph.graph.get("globals_schema", {}),
+                        "file_manifest": file_manifest,
+                        "file_profiles": file_profiles,
+                        "memory_context": memory_context,
+                    }
+                    frp = getattr(self.context, "_failure_replan_payload", None)
+                    if frp:
+                        planner_input.update(frp)
+                        self.context._failure_replan_payload = None
+
                     async def run_planner():
-                        return await self.agent_runner.run_agent(
-                            "PlannerAgent",
-                            {
-                                "original_query": query,
-                                "planning_strategy": self.strategy,
-                                "globals_schema": self.context.plan_graph.graph.get("globals_schema", {}),
-                                "file_manifest": file_manifest,
-                                "file_profiles": file_profiles,
-                                "memory_context": memory_context
-                            }
-                        )
+                        return await self.agent_runner.run_agent("PlannerAgent", planner_input)
+
+                    planner_t0 = now_ms()
                     plan_result = await self._track_task(retry_with_backoff(run_planner))
+                    ORCHESTRATOR_PLANNER_LATENCY_MS.observe(elapsed_ms(planner_t0))
+                    log_step(
+                        f"[PLANNER] planner_done_ms={elapsed_ms(planner_t0):.1f}",
+                        symbol="📋",
+                    )
 
                 if self.context.stop_requested:
                     break
@@ -386,6 +448,17 @@ class AgentLoop4:
                 new_plan_graph = plan_result["output"]["plan_graph"]
                 self._merge_plan_into_context(new_plan_graph)
 
+                val_errs, val_warns = validate_merged_plan_graph(self.context.plan_graph)
+                self.context.plan_validation_errors = val_errs
+                self.context.plan_validation_warnings = val_warns
+                for w in val_warns:
+                    log_step(f"[PLAN_VALIDATE] {w}", symbol="⚠️")
+                if val_errs:
+                    for e in val_errs:
+                        log_error(f"[PLAN_VALIDATE] {e}")
+                    self.context.mark_failed("Query", "; ".join(val_errs))
+                    raise RuntimeError(f"Plan graph validation failed: {val_errs}")
+
                 try:
                     # Phase 4: Execute DAG
                     await self._track_task(self._execute_dag(self.context))
@@ -393,10 +466,35 @@ class AgentLoop4:
                     if self.context.stop_requested:
                         break
 
+                    if getattr(self.context, "failure_replan_requested", False):
+                        self.context.failure_replan_requested = False
+                        ORCHESTRATOR_REPLAN_TOTAL.labels(reason="failure").inc()
+                        log_step(
+                            "[EXECUTOR] failure_replan: invoking PlannerAgent with recovery context",
+                            symbol="🔄",
+                        )
+                        self.context.plan_graph.nodes["Query"]["status"] = "running"
+                        self.context._save_session()
+                        continue
+
+                    has_failed = any(
+                        self.context.plan_graph.nodes[n].get("status") == "failed"
+                        for n in self.context.plan_graph.nodes
+                    )
+                    if has_failed:
+                        final_status = "failed"
+                        return self.context
+
+                    # Successful DAG completion — reset failure replan budget for future turns
+                    self.context.failure_replan_attempts = 0
+
                     # Phase 5: Check for Adaptive Re-Planning (Dead End Discovery)
                     if self._should_replan():
-                        log_step("♻️ Adaptive Re-planning: Clarification resolved, formulating next steps...", symbol="🔄")
-                        # Reactivate Query node for UI
+                        ORCHESTRATOR_REPLAN_TOTAL.labels(reason="clarification").inc()
+                        log_step(
+                            "♻️ Adaptive Re-planning: Clarification resolved, formulating next steps...",
+                            symbol="🔄",
+                        )
                         self.context.plan_graph.nodes["Query"]["status"] = "running"
                         self.context._save_session()
                         continue
@@ -447,7 +545,21 @@ class AgentLoop4:
         )
 
     def _is_fast_mode(self, query: str) -> bool:
-        return "[execution mode: fast]" in (query or "").lower()
+        """
+        Fast mode: explicit tag, or structured WISE CBC payload without explicit full mode.
+
+        WISE often omits ``[execution mode: fast]``; defaulting structured CBC to fast keeps
+        runs within typical client poll windows and aligns Thinker output with client-side CBC parsing.
+        Use ``[execution mode: full]`` when a multi-step planner run is required.
+        """
+        q = (query or "").lower()
+        if "[execution mode: full]" in q:
+            return False
+        if "[execution mode: fast]" in q:
+            return True
+        if self._is_cbc_payload_query(query or ""):
+            return True
+        return False
 
     def _should_replan(self):
         """
@@ -617,178 +729,223 @@ class AgentLoop4:
         self.context._save_session()
         log_step("✅ Plan merged into execution context", symbol="🌳")
 
+    def _request_failure_replan(self, context, failed_step_id: str, err_msg: str, step_data: dict):
+        """After a terminal step failure: skip downstream, optionally queue PlannerAgent recovery."""
+        orch = self._orchestrator_settings()
+        max_fr = orch["max_failure_replans"]
+        context.skip_pending_descendants(failed_step_id)
+        if context.failure_replan_attempts >= max_fr:
+            log_error(
+                f"[EXECUTOR] failure_replan exhausted ({context.failure_replan_attempts}/{max_fr}) for {failed_step_id}"
+            )
+            context.failure_replan_requested = False
+            return
+        context.failure_replan_attempts += 1
+        context.failure_replan_requested = True
+        context._failure_replan_payload = {
+            "replan_after_failure": True,
+            "failed_step_id": failed_step_id,
+            "failure_error": (err_msg or "")[:2000],
+            "failed_agent": step_data.get("agent"),
+            "completed_steps_summary": self._summarize_completed_for_replan(context),
+            "globals_keys": list(context.plan_graph.graph.get("globals_schema", {}).keys()),
+        }
+        log_step(
+            f"[EXECUTOR] failure_replan scheduled (attempt {context.failure_replan_attempts}/{max_fr}) "
+            f"after {failed_step_id}",
+            symbol="🔄",
+        )
+
     async def _execute_dag(self, context):
         """Execute DAG with visualization - DEBUGGING MODE"""
-        
+        orch = self._orchestrator_settings()
+        max_iterations = orch["max_dag_iterations"]
+        MAX_STEP_RETRIES = orch["max_step_retries"]
+
         # Get plan_graph structure for visualization
         plan_graph = {
             "nodes": [
-                {"id": node_id, **node_data} 
+                {"id": node_id, **node_data}
                 for node_id, node_data in context.plan_graph.nodes(data=True)
             ],
             "links": [
                 {"source": source, "target": target}
                 for source, target in context.plan_graph.edges()
-            ]
+            ],
         }
-        
-        # Create visualizer
+
         visualizer = ExecutionVisualizer(plan_graph)
         console = Console()
-        
-        # 🔧 DEBUGGING MODE: No Live display, just regular prints
-        max_iterations = 20
+
         iteration = 0
-        
-        # ===== COST THRESHOLD ENFORCEMENT =====
-        from config.settings_loader import reload_settings
         settings = reload_settings()
         max_cost = settings.get("agent", {}).get("max_cost_per_run", 0.50)
         warn_cost = settings.get("agent", {}).get("warn_at_cost", 0.25)
         cost_warning_shown = False
 
         while not context.all_done():
+            iteration += 1
+            if iteration > max_iterations:
+                log_error(
+                    f"[EXECUTOR] max DAG iterations ({max_iterations}) exceeded — stopping scheduler"
+                )
+                break
+
             if context.stop_requested:
                 console.print("[yellow]🛑 Aborting execution: Cleaning up nodes...[/yellow]")
-                # Cleanup: Mark any 'running' nodes as 'stopped' to prevent zombie spinners in UI
                 for n_id in context.plan_graph.nodes:
                     if context.plan_graph.nodes[n_id].get("status") == "running":
                         context.plan_graph.nodes[n_id]["status"] = "stopped"
                 context._save_session()
                 break
-            
-            # Get ready nodes
+
             ready_steps = context.get_ready_steps()
-            
-            # 🛡️ DEFENSIVE: Filter out steps that are not pending (prevents loops)
             ready_steps = [s for s in ready_steps if context.plan_graph.nodes[s]["status"] == "pending"]
-            
+
+            log_step(
+                f"[EXECUTOR] dag_iter={iteration}/{max_iterations} ready={ready_steps}",
+                symbol="⚙️",
+            )
+
             if not ready_steps:
-                # Check for running steps or waiting steps
                 running_or_waiting = any(
-                    context.plan_graph.nodes[n]['status'] in ['running', 'waiting_input']
+                    context.plan_graph.nodes[n]["status"] in ["running", "waiting_input"]
                     for n in context.plan_graph.nodes
                 )
-                
+
                 if not running_or_waiting:
-                    # If no ready steps, and nothing is running/waiting, and we aren't "all_done" (maybe orphans?)
-                    # Check if everything is completed or skipped
                     is_complete = all(
-                        context.plan_graph.nodes[n]['status'] in ['completed', 'skipped', 'cost_exceeded']
+                        context.plan_graph.nodes[n]["status"] in ["completed", "skipped", "cost_exceeded"]
                         for n in context.plan_graph.nodes
                         if n != "ROOT"
                     )
+                    if not is_complete and not context.all_done():
+                        ORCHESTRATOR_DAG_STALL_ITERATIONS.inc()
                     if is_complete:
                         break
-                
-                # Wait for progress
+
                 await asyncio.sleep(0.5)
                 continue
 
-            # Show current state (only when we found work to do)
             try:
                 console.print(visualizer.get_layout())
             except Exception as e:
                 console.print(f"[dim]Note: Could not refresh terminal UI: {e}[/dim]")
 
-            # Mark running
             for step_id in ready_steps:
                 visualizer.mark_running(step_id)
                 context.mark_running(step_id)
-            
-            # ✅ EXECUTE AGENTS FOR REAL
+
             tasks = []
+            step_start_times = {}
             for step_id in ready_steps:
-                # Log step start with description
                 step_data = context.get_step_data(step_id)
                 desc = step_data.get("agent_prompt", step_data.get("description", "No description"))[:60]
                 log_step(f"🔄 Starting {step_id} ({step_data['agent']}): {desc}...", symbol="🚀")
-                
                 visualizer.mark_running(step_id)
                 context.mark_running(step_id)
+                step_start_times[step_id] = now_ms()
                 tasks.append(self._track_task(self._execute_step(step_id, context)))
 
             results = await self._track_task(asyncio.gather(*tasks, return_exceptions=True))
 
-            # Step-level retry configuration
-            MAX_STEP_RETRIES = 2
-            
-            # Process results (with step-level retry)
+            abort_dag = False
             for step_id, result in zip(ready_steps, results):
                 step_data = context.get_step_data(step_id)
-                retry_count = step_data.get('_retry_count', 0)
-                
-                # ✅ HANDLE AWAITING INPUT
+                retry_count = step_data.get("_retry_count", 0)
+                agent_label = step_data.get("agent", "unknown")
+
                 if isinstance(result, dict) and result.get("status") == "waiting_input":
-                     visualizer.mark_waiting(step_id) 
-                     context.plan_graph.nodes[step_id]["status"] = "waiting_input"
-                     # Preserve partial output
-                     if "output" in result:
-                         context.plan_graph.nodes[step_id]["output"] = result["output"]
-                     context._save_session()
-                     log_step(f"⏳ {step_id}: Waiting for user input...", symbol="⏳")
-                     continue
-                
+                    visualizer.mark_waiting(step_id)
+                    context.plan_graph.nodes[step_id]["status"] = "waiting_input"
+                    if "output" in result:
+                        context.plan_graph.nodes[step_id]["output"] = result["output"]
+                    context._save_session()
+                    log_step(f"⏳ {step_id}: Waiting for user input...", symbol="⏳")
+                    continue
+
                 if isinstance(result, Exception):
-                    # Check if we should retry this step
                     if retry_count < MAX_STEP_RETRIES:
-                        step_data['_retry_count'] = retry_count + 1
-                        context.plan_graph.nodes[step_id]['status'] = 'pending'  # Reset to pending for retry
-                        log_step(f"🔄 Retrying {step_id} (attempt {retry_count + 1}/{MAX_STEP_RETRIES}): {str(result)}", symbol="🔄")
+                        step_data["_retry_count"] = retry_count + 1
+                        context.plan_graph.nodes[step_id]["status"] = "pending"
+                        ORCHESTRATOR_STEP_RETRIES_TOTAL.labels(agent=agent_label).inc()
+                        log_step(
+                            f"🔄 Retrying {step_id} (attempt {retry_count + 1}/{MAX_STEP_RETRIES}): {str(result)}",
+                            symbol="🔄",
+                        )
                     else:
                         visualizer.mark_failed(step_id, result)
                         context.mark_failed(step_id, str(result))
                         log_error(f"❌ Failed {step_id} after {MAX_STEP_RETRIES} retries: {str(result)}")
+                        self._request_failure_replan(context, step_id, str(result), step_data)
+                        abort_dag = True
+                        break
                 elif result["success"]:
                     visualizer.mark_completed(step_id)
                     await context.mark_done(step_id, result["output"])
-                    log_step(f"✅ Completed {step_id} ({step_data['agent']})", symbol="✅")
+                    ms = elapsed_ms(step_start_times.get(step_id, now_ms()))
+                    ORCHESTRATOR_STEP_LATENCY_MS.labels(agent=agent_label).observe(ms)
+                    log_step(
+                        f"✅ Completed {step_id} ({step_data['agent']}) step_ms={ms:.1f}",
+                        symbol="✅",
+                    )
                 else:
-                    # Agent returned failure - also retry
                     if retry_count < MAX_STEP_RETRIES:
-                        step_data['_retry_count'] = retry_count + 1
-                        context.plan_graph.nodes[step_id]['status'] = 'pending'
-                        log_step(f"🔄 Retrying {step_id} (attempt {retry_count + 1}/{MAX_STEP_RETRIES}): {result['error']}", symbol="🔄")
+                        step_data["_retry_count"] = retry_count + 1
+                        context.plan_graph.nodes[step_id]["status"] = "pending"
+                        ORCHESTRATOR_STEP_RETRIES_TOTAL.labels(agent=agent_label).inc()
+                        log_step(
+                            f"🔄 Retrying {step_id} (attempt {retry_count + 1}/{MAX_STEP_RETRIES}): {result['error']}",
+                            symbol="🔄",
+                        )
                     else:
                         visualizer.mark_failed(step_id, result["error"])
                         context.mark_failed(step_id, result["error"])
                         log_error(f"❌ Failed {step_id} after {MAX_STEP_RETRIES} retries: {result['error']}")
+                        self._request_failure_replan(context, step_id, result.get("error", ""), step_data)
+                        abort_dag = True
+                        break
 
-            # ===== COST THRESHOLD CHECK =====
+            if abort_dag or context.failure_replan_requested:
+                ORCHESTRATOR_DAG_ITERATIONS.observe(iteration)
+                console.print(visualizer.get_layout())
+                context.plan_graph.graph["status"] = "replanning"
+                context._auto_save()
+                return
+
             accumulated_cost = sum(
-                context.plan_graph.nodes[n].get('cost', 0) 
+                context.plan_graph.nodes[n].get("cost", 0)
                 for n in context.plan_graph.nodes
-                if context.plan_graph.nodes[n].get('status') == 'completed'
+                if context.plan_graph.nodes[n].get("status") == "completed"
             )
-            
-            # Warning threshold
+
             if not cost_warning_shown and accumulated_cost >= warn_cost:
                 log_step(f"⚠️ Cost Warning: ${accumulated_cost:.4f} (threshold: ${warn_cost:.2f})", symbol="💰")
                 cost_warning_shown = True
-            
-            # Hard stop threshold
+
             if accumulated_cost >= max_cost:
                 log_error(f"🛑 Cost Exceeded: ${accumulated_cost:.4f} > ${max_cost:.2f}")
-                context.plan_graph.graph['status'] = 'cost_exceeded'
-                context.plan_graph.graph['final_cost'] = accumulated_cost
+                context.plan_graph.graph["status"] = "cost_exceeded"
+                context.plan_graph.graph["final_cost"] = accumulated_cost
                 break
 
-        # Final state
+        ORCHESTRATOR_DAG_ITERATIONS.observe(iteration)
         console.print(visualizer.get_layout())
-        
-        # Determine and save final status
-        if context.stop_requested:
-             context.plan_graph.graph['status'] = 'stopped'
-        elif any(context.plan_graph.nodes[n]['status'] == 'failed' for n in context.plan_graph.nodes):
-             context.plan_graph.graph['status'] = 'failed'
+
+        if context.failure_replan_requested:
+            context.plan_graph.graph["status"] = "replanning"
+        elif context.stop_requested:
+            context.plan_graph.graph["status"] = "stopped"
+        elif any(context.plan_graph.nodes[n]["status"] == "failed" for n in context.plan_graph.nodes):
+            context.plan_graph.graph["status"] = "failed"
         elif context.all_done():
-             context.plan_graph.graph['status'] = 'completed'
+            context.plan_graph.graph["status"] = "completed"
+            context.failure_replan_attempts = 0
         else:
-             # Max iterations or stalled
-             context.plan_graph.graph['status'] = 'failed'
-        
+            context.plan_graph.graph["status"] = "failed"
+
         context._auto_save()
-        
+
         if context.all_done():
             console.print("🎉 All tasks completed!")
 
@@ -805,17 +962,7 @@ class AgentLoop4:
         step_data["reads"] = reads
         step_data["writes"] = writes
 
-        agent_type = step_data["agent"]
-        # Normalize common planner aliases to configured agent names
-        agent_aliases = {
-            "SummarizationAgent": "SummarizerAgent",
-            "SummaryAgent": "SummarizerAgent",
-            "ResearchAgent": "RetrieverAgent",
-            "RAG": "RetrieverAgent",
-            "RagAgent": "RetrieverAgent",
-            "ResponseAgent": "FormatterAgent",
-        }
-        agent_type = agent_aliases.get(agent_type, agent_type)
+        agent_type = resolve_agent_alias(step_data["agent"])
         
         # Get inputs from NetworkX graph
         inputs = context.get_inputs(step_data.get("reads", []))
@@ -846,17 +993,16 @@ class AgentLoop4:
                 
             return payload
 
-        # Execute with ReAct Loop (Max 15 turns)
-        max_turns = 15
+        orch = self._orchestrator_settings()
+        max_turns = orch["max_react_turns_per_step"]
+        step_timeout = int(orch["step_timeout_multiplier"] * get_timeout())
         current_input = build_agent_input()
         iterations_data = []
-        
+
         for turn in range(1, max_turns + 1):
             log_step(f"🔄 {agent_type} Iteration {turn}/{max_turns}", symbol="🔄")
-            
+
             # Run Agent (with retry for transient failures like rate limits)
-            # Per-step timeout: 1.5x Ollama timeout so one slow LLM call + overhead can complete
-            step_timeout = int(1.5 * get_timeout())
             async def run_agent_step():
                 return await self.agent_runner.run_agent(agent_type, current_input)
 
@@ -1021,8 +1167,3 @@ class AgentLoop4:
         last_output = iterations_data[-1]["output"] if iterations_data else {"error": "No output produced"}
         # Ensure it has a valid structure if possible, or just pass it through
         return {"success": True, "output": last_output}
-
-    async def _handle_failures(self, context):
-        """Handle failures via mid-session replanning"""
-        # TODO: Implement mid-session replanning with PlannerAgent
-        log_error("Mid-session replanning not yet implemented")

@@ -10,21 +10,47 @@ from PIL import Image
 from datetime import datetime
 import os
 
+
+def _apply_wise_ollama_model(model_provider: str, model_name: str, fresh_settings: dict) -> tuple[str, str]:
+    """
+    For Wise-scoped runs using Ollama, map to MedGemma vs Gemma per ``wise_ai`` settings.
+    Non-Ollama providers and non-Wise ``source_system`` values are unchanged.
+    """
+    from config.run_context import get_run_source_system
+
+    if model_provider != "ollama":
+        return model_provider, model_name
+    wise = fresh_settings.get("wise_ai") or {}
+    src = get_run_source_system()
+    allowed = {s.strip().lower() for s in wise.get("source_systems", []) if isinstance(s, str)}
+    if src not in allowed:
+        return model_provider, model_name
+    ollama_models = wise.get("ollama_models") or {}
+    gemma_tag = ollama_models.get("gemma", "gemma3:4b")
+    medgemma_tag = ollama_models.get("medgemma", "medgemma:4b")
+    if wise.get("use_medgemma", False):
+        return model_provider, medgemma_tag
+    return model_provider, gemma_tag
+
+
 # Alias map: planner-invented agent names -> actual agents in agent_config.yaml
 # Includes WISE CDSS architecture names so plans can use doc terminology (no refactor needed).
 AGENT_ALIASES = {
-    # General / planner-invented
+    # General / planner-invented (single source of truth; also used by AgentLoop4)
     "SearchLabsAgent": "RetrieverAgent",
     "SummarizationAgent": "SummarizerAgent",
+    "SummaryAgent": "SummarizerAgent",
     "NoteWriterAgent": "FormatterAgent",
     "NoteWriter": "FormatterAgent",
     "RAG": "RetrieverAgent",
+    "RagAgent": "RetrieverAgent",
     "QA": "QAAgent",
     "ParserAgent": "DistillerAgent",
     "ReportGeneratorAgent": "FormatterAgent",
     "NameExtractorAgent": "RetrieverAgent",
     "InterpretationAgent": "ThinkerAgent",
     "System": "ThinkerAgent",
+    "ResponseAgent": "FormatterAgent",
     # WISE CDSS architecture names -> existing S18 agents
     "ClinicalReasoningAgent": "ThinkerAgent",
     "ContextSynthesisAgent": "DistillerAgent",
@@ -35,8 +61,12 @@ AGENT_ALIASES = {
     "CBCAgent": "EHRDataMinerAgent",
     "TrendAgent": "EHRDataMinerAgent",
     "ActionAgent": "FormatterAgent",
-    "ResponseAgent": "FormatterAgent",
 }
+
+
+def resolve_agent_alias(agent_type: str) -> str:
+    """Map planner-invented names to configured agents in agent_config.yaml."""
+    return AGENT_ALIASES.get(agent_type, agent_type)
 
 
 class AgentRunner:
@@ -306,7 +336,11 @@ class AgentRunner:
             else:
                 model_provider = agent_settings.get("model_provider", "gemini")
                 model_name = agent_settings.get("default_model", "gemini-2.5-flash")
-            
+
+            model_provider, model_name = _apply_wise_ollama_model(
+                model_provider, model_name, fresh_settings
+            )
+
             log_step(f"📡 Using {model_provider}:{model_name}", symbol="🔌")
             model_manager = ModelManager(model_name, provider=model_provider)
             

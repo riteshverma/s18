@@ -6,6 +6,8 @@ This document is the current architecture baseline for the Wise-AI and S18 integ
 It reflects the latest implementation state in this repository, including MockEHR bridge
 integration, CBC schema hardening, MCP routing robustness, and Supabase-backed auth/logging paths.
 
+**Model routing (Gemma vs MedGemma for Wise-only Ollama runs):** see [`docs/wise_ai_models.md`](../wise_ai_models.md).
+
 ## System data flow
 
 The system follows a decoupled Orchestrator-Agent pattern with explicit data contracts.

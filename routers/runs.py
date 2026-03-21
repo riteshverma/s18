@@ -127,7 +127,12 @@ def _retrieve_memories_sync(query: str):
     return remme_store.search(emb, query_text=query, k=3)
 
 
-async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str, Any]] = None):
+async def process_run(
+    run_id: str,
+    query: str,
+    audit_context: Optional[Dict[str, Any]] = None,
+    source_system: str = "s18",
+):
     """Background task to execute the agent loop"""
     final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete"}
     try:
@@ -178,7 +183,15 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
         # The loop will maintain its own internal context
         print(f"[{run_id}] MEMORY CONTEXT INJECTED:\n{memory_context}")
         try:
-             context = await loop.run(query, [], {}, [], session_id=run_id, memory_context=memory_context)
+             context = await loop.run(
+                 query,
+                 [],
+                 {},
+                 [],
+                 session_id=run_id,
+                 memory_context=memory_context,
+                 source_system=source_system,
+             )
         except asyncio.CancelledError:
              print(f"[{run_id}] Run cancelled.")
              context = loop.context # Recovery context from loop if possible
@@ -190,11 +203,13 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
         
     except Exception as e:
         print(f"Run {run_id} failed: {e}")
+        active_loops.pop(run_id, None)
+
     finally:
-        # Clean up
-        if run_id in active_loops:
-            del active_loops[run_id]
-            
+        # Keep active_loops registered until post-run work finishes so GET /runs/{id}
+        # still serves the in-memory graph (status completed) while Remme runs; avoids
+        # clients falling back to disk during slow extraction.
+
         # Attempt extraction if we have context (even if stopped)
         # Note: 'context' variable needs to be accessible here.
         pass 
@@ -451,7 +466,10 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
             except Exception as e:
                 print(f"⚠️ Supabase result logging failed for run {run_id}: {e}")
 
-        return final_result
+        try:
+            return final_result
+        finally:
+            active_loops.pop(run_id, None)
 
 
 # === Endpoints ===
@@ -500,7 +518,13 @@ async def create_run(
         print(f"⚠️ Supabase inbound logging failed for run {run_id}: {e}")
 
     # Start background execution
-    background_tasks.add_task(process_run, run_id, request.query, audit_context)
+    background_tasks.add_task(
+        process_run,
+        run_id,
+        request.query,
+        audit_context,
+        (request.source_system or "s18").strip().lower(),
+    )
     
     return {
         "id": run_id,

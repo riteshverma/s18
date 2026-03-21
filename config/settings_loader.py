@@ -42,6 +42,11 @@ def load_settings() -> dict:
             save_settings()  # Create settings.json from defaults
         else:
             raise FileNotFoundError(f"No settings files found in {CONFIG_DIR}")
+        # Merge wise_ai from defaults if settings.json predates this block
+        if DEFAULTS_FILE.exists() and "wise_ai" not in _settings_cache:
+            _defaults = json.loads(DEFAULTS_FILE.read_text())
+            if "wise_ai" in _defaults:
+                _settings_cache["wise_ai"] = _defaults["wise_ai"]
         # Allow container/runtime override without editing tracked config files.
         env_ollama_base_url = os.getenv("OLLAMA_BASE_URL")
         if env_ollama_base_url:
@@ -83,6 +88,25 @@ def load_settings() -> dict:
         if env_service_role:
             _settings_cache.setdefault("supabase_logging", {})
             _settings_cache["supabase_logging"]["service_role_key"] = env_service_role
+        env_wise_medgemma = os.getenv("WISE_AI_USE_MEDGEMMA")
+        if env_wise_medgemma is not None:
+            _settings_cache.setdefault("wise_ai", {})
+            _settings_cache["wise_ai"]["use_medgemma"] = env_wise_medgemma.strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        env_wise_medgemma_model = os.getenv("WISE_AI_MEDGEMMA_MODEL")
+        if env_wise_medgemma_model:
+            _settings_cache.setdefault("wise_ai", {})
+            _settings_cache.setdefault("wise_ai", {}).setdefault("ollama_models", {})
+            _settings_cache["wise_ai"]["ollama_models"]["medgemma"] = env_wise_medgemma_model.strip()
+        env_wise_gemma_model = os.getenv("WISE_AI_GEMMA_MODEL")
+        if env_wise_gemma_model:
+            _settings_cache.setdefault("wise_ai", {})
+            _settings_cache.setdefault("wise_ai", {}).setdefault("ollama_models", {})
+            _settings_cache["wise_ai"]["ollama_models"]["gemma"] = env_wise_gemma_model.strip()
     return _settings_cache
 
 def save_settings() -> None:
@@ -130,8 +154,8 @@ def get_timeout() -> int:
     return load_settings()["ollama"]["timeout"]
 
 def get_run_poll_timeout() -> int:
-    """Recommended timeout in seconds for clients polling GET /runs/{id}. Runs can take ~2 min; use this so the client does not abort too early."""
-    return load_settings().get("run_poll_timeout_seconds", 300)
+    """Recommended timeout in seconds for clients polling GET /runs/{id}. Multi-step orchestration often needs 10–15+ minutes; default 900s."""
+    return int(load_settings().get("run_poll_timeout_seconds", 900))
 
 # --- Initialize on import ---
 settings = load_settings()
