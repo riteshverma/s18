@@ -13,7 +13,10 @@ from pydantic import ValidationError
 from core.schemas.clinical import (
     CBCPayload,
     ClinicalAssessment,
+    derive_evidence_based_cbc_flags,
+    derive_risk_level_from_cbc_evidence,
     extract_request_payload_from_query,
+    merge_wise_flags_with_cbc_evidence,
     try_parse_clinical_assessment,
     validate_cbc_payload,
 )
@@ -230,3 +233,30 @@ def test_try_parse_clinical_assessment_invalid_returns_none():
     assert try_parse_clinical_assessment({"bad": "data"}) is None
     assert try_parse_clinical_assessment(None) is None
     assert try_parse_clinical_assessment("not json {{{") is None
+
+
+# --- Evidence-based CBC flags (WHO-style screening) ---
+
+
+def test_derive_evidence_flags_normal_cbc_no_flags():
+    m, err = validate_cbc_payload(
+        {"hemoglobin": 13.5, "wbc": 7.0, "rbc": 4.5, "platelets": 250000}
+    )
+    assert err is None and m is not None
+    assert derive_evidence_based_cbc_flags(m) == []
+
+
+def test_derive_evidence_flags_anemia_and_leukocytosis():
+    m, err = validate_cbc_payload({"hemoglobin": 10.5, "wbc": 15.0})
+    assert err is None and m is not None
+    flags = derive_evidence_based_cbc_flags(m)
+    assert "low_hemoglobin" in flags
+    assert "high_wbc" in flags
+    assert derive_risk_level_from_cbc_evidence(flags, m) == "high"
+
+
+def test_merge_wise_flags_strips_contradictory_llm_labels():
+    m, err = validate_cbc_payload({"hemoglobin": 13.5, "wbc": 7.0})
+    assert err is None and m is not None
+    merged = merge_wise_flags_with_cbc_evidence(["low_hemoglobin", "high_wbc"], m)
+    assert merged == []

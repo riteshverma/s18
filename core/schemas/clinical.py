@@ -19,6 +19,24 @@ RBC_MAX = 10.0
 PLATELETS_MIN = 5_000   # /uL
 PLATELETS_MAX = 2_000_000
 
+# --- Evidence-based screening thresholds (adults, typical lab units after normalization) ---
+# WHO anemia (non-pregnant adults, sea level): Hb < 13 g/dL (men), < 12 g/dL (women).
+# When sex is unknown, use the stricter 12 g/dL cutoff to reduce false alarms on borderline values.
+WHO_ANEMIA_HEMOGLOBIN_MALE_G_DL = 13.0
+WHO_ANEMIA_HEMOGLOBIN_FEMALE_G_DL = 12.0
+WHO_ANEMIA_HEMOGLOBIN_UNKNOWN_SEX_G_DL = 12.0
+
+# Critical hemoglobin warranting urgent escalation in many pathways (product safety cap).
+CRITICAL_HEMOGLOBIN_G_DL = 7.0
+
+# WBC (canonical 10^3/uL): common adult ref ~4.5–11.0; leukocytosis screening cut ~11.0; leukopenia ~4.0.
+WBC_LEUKOCYTOSIS_10_3_PER_UL = 11.0
+WBC_LEUKOPENIA_10_3_PER_UL = 4.0
+
+# Platelets (/uL after normalization): thrombocytopenia / thrombocytosis screening cuts (broad).
+PLATELETS_THROMBOCYTOPENIA_PER_UL = 150_000.0
+PLATELETS_THROMBOCYTOSIS_PER_UL = 450_000.0
+
 
 class CBCPayload(BaseModel):
     """
@@ -29,12 +47,25 @@ class CBCPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     patient_id: Optional[str] = Field(None, description="Patient identifier (often from query prefix)")
+    sex: Optional[str] = Field(
+        None,
+        description="Optional biological sex for WHO anemia thresholds: male|female (or m|f)",
+    )
     hemoglobin: Optional[float] = Field(None, description="Hemoglobin in g/dL (or g/L if unit is g/L)")
     wbc: Optional[float] = Field(None, description="WBC in 10^3/uL")
     rbc: Optional[float] = Field(None, description="RBC in 10^6/uL")
     platelets: Optional[float] = Field(None, description="Platelets per uL")
     unit: Optional[str] = Field("g/dL", description="Unit for hemoglobin: g/dL or g/L (normalized to g/dL)")
     normalization_notes: List[str] = Field(default_factory=list, description="Audit trail of unit conversions applied")
+
+    @field_validator("sex", mode="before")
+    @classmethod
+    def normalize_sex_field(cls, v: Any) -> Any:
+        if v is None or v == "":
+            return None
+        if isinstance(v, str):
+            return _normalize_sex(v)
+        return None
 
     @field_validator("hemoglobin")
     @classmethod
@@ -197,6 +228,105 @@ def extract_request_payload_from_query(query: str) -> Dict[str, Any]:
         return payload if isinstance(payload, dict) else {}
     except Exception:
         return {}
+
+
+def _normalize_sex(raw: Optional[str]) -> Optional[str]:
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip().lower()
+    if s in ("male", "m", "man"):
+        return "male"
+    if s in ("female", "f", "woman"):
+        return "female"
+    return None
+
+
+def derive_evidence_based_cbc_flags(cbc: CBCPayload) -> List[str]:
+    """
+    Derive machine flags from normalized CBC values using conservative adult screening rules.
+    Intended to be more stable and patient-appropriate than raw LLM label noise.
+    """
+    flags: List[str] = []
+    sex = _normalize_sex(cbc.sex)
+
+    hb = cbc.hemoglobin
+    if hb is not None:
+        if sex == "male":
+            thr = WHO_ANEMIA_HEMOGLOBIN_MALE_G_DL
+        elif sex == "female":
+            thr = WHO_ANEMIA_HEMOGLOBIN_FEMALE_G_DL
+        else:
+            thr = WHO_ANEMIA_HEMOGLOBIN_UNKNOWN_SEX_G_DL
+        if float(hb) < thr:
+            flags.append("low_hemoglobin")
+
+    wbc = cbc.wbc
+    if wbc is not None:
+        w = float(wbc)
+        if w > WBC_LEUKOCYTOSIS_10_3_PER_UL:
+            flags.append("high_wbc")
+        elif w < WBC_LEUKOPENIA_10_3_PER_UL:
+            flags.append("low_wbc")
+
+    plt = cbc.platelets
+    if plt is not None:
+        p = float(plt)
+        if p < PLATELETS_THROMBOCYTOPENIA_PER_UL:
+            flags.append("low_platelets")
+        elif p > PLATELETS_THROMBOCYTOSIS_PER_UL:
+            flags.append("high_platelets")
+
+    return flags
+
+
+def filter_llm_flags_against_cbc_evidence(llm_flags: List[str], cbc: CBCPayload) -> List[str]:
+    """Drop LLM flag labels that contradict measured CBC values (reduces harmful false alarms)."""
+    ev = set(derive_evidence_based_cbc_flags(cbc))
+    out: List[str] = []
+    for f in llm_flags:
+        if f in ("low_hemoglobin",) and "low_hemoglobin" not in ev:
+            continue
+        if f in ("high_wbc",) and "high_wbc" not in ev:
+            continue
+        if f in ("low_wbc",) and "low_wbc" not in ev:
+            continue
+        if f in ("low_platelets",) and "low_platelets" not in ev:
+            continue
+        if f in ("high_platelets",) and "high_platelets" not in ev:
+            continue
+        out.append(f)
+    return out
+
+
+def merge_wise_flags_with_cbc_evidence(llm_flags: List[str], cbc: CBCPayload) -> List[str]:
+    """
+    Union evidence-based flags with LLM flags that are not contradicted by labs.
+    Evidence flags are listed first; order is otherwise stable and de-duplicated.
+    """
+    evidence = derive_evidence_based_cbc_flags(cbc)
+    filtered_llm = filter_llm_flags_against_cbc_evidence(llm_flags, cbc)
+    seen: set = set()
+    merged: List[str] = []
+    for item in evidence + filtered_llm:
+        if item not in seen:
+            seen.add(item)
+            merged.append(item)
+    return merged
+
+
+def derive_risk_level_from_cbc_evidence(flags: List[str], cbc: CBCPayload) -> str:
+    """
+    Map evidence flags + key lab severities to a single risk tier for WISE consumers.
+    Conservative: avoid 'high' unless multiple abnormalities or critical hemoglobin.
+    """
+    if not flags:
+        return "low"
+    hb = cbc.hemoglobin
+    if hb is not None and float(hb) < CRITICAL_HEMOGLOBIN_G_DL:
+        return "high"
+    if len(flags) >= 2:
+        return "high"
+    return "moderate"
 
 
 def validate_cbc_payload(raw: dict) -> tuple[Optional[CBCPayload], Optional[str]]:

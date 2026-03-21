@@ -5,6 +5,12 @@ from pathlib import Path
 from typing import Optional
 from core.model_manager import ModelManager
 from core.json_parser import parse_llm_json, parse_llm_json_or_fallback
+from core.schemas.clinical import (
+    derive_risk_level_from_cbc_evidence,
+    extract_request_payload_from_query,
+    merge_wise_flags_with_cbc_evidence,
+    validate_cbc_payload,
+)
 from core.utils import log_step, log_error
 from PIL import Image
 from datetime import datetime
@@ -187,6 +193,60 @@ class AgentRunner:
                 break
         return out
 
+    def _normalize_wise_flags(self, value) -> list:
+        """
+        Coerce model-provided flags to a list of non-empty strings.
+        Supports list, dict (keys with truthy values), or a single string.
+        """
+        if value is None:
+            return []
+        if isinstance(value, list):
+            seen: set = set()
+            out: list = []
+            for x in value:
+                s = str(x).strip() if x is not None else ""
+                if s and s not in seen:
+                    seen.add(s)
+                    out.append(s)
+            return out
+        if isinstance(value, dict):
+            seen = set()
+            out = []
+            for k, v in value.items():
+                key = str(k).strip() if k is not None else ""
+                if not key:
+                    continue
+                truthy = False
+                if isinstance(v, bool):
+                    truthy = v
+                elif isinstance(v, (int, float)):
+                    truthy = bool(v) and v != 0
+                elif isinstance(v, str):
+                    truthy = v.strip().lower() in ("true", "1", "yes")
+                else:
+                    truthy = bool(v)
+                if truthy and key not in seen:
+                    seen.add(key)
+                    out.append(key)
+            return out
+        if isinstance(value, str):
+            s = value.strip()
+            return [s] if s else []
+        return []
+
+    def _merge_wise_flag_lists(self, *lists) -> list:
+        """Union of flag lists, preserving order (first list wins, then append new)."""
+        seen = set()
+        out = []
+        for lst in lists:
+            if not lst:
+                continue
+            for item in lst:
+                if item not in seen:
+                    seen.add(item)
+                    out.append(item)
+        return out
+
     def _ensure_wise_output_schema(self, output, raw_response: str) -> dict:
         """
         Ensure ThinkerAgent output includes risk_level, confidence, flags for WISE integration.
@@ -212,9 +272,74 @@ class AgentRunner:
                 output["confidence"] = float(output["confidence"])
             except (TypeError, ValueError):
                 output["confidence"] = extracted.get("confidence") if extracted.get("confidence") is not None else 0.5
-        # flags
-        if not isinstance(output.get("flags"), list):
-            output["flags"] = extracted.get("flags") if isinstance(extracted.get("flags"), list) else []
+        # flags: normalize list/dict/str; merge with footer/text extraction
+        parsed_flags = self._normalize_wise_flags(output.get("flags"))
+        extracted_flags = self._normalize_wise_flags(extracted.get("flags"))
+        output["flags"] = self._merge_wise_flag_lists(parsed_flags, extracted_flags)
+        return output
+
+    def _apply_cbc_evidence_to_wise_output(self, output: dict, input_data: dict) -> dict:
+        """
+        When the run query includes a validated CBC Request JSON, align WISE flags and risk
+        with WHO-style screening thresholds instead of trusting contradictory LLM labels.
+        """
+        if not isinstance(output, dict):
+            return output
+        q = (input_data or {}).get("original_query") or ""
+        payload = extract_request_payload_from_query(q)
+        if not payload:
+            return output
+        validated, err = validate_cbc_payload(payload)
+        if err or validated is None:
+            return output
+        llm_flags = self._normalize_wise_flags(output.get("flags"))
+        output["flags"] = merge_wise_flags_with_cbc_evidence(llm_flags, validated)
+        output["risk_level"] = derive_risk_level_from_cbc_evidence(output["flags"], validated)
+        try:
+            conf = float(output.get("confidence", 0.8))
+        except (TypeError, ValueError):
+            conf = 0.8
+        if not output["flags"]:
+            output["confidence"] = min(conf, 0.92)
+        else:
+            output["confidence"] = min(max(conf, 0.72), 0.95)
+        return output
+
+    def _sync_wise_response_footer(self, output: dict) -> dict:
+        """
+        Keep markdown footer fields aligned with structured risk/confidence/flags.
+        This prevents the UI from showing contradictory narrative vs JSON state.
+        """
+        if not isinstance(output, dict):
+            return output
+        response = output.get("response")
+        if not isinstance(response, str):
+            return output
+
+        response = re.sub(
+            r"(?im)^[-*]?\s*Risk\s+Level\s*:\s*.*$",
+            f"- Risk Level: {output.get('risk_level', 'low')}",
+            response,
+        )
+        response = re.sub(
+            r"(?im)^[-*]?\s*Confidence\s*:\s*.*$",
+            f"- Confidence: {output.get('confidence', 0.5)}",
+            response,
+        )
+        response = re.sub(
+            r"(?im)^[-*]?\s*Flags\s*:\s*.*$",
+            f"- Flags: {json.dumps(output.get('flags', []))}",
+            response,
+        )
+
+        if "Flags:" not in response:
+            response = response.rstrip() + f"\n\n- Flags: {json.dumps(output.get('flags', []))}"
+        if "Risk Level:" not in response:
+            response = response.rstrip() + f"\n- Risk Level: {output.get('risk_level', 'low')}"
+        if "Confidence:" not in response:
+            response = response.rstrip() + f"\n- Confidence: {output.get('confidence', 0.5)}"
+
+        output["response"] = response
         return output
 
     async def run_agent(self, agent_type: str, input_data: dict, image_path: Optional[str] = None) -> dict:
@@ -333,18 +458,25 @@ class AgentRunner:
             elif agent_type == "ThinkerAgent":
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
                 output = self._ensure_wise_output_schema(output, response)
+                output = self._apply_cbc_evidence_to_wise_output(output, input_data)
             elif agent_type == "SummarizerAgent":
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
                 output = self._ensure_wise_output_schema(output, response)
-                # Ensure machine-readable flags are always present in markdown output
-                # so downstream WISE adapters can parse consistently.
-                if isinstance(output.get("response"), str) and "Flags:" not in output["response"]:
-                    output["response"] = (
-                        output["response"].rstrip()
-                        + f"\n\nFlags: {json.dumps(output.get('flags', []))}"
-                    )
+                output = self._apply_cbc_evidence_to_wise_output(output, input_data)
+                output = self._sync_wise_response_footer(output)
             else:
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
+                # FormatterAgent: carry WISE fields from input if not produced by the model.
+                # The orchestrator stashes them under _wise_* keys in globals_schema.
+                if agent_type == "FormatterAgent" and isinstance(output, dict):
+                    gs = input_data.get("all_globals_schema") or {}
+                    if "risk_level" not in output and gs.get("_wise_risk_level"):
+                        output["risk_level"] = gs["_wise_risk_level"]
+                    if "confidence" not in output and gs.get("_wise_confidence") is not None:
+                        output["confidence"] = gs["_wise_confidence"]
+                    if not isinstance(output.get("flags"), list) and isinstance(gs.get("_wise_flags"), list):
+                        output["flags"] = gs["_wise_flags"]
+                    output = self._sync_wise_response_footer(output)
             
             # Robustness: Some models (like gemma3) wrap JSON in a list
             if isinstance(output, list) and len(output) > 0 and isinstance(output[0], dict):

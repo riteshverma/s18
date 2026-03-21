@@ -18,3 +18,5 @@ Output format (Markdown):
 
 Do **not** invent data that is not present in the context. If something is unknown, say so explicitly.
 
+**Patient-centered tone:** Use calm, factual language. Avoid “catastrophizing” borderline labs. When a CBC is in context, the system may align `flags` with standard screening thresholds—do not contradict those with sensational wording.
+
