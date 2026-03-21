@@ -53,3 +53,10 @@ Thumbs.db
 # data/inbox/
 # data/system/
 # mcp_servers/faiss_index/
+
+# Runtime sessions and Remme local state (never commit)
+memory/session_summaries_index/
+memory/remme_index/
+memory/remme_staging.json
+memory/remme_scanned_sources.json
+data/conversation_history/

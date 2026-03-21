@@ -35,6 +35,42 @@ ORCHESTRATOR_RUN_LATENCY_MS = Histogram(
     buckets=(50, 100, 250, 500, 1000, 2500, 5000, 10000, 20000, 40000, 60000, 120000),
 )
 
+ORCHESTRATOR_PLANNER_LATENCY_MS = Histogram(
+    "wiseai_orchestrator_planner_latency_ms",
+    "PlannerAgent invocation latency in milliseconds",
+    buckets=(100, 250, 500, 1000, 2500, 5000, 10000, 20000, 40000, 60000),
+)
+
+ORCHESTRATOR_STEP_LATENCY_MS = Histogram(
+    "wiseai_orchestrator_step_latency_ms",
+    "Per DAG step execution latency in milliseconds",
+    ["agent"],
+    buckets=(50, 100, 250, 500, 1000, 2500, 5000, 10000, 20000, 40000, 60000, 120000),
+)
+
+ORCHESTRATOR_DAG_ITERATIONS = Histogram(
+    "wiseai_orchestrator_dag_iterations",
+    "Inner DAG scheduler iterations per run",
+    buckets=(1, 2, 5, 10, 15, 20, 30, 40, 60, 80),
+)
+
+ORCHESTRATOR_REPLAN_TOTAL = Counter(
+    "wiseai_orchestrator_replan_total",
+    "Re-planning events by reason",
+    ["reason"],
+)
+
+ORCHESTRATOR_STEP_RETRIES_TOTAL = Counter(
+    "wiseai_orchestrator_step_retries_total",
+    "Step-level retries by agent",
+    ["agent"],
+)
+
+ORCHESTRATOR_DAG_STALL_ITERATIONS = Counter(
+    "wiseai_orchestrator_dag_stall_iterations_total",
+    "DAG iterations where no pending ready steps were found but work remained",
+)
+
 RAG_REQUESTS_TOTAL = Counter(
     "wiseai_rag_requests_total",
     "Total RAG search requests",
