@@ -162,7 +162,11 @@ class AgentLoop4:
             self.context.memory_context = memory_context # Store for retrieval
             # Inject multi_mcp immediately
             self.context.multi_mcp = self.multi_mcp
-            self.context.plan_graph.graph['globals_schema'].update(globals_schema)
+            seeded_query = self.context.plan_graph.graph['globals_schema'].get("original_query")
+            self.context.plan_graph.graph['globals_schema'].update(globals_schema or {})
+            merged_query = self.context.plan_graph.graph['globals_schema'].get("original_query")
+            if (merged_query is None or merged_query == "") and seeded_query not in (None, ""):
+                self.context.plan_graph.graph['globals_schema']['original_query'] = seeded_query
             self.context._save_session()
             log_step("✅ Session initialized with Query processing", symbol="🌱")
         except Exception as e:

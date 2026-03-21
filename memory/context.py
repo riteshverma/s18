@@ -57,6 +57,8 @@ class ExecutionContextManager:
         self.plan_graph.graph['created_at'] = datetime.utcnow().isoformat()
         self.plan_graph.graph['status'] = 'running'
         self.plan_graph.graph['globals_schema'] = {}
+        if original_query is not None:
+            self.plan_graph.graph['globals_schema']['original_query'] = original_query
         self.failure_replan_requested = False
         self.failure_replan_attempts = 0
         self._failure_replan_payload = None
@@ -491,12 +493,23 @@ class ExecutionContextManager:
                         print(f"✅ Extracted {write_key} = [Final Answer] (mapped from 'final_answer')")
                         extracted = True
                 
-                # Strategy 3: Emergency fallback - try to find any matching data
+                # Strategy 3: Fall back to response text or full output dict
                 if not extracted:
-                    print(f"⚠️  Could not extract {write_key}")
-                    # Set empty placeholder to prevent downstream errors
-                    globals_schema[write_key] = []
+                    if isinstance(output, dict) and isinstance(output.get("response"), str):
+                        globals_schema[write_key] = output["response"]
+                        print(f"⚠️  {write_key} not in output keys; stored output['response'] instead")
+                        extracted = True
+                    else:
+                        print(f"⚠️  Could not extract {write_key}")
+                        globals_schema[write_key] = []
         
+        # Propagate WISE fields (risk_level, confidence, flags) from reasoning agents
+        # so downstream nodes and the frontend can always find the latest assessment.
+        if isinstance(output, dict) and "risk_level" in output and isinstance(output.get("flags"), list):
+            globals_schema["_wise_risk_level"] = output["risk_level"]
+            globals_schema["_wise_confidence"] = output.get("confidence")
+            globals_schema["_wise_flags"] = output["flags"]
+
         # Store results
         node_data['status'] = 'completed'
         node_data['end_time'] = datetime.utcnow().isoformat()
@@ -542,6 +555,10 @@ class ExecutionContextManager:
         for read_key in reads:
             if read_key in globals_schema:
                 inputs[read_key] = globals_schema[read_key]
+            elif read_key == "original_query":
+                root_query = self.plan_graph.graph.get("original_query")
+                if root_query is not None:
+                    inputs[read_key] = root_query
             else:
                 print(f"⚠️  Missing dependency: '{read_key}' not found in globals_schema")
                 print(f"📋 Available keys: {list(globals_schema.keys())}")
