@@ -471,10 +471,80 @@ class AgentLoop4:
         
         return has_new_leaf_clarification
 
+    def _repair_cbc_plan_dependencies(self, new_nodes, new_edges):
+        """
+        Repair common CBC planner mistakes:
+        - reasoning/summarization node reads only `original_query`
+        - miner node exists but no dependency edge is present
+        This avoids parallel execution where summary is generated before lab retrieval.
+        """
+        if not isinstance(new_nodes, list):
+            return
+
+        miner_nodes = [
+            n for n in new_nodes
+            if isinstance(n, dict) and n.get("agent") == "EHRDataMinerAgent"
+        ]
+        if not miner_nodes:
+            return
+
+        miner_write_keys = []
+        miner_node_ids = []
+        for miner in miner_nodes:
+            miner_node_ids.append(miner.get("id"))
+            miner_write_keys.extend(sanitize_io_keys_list(miner.get("writes", [])))
+
+        dependent_agents = {
+            "SummarizationAgent",
+            "SummarizerAgent",
+            "ClinicalReasoningAgent",
+            "ThinkerAgent",
+            "FormatterAgent",
+            "ActionAgent",
+            "ResponseAgent",
+        }
+
+        existing_edges = {
+            (
+                (edge.get("source") or edge.get("from")),
+                (edge.get("target") or edge.get("to")),
+            )
+            for edge in new_edges
+            if isinstance(edge, dict)
+        }
+
+        for node in new_nodes:
+            if not isinstance(node, dict):
+                continue
+            node_id = node.get("id")
+            agent = node.get("agent")
+            if not node_id or agent not in dependent_agents:
+                continue
+            if node_id in miner_node_ids:
+                continue
+
+            reads = sanitize_io_keys_list(node.get("reads", []))
+            if reads == ["original_query"]:
+                for write_key in miner_write_keys:
+                    if write_key not in reads:
+                        reads.append(write_key)
+                node["reads"] = reads
+
+            for miner_id in miner_node_ids:
+                if (miner_id, node_id) not in existing_edges:
+                    new_edges.append({"source": miner_id, "target": node_id})
+                    existing_edges.add((miner_id, node_id))
+                    log_step(
+                        f"🔧 Repaired CBC plan dependency {miner_id} -> {node_id}",
+                        symbol="🔧",
+                    )
+
     def _merge_plan_into_context(self, new_plan_graph):
         """Merge the planned nodes into the existing bootstrap context"""
         new_nodes = new_plan_graph.get("nodes", [])
         new_edges = new_plan_graph.get("edges", [])
+        if self.context and self._is_cbc_payload_query(self.context.plan_graph.graph.get("original_query", "")):
+            self._repair_cbc_plan_dependencies(new_nodes, new_edges)
         known_new_node_ids = {n.get("id") for n in new_nodes if isinstance(n, dict) and n.get("id")}
         
         # Track which new nodes have incoming edges to detect orphans
