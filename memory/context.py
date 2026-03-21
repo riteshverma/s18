@@ -4,6 +4,7 @@ import networkx as nx
 import json
 import ast
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 import asyncio
@@ -32,7 +33,12 @@ class ExecutionContextManager:
         self.plan_graph.graph['created_at'] = datetime.utcnow().isoformat()
         self.plan_graph.graph['status'] = 'running'
         self.plan_graph.graph['globals_schema'] = {}
-        
+        self.failure_replan_requested = False
+        self.failure_replan_attempts = 0
+        self._failure_replan_payload = None
+        self.plan_validation_errors = []
+        self.plan_validation_warnings = []
+
         # Add ROOT node
         self.plan_graph.add_node("ROOT",
             description="Initial Query",
@@ -517,11 +523,27 @@ class ExecutionContextManager:
         return inputs
 
     def all_done(self):
-        """Check if all steps are completed or failed"""
-        return all(
-            self.plan_graph.nodes[node_id]['status'] in ['completed', 'failed']
-            for node_id in self.plan_graph.nodes
-        )
+        """True when every node is in a terminal execution state."""
+        terminal = ('completed', 'failed', 'skipped', 'cost_exceeded')
+        for node_id in self.plan_graph.nodes:
+            st = self.plan_graph.nodes[node_id].get('status', 'pending')
+            if st not in terminal:
+                return False
+        return True
+
+    def skip_pending_descendants(self, failed_step_id: str, reason: str = "upstream_failed"):
+        """Mark pending downstream nodes skipped after a terminal failure (BFS over successors)."""
+        q = deque([failed_step_id])
+        while q:
+            cur = q.popleft()
+            for succ in self.plan_graph.successors(cur):
+                data = self.plan_graph.nodes[succ]
+                if data.get('status') != 'pending':
+                    continue
+                data['status'] = 'skipped'
+                data['skip_reason'] = f"{reason}:{failed_step_id}"
+                q.append(succ)
+        self._auto_save()
 
     def get_execution_summary(self):
         """Get execution summary with cost and token breakdown"""
@@ -632,4 +654,10 @@ class ExecutionContextManager:
         context = cls.__new__(cls)
         context.plan_graph = plan_graph
         context.debug_mode = debug_mode
+        context.stop_requested = False
+        context.failure_replan_requested = False
+        context.failure_replan_attempts = 0
+        context._failure_replan_payload = None
+        context.plan_validation_errors = []
+        context.plan_validation_warnings = []
         return context
