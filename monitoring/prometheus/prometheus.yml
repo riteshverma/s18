@@ -12,11 +12,11 @@ alerting:
             - alertmanager:9093
 
 scrape_configs:
-  - job_name: wiseai-api
+  - job_name: s18-api
     metrics_path: /metrics/prometheus
     static_configs:
       - targets:
-          - host.docker.internal:8000
+          - host.docker.internal:8001
 
   - job_name: prometheus
     static_configs:

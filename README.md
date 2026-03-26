@@ -60,9 +60,8 @@ Optional:
 - Backend verifies the JWT on protected endpoints using Supabase JWKS (`/auth/v1/.well-known/jwks.json`) with issuer/audience checks (no backend-managed Supabase session).
 - If S18 is called through another backend/proxy, it also accepts `X-Forwarded-Authorization: Bearer <access_token>`.
 - Optional persistence can write to two Supabase tables:
-  - `ehr_request_log` (inbound request/audit trail)
-  - `ehr_clinical_result` (normalized RAC/CBC/ABDM/FHIR-aligned outcome)
-- Reference SQL schema: `docs/supabase_ehr_schema.sql`
+  - `agent_request_log` (inbound request/audit trail)
+  - `agent_result_log` (normalized run result payload)
 - Quick environment/table readiness check:
 
 ```bash
@@ -179,14 +178,14 @@ docker compose -f monitoring/docker-compose.monitoring.yml up -d
 
 Expected key metric families:
 
-- `wiseai_api_requests_total`
-- `wiseai_api_requests_success_total`
-- `wiseai_api_request_latency_ms`
-- `wiseai_orchestrator_runs_total`
-- `wiseai_orchestrator_run_latency_ms`
-- `wiseai_rag_requests_total`
-- `wiseai_mcp_tool_calls_total`
-- `wiseai_memory_operations_total`
+- `s18_api_requests_total`
+- `s18_api_requests_success_total`
+- `s18_api_request_latency_ms`
+- `s18_orchestrator_runs_total`
+- `s18_orchestrator_run_latency_ms`
+- `s18_rag_requests_total`
+- `s18_mcp_tool_calls_total`
+- `s18_memory_operations_total`
 
 ### Port Overrides
 

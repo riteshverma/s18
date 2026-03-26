@@ -7,7 +7,7 @@
     "embedding": "nomic-embed-text",
     "semantic_chunking": "gemma3:4b",
     "image_captioning": "gemma3:4b",
-    "memory_extraction": "gemma3:4b",
+    "memory_extraction": "qwen3-vl:8b",
     "insights_provider": "ollama"
   },
   "rag": {
@@ -18,9 +18,14 @@
     "top_k": 3
   },
   "agent": {
-    "model_provider": "ollama",
-    "default_model": "gemma3:4b",
-    "overrides": {},
+    "model_provider": "gemini",
+    "default_model": "gemini-2.5-flash",
+    "overrides": {
+      "TestAgent": {
+        "model_provider": "ollama",
+        "model": "gemma3:4b"
+      }
+    },
     "max_steps": 3,
     "max_lifelines_per_step": 3,
     "planning_mode": "conservative",
@@ -74,5 +79,18 @@
         "enabled": true
       }
     ]
+  },
+  "auth": {
+    "enabled": false,
+    "supabase_url": "",
+    "supabase_anon_key": "",
+    "supabase_jwt_audience": "authenticated"
+  },
+  "supabase_logging": {
+    "enabled": false,
+    "supabase_url": "",
+    "service_role_key": "",
+    "request_table": "agent_request_log",
+    "result_table": "agent_result_log"
   }
 }

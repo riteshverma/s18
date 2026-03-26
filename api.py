@@ -224,8 +224,8 @@ async def health_auth():
         "supabase_jwt_audience_configured": bool(supabase_jwt_audience),
         "supabase_anon_key_configured": bool(supabase_anon_key),
         "supabase_service_role_key_configured": bool(supabase_service_key),
-        "request_table": log_cfg.get("request_table", "ehr_request_log"),
-        "result_table": log_cfg.get("result_table", "ehr_clinical_result"),
+        "request_table": log_cfg.get("request_table", "agent_request_log"),
+        "result_table": log_cfg.get("result_table", "agent_result_log"),
     }
 
 

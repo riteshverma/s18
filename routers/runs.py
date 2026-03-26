@@ -20,7 +20,7 @@ from core.supabase_auth import require_supabase_user
 from core.supabase_logging import (
     build_idempotency_key,
     compute_payload_hash,
-    log_clinical_result,
+    log_run_result,
     log_inbound_request,
     update_request_status,
 )
@@ -72,14 +72,12 @@ class AgentTestRequest(BaseModel):
 # === Background Tasks ===
 
 def _infer_query_type(query: str) -> str:
-    q = (query or "").lower()
-    if "cbc" in q:
-        return "cbc"
-    if "rac" in q:
-        return "rac"
-    if "abdm" in q or "fhir" in q:
-        return "abdm_fhir"
-    return "generic"
+    q = (query or "").strip()
+    if not q:
+        return "empty"
+    if q.startswith("{") or q.startswith("["):
+        return "structured"
+    return "text"
 
 
 def _session_file_candidates(run_id: str, summaries_dir: Path):
@@ -147,7 +145,7 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
         except Exception as e:
             print(f"⚠️ Remme Retrieval Failed: {e}")
 
-        # 1b. RAG context: search indexed documents so CBC/lab and document queries get doc context
+        # 1b. RAG context: search indexed documents so runs start with relevant document context.
         try:
             rag_result = await multi_mcp.call_tool("rag", "search_stored_documents_rag", {"query": query})
             if rag_result and hasattr(rag_result, "content") and isinstance(rag_result.content, list):
@@ -431,7 +429,7 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
                     status=final_status,
                     error_code=error_code,
                 )
-                await log_clinical_result(
+                await log_run_result(
                     {
                         "run_id": run_id,
                         "request_id": audit_context.get("request_id"),
@@ -442,7 +440,7 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
                             "output": final_result.get("output"),
                         },
                         "summary": final_result.get("summary"),
-                        "triage_flag": "high" if final_status == "failed" else "normal",
+                        "priority_flag": "high" if final_status == "failed" else "normal",
                         "status": final_status,
                         "error_code": error_code,
                     }

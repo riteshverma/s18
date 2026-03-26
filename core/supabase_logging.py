@@ -29,8 +29,8 @@ def _config() -> Dict[str, str]:
     return {
         "url": (os.getenv("SUPABASE_URL") or cfg.get("supabase_url") or "").rstrip("/"),
         "service_key": os.getenv("SUPABASE_SERVICE_ROLE_KEY") or cfg.get("service_role_key", ""),
-        "request_table": cfg.get("request_table", "ehr_request_log"),
-        "result_table": cfg.get("result_table", "ehr_clinical_result"),
+        "request_table": cfg.get("request_table", "agent_request_log"),
+        "result_table": cfg.get("result_table", "agent_result_log"),
     }
 
 
@@ -120,7 +120,7 @@ async def update_request_status(
     return await _rest_upsert(_config()["request_table"], payload, on_conflict="idempotency_key")
 
 
-async def log_clinical_result(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def log_run_result(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not is_logging_enabled():
         return None
     payload = {
@@ -130,7 +130,7 @@ async def log_clinical_result(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "query_type": row.get("query_type", "generic"),
         "normalized_result": row.get("normalized_result"),
         "summary": row.get("summary"),
-        "triage_flag": row.get("triage_flag"),
+        "priority_flag": row.get("priority_flag"),
         "status": row.get("status", "completed"),
         "error_code": row.get("error_code"),
         "generated_at": row.get("generated_at") or _now_iso(),

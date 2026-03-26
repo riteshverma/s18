@@ -59,14 +59,14 @@ def check_table(supabase_url: str, service_key: str, table: str, timeout: float)
         if r.status_code == 200:
             return True, f"Table '{table}' is accessible"
         if r.status_code == 404:
-            return False, f"Table '{table}' not found (run docs/supabase_ehr_schema.sql)"
+            return False, f"Table '{table}' not found (create the configured Supabase logging tables first)"
         return False, f"Table '{table}' check failed: {r.status_code} {r.text[:200]}"
     except Exception as e:
         return False, f"Table '{table}' check error: {e}"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check Supabase JWT + table integration for S18/WISE AI backend.")
+    parser = argparse.ArgumentParser(description="Check Supabase JWT + table integration for the S18 backend.")
     parser.add_argument("--timeout", type=float, default=8.0, help="HTTP timeout in seconds")
     args = parser.parse_args()
 
@@ -112,7 +112,7 @@ def main() -> int:
             _fail("SUPABASE_LOGGING_ENABLED=true but SUPABASE_SERVICE_ROLE_KEY is missing")
             has_error = True
         else:
-            for table in ("ehr_request_log", "ehr_clinical_result"):
+            for table in ("agent_request_log", "agent_result_log"):
                 ok, msg = check_table(supabase_url, service_key, table, args.timeout)
                 if ok:
                     _ok(msg)

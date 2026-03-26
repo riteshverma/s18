@@ -1,10 +1,10 @@
 groups:
-  - name: wiseai_slo_burn_rules
+  - name: s18_slo_burn_rules
     rules:
-      - alert: WiseAIAPIErrorBudgetBurnFast
+      - alert: S18APIErrorBudgetBurnFast
         expr: |
           (
-            (1 - sum(rate(wiseai_api_requests_success_total[5m])) / sum(rate(wiseai_api_requests_total[5m])))
+            (1 - sum(rate(s18_api_requests_success_total[5m])) / sum(rate(s18_api_requests_total[5m])))
             / 0.005
           ) > 14.4
         for: 5m
@@ -14,10 +14,10 @@ groups:
           summary: API error budget fast burn
           description: API is burning error budget at fast-burn threshold.
 
-      - alert: WiseAIAPIErrorBudgetBurnSlow
+      - alert: S18APIErrorBudgetBurnSlow
         expr: |
           (
-            (1 - sum(rate(wiseai_api_requests_success_total[1h])) / sum(rate(wiseai_api_requests_total[1h])))
+            (1 - sum(rate(s18_api_requests_success_total[1h])) / sum(rate(s18_api_requests_total[1h])))
             / 0.005
           ) > 6
         for: 1h

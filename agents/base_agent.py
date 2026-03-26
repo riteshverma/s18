@@ -95,9 +95,9 @@ class AgentRunner:
         output["plan_graph"] = pg
         return output
 
-    def _ensure_wise_output_schema(self, output, raw_response: str) -> dict:
+    def _ensure_thinker_output_schema(self, output, raw_response: str) -> dict:
         """
-        Ensure ThinkerAgent output includes risk_level, confidence, flags for WISE integration.
+        Ensure ThinkerAgent output includes the normalized fields expected downstream.
         """
         if isinstance(output, list) and output and isinstance(output[0], dict):
             output = output[0]
@@ -225,7 +225,7 @@ class AgentRunner:
                 output = self._ensure_planner_plan_graph(output, response)
             elif agent_type == "ThinkerAgent":
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
-                output = self._ensure_wise_output_schema(output, response)
+                output = self._ensure_thinker_output_schema(output, response)
             else:
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
             

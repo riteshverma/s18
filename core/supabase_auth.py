@@ -38,7 +38,7 @@ def _get_expected_audience() -> Optional[str]:
 
 
 def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
-    if not authorization:
+    if not authorization or not isinstance(authorization, str):
         return None
     parts = authorization.strip().split(" ", 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":

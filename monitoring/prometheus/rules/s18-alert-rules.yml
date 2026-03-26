@@ -1,8 +1,8 @@
 groups:
-  - name: wiseai_alert_rules
+  - name: s18_alert_rules
     rules:
-      - alert: WiseAIApiAvailabilityLow
-        expr: wiseai:sli_api_availability:ratio_5m < 0.995
+      - alert: S18ApiAvailabilityLow
+        expr: s18:sli_api_availability:ratio_5m < 0.995
         for: 10m
         labels:
           severity: p1
@@ -10,8 +10,8 @@ groups:
           summary: API availability below 99.5%
           description: API availability is below SLO threshold.
 
-      - alert: WiseAIOrchestratorSuccessLow
-        expr: wiseai:sli_agent_run_success:ratio_5m < 0.97
+      - alert: S18OrchestratorSuccessLow
+        expr: s18:sli_agent_run_success:ratio_5m < 0.97
         for: 10m
         labels:
           severity: p1
@@ -19,8 +19,8 @@ groups:
           summary: Orchestrator success below 97%
           description: Orchestrator success ratio is below threshold.
 
-      - alert: WiseAIOrchestratorLatencyHigh
-        expr: wiseai:orchestrator_run_latency_p95_ms:5m > 18000
+      - alert: S18OrchestratorLatencyHigh
+        expr: s18:orchestrator_run_latency_p95_ms:5m > 18000
         for: 15m
         labels:
           severity: p2
@@ -28,8 +28,8 @@ groups:
           summary: Orchestrator p95 latency above 18s
           description: Orchestrator latency exceeded SLO.
 
-      - alert: WiseAIRetrievalCoverageLow
-        expr: wiseai:sli_retrieval_coverage:ratio_5m < 0.99
+      - alert: S18RetrievalCoverageLow
+        expr: s18:sli_retrieval_coverage:ratio_5m < 0.99
         for: 15m
         labels:
           severity: p2
@@ -37,8 +37,8 @@ groups:
           summary: Retrieval coverage below 99%
           description: Too many retrieval calls return empty results.
 
-      - alert: WiseAIMcpReliabilityLow
-        expr: wiseai:sli_mcp_reliability:ratio_5m < 0.98
+      - alert: S18McpReliabilityLow
+        expr: s18:sli_mcp_reliability:ratio_5m < 0.98
         for: 15m
         labels:
           severity: p2

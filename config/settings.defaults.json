@@ -47,7 +47,7 @@
     "enabled": false,
     "supabase_url": "",
     "service_role_key": "",
-    "request_table": "ehr_request_log",
-    "result_table": "ehr_clinical_result"
+    "request_table": "agent_request_log",
+    "result_table": "agent_result_log"
     }
 }
