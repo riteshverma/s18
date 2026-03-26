@@ -5,6 +5,7 @@ import asyncio
 import time
 import ast
 import json
+from pathlib import Path
 from memory.context import ExecutionContextManager
 from agents.base_agent import AgentRunner
 from core.utils import log_step, log_error
@@ -130,37 +131,98 @@ class AgentLoop4:
         finally:
             self._tasks.discard(task)
 
-    async def run(self, query, file_manifest, globals_schema, uploaded_files, session_id=None, memory_context=None):
+    def _apply_memory_context(self, context, memory_context):
+        context.memory_context = memory_context
+        context.plan_graph.graph["memory_context"] = memory_context
+        if memory_context is not None:
+            context.plan_graph.graph.setdefault("globals_schema", {})["memory_context"] = memory_context
+
+    def _prepare_resumed_context(self, context, memory_context=None):
+        context.set_multi_mcp(self.multi_mcp)
+        context.api_mode = bool(context.plan_graph.graph.get("api_mode", True))
+        context.user_input_event = asyncio.Event()
+        context.user_input_value = None
+        context._live_display = None
+        restored_memory = memory_context
+        if restored_memory is None:
+            restored_memory = context.plan_graph.graph.get("memory_context")
+        self._apply_memory_context(context, restored_memory)
+        context.stop_requested = False
+
+        for _, node_data in context.plan_graph.nodes(data=True):
+            if node_data.get("status") == "running":
+                node_data["status"] = "pending"
+                node_data["error"] = None
+                node_data["end_time"] = None
+
+        context.plan_graph.graph["status"] = "running"
+        context._save_session()
+        return context
+
+    async def resume(self, session_file, memory_context=None):
+        context = ExecutionContextManager.load_session(Path(session_file))
+        self.context = self._prepare_resumed_context(context, memory_context=memory_context)
+
+        query_node = self.context.plan_graph.nodes["Query"] if "Query" in self.context.plan_graph else {}
+        has_expanded_plan = len(self.context.plan_graph.nodes) > 2
+        if not has_expanded_plan or query_node.get("status") != "completed":
+            return await self.run(
+                query=self.context.plan_graph.graph.get("original_query", ""),
+                file_manifest=self.context.plan_graph.graph.get("file_manifest", []),
+                globals_schema=self.context.plan_graph.graph.get("globals_schema", {}),
+                uploaded_files=[],
+                session_id=self.context.plan_graph.graph.get("session_id"),
+                memory_context=self.context.memory_context,
+                existing_context=self.context,
+            )
+
+        await self._track_task(self._execute_dag(self.context))
+        return self.context
+
+    async def run(self, query, file_manifest, globals_schema, uploaded_files, session_id=None, memory_context=None, existing_context=None):
         run_start_ms = now_ms()
         final_status = "failed"
-        # 🟢 PHASE 0: BOOTSTRAP CONTEXT (Immediate VS Code feedback)
-        # We create a temporary graph with just a "Query" node (running Planner) so the UI sees meaningful start
-        bootstrap_graph = {
-            "nodes": [
-                {
-                    "id": "Query", 
-                    "description": "Formulate execution plan", 
-                    "agent": "PlannerAgent", 
-                    "status": "running",
-                    "reads": ["original_query"],
-                    "writes": ["plan_graph"]
-                }
-            ],
-            "edges": [
-                {"source": "ROOT", "target": "Query"}
-            ]
-        }
-        
         try:
-            # Create Context & Save Immediately
-            self.context = ExecutionContextManager(
-                bootstrap_graph,
-                session_id=session_id,
-                original_query=query,
-                file_manifest=file_manifest
-            )
-            self.context.memory_context = memory_context # Store for retrieval
-            # Inject multi_mcp immediately
+            if existing_context is None:
+                # 🟢 PHASE 0: BOOTSTRAP CONTEXT (Immediate VS Code feedback)
+                # We create a temporary graph with just a "Query" node (running Planner) so the UI sees meaningful start
+                bootstrap_graph = {
+                    "nodes": [
+                        {
+                            "id": "Query", 
+                            "description": "Formulate execution plan", 
+                            "agent": "PlannerAgent", 
+                            "status": "running",
+                            "reads": ["original_query"],
+                            "writes": ["plan_graph"]
+                        }
+                    ],
+                    "edges": [
+                        {"source": "ROOT", "target": "Query"}
+                    ]
+                }
+
+                # Create Context & Save Immediately
+                self.context = ExecutionContextManager(
+                    bootstrap_graph,
+                    session_id=session_id,
+                    original_query=query,
+                    file_manifest=file_manifest
+                )
+                log_step("✅ Session initialized with Query processing", symbol="🌱")
+            else:
+                self.context = existing_context
+                self.context.set_multi_mcp(self.multi_mcp)
+                self.context.plan_graph.graph["file_manifest"] = file_manifest
+                query_node = self.context.plan_graph.nodes["Query"] if "Query" in self.context.plan_graph else None
+                if query_node and query_node.get("status") != "completed":
+                    query_node["status"] = "running"
+                    query_node["error"] = None
+                    query_node["end_time"] = None
+                self.context.plan_graph.graph["status"] = "running"
+                log_step("✅ Resuming session from saved bootstrap state", symbol="🌱")
+
+            self._apply_memory_context(self.context, memory_context)
             self.context.multi_mcp = self.multi_mcp
             seeded_query = self.context.plan_graph.graph['globals_schema'].get("original_query")
             self.context.plan_graph.graph['globals_schema'].update(globals_schema or {})
@@ -168,14 +230,13 @@ class AgentLoop4:
             if (merged_query is None or merged_query == "") and seeded_query not in (None, ""):
                 self.context.plan_graph.graph['globals_schema']['original_query'] = seeded_query
             self.context._save_session()
-            log_step("✅ Session initialized with Query processing", symbol="🌱")
         except Exception as e:
             print(f"❌ ERROR initializing context: {e}")
             raise
 
         # Phase 1: File Profiling (if files exist)
-        file_profiles = {}
-        if uploaded_files:
+        file_profiles = self.context.plan_graph.graph.get("file_profiles", {}) or {}
+        if uploaded_files and not file_profiles:
             # Wrap with retry for transient failures
             async def run_distiller():
                 return await self.agent_runner.run_agent(

@@ -127,56 +127,60 @@ def _retrieve_memories_sync(query: str):
     return remme_store.search(emb, query_text=query, k=3)
 
 
+async def _build_memory_context(run_id: str, query: str):
+    memory_context = ""
+    results = []
+
+    try:
+        # Keep sync embedding/search work off the event loop so /runs polling
+        # stays responsive under load.
+        results = await asyncio.to_thread(_retrieve_memories_sync, query)
+        if results:
+            memory_str = "\n".join([f"- {r['text']} (Confidence: {r.get('score', 0):.2f})" for r in results])
+            memory_context = f"PREVIOUS MEMORIES ABOUT USER:\n{memory_str}\n"
+            print(f" Remme: Injected {len(results)} memories into run {run_id}")
+    except Exception as e:
+        print(f"⚠️ Remme Retrieval Failed: {e}")
+
+    try:
+        rag_result = await multi_mcp.call_tool("rag", "search_stored_documents_rag", {"query": query})
+        if rag_result and hasattr(rag_result, "content") and isinstance(rag_result.content, list):
+            snippets = []
+            for item in rag_result.content:
+                if hasattr(item, "text"):
+                    try:
+                        parsed = ast.literal_eval(item.text)
+                        if isinstance(parsed, list):
+                            snippets.extend(parsed[:5])
+                        else:
+                            snippets.append(item.text[:500])
+                    except Exception:
+                        snippets.append((item.text or "")[:500])
+            if snippets:
+                rag_str = "\n".join(f"- {s[:400]}..." if len(s) > 400 else f"- {s}" for s in snippets[:8])
+                memory_context += f"\nRELEVANT DOCUMENT SNIPPETS (RAG):\n{rag_str}\n"
+                print(f"[{run_id}] Injected {len(snippets)} RAG snippets into run context")
+    except Exception as e:
+        print(f"⚠️ RAG context injection failed (non-fatal): {e}")
+
+    return memory_context, results
+
+
 async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str, Any]] = None):
     """Background task to execute the agent loop"""
     final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete"}
+    context = None
+    results = []
+    loop = AgentLoop4(multi_mcp=multi_mcp)
+    active_loops[run_id] = loop
     try:
         # 1. RETRIEVE MEMORIES (Remme)
         # Search for past relevant facts to injecting into this run
-        memory_context = ""
-        context = None # Initialize for safe access in finally block
-        results = []
-        try:
-            # Keep sync embedding/search work off the event loop so /runs polling
-            # stays responsive under load.
-            results = await asyncio.to_thread(_retrieve_memories_sync, query)
-            if results:
-                memory_str = "\n".join([f"- {r['text']} (Confidence: {r.get('score', 0):.2f})" for r in results])
-                memory_context = f"PREVIOUS MEMORIES ABOUT USER:\n{memory_str}\n"
-                print(f" Remme: Injected {len(results)} memories into run {run_id}")
-        except Exception as e:
-            print(f"⚠️ Remme Retrieval Failed: {e}")
+        memory_context, results = await _build_memory_context(run_id, query)
 
-        # 1b. RAG context: search indexed documents so CBC/lab and document queries get doc context
-        try:
-            rag_result = await multi_mcp.call_tool("rag", "search_stored_documents_rag", {"query": query})
-            if rag_result and hasattr(rag_result, "content") and isinstance(rag_result.content, list):
-                snippets = []
-                for item in rag_result.content:
-                    if hasattr(item, "text"):
-                        try:
-                            import ast
-                            parsed = ast.literal_eval(item.text)
-                            if isinstance(parsed, list):
-                                snippets.extend(parsed[:5])
-                            else:
-                                snippets.append(item.text[:500])
-                        except Exception:
-                            snippets.append((item.text or "")[:500])
-                if snippets:
-                    rag_str = "\n".join(f"- {s[:400]}..." if len(s) > 400 else f"- {s}" for s in snippets[:8])
-                    memory_context += f"\nRELEVANT DOCUMENT SNIPPETS (RAG):\n{rag_str}\n"
-                    print(f"[{run_id}] Injected {len(snippets)} RAG snippets into run context")
-        except Exception as e:
-            print(f"⚠️ RAG context injection failed (non-fatal): {e}")
-
-        loop = AgentLoop4(multi_mcp=multi_mcp)
-        # Register the LOOP instance immediately so we can stop it
-        active_loops[run_id] = loop
-        
         # Execute the loop
         # The loop will maintain its own internal context
-        print(f"[{run_id}] MEMORY CONTEXT INJECTED:\n{memory_context}")
+        print(f"[{run_id}] MEMORY CONTEXT READY ({len(memory_context)} chars)")
         try:
              context = await loop.run(query, [], {}, [], session_id=run_id, memory_context=memory_context)
         except asyncio.CancelledError:
@@ -454,6 +458,46 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
         return final_result
 
 
+async def process_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = None):
+    """Background task to resume a saved run from disk."""
+    final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete"}
+    context = None
+    results = []
+    query = ""
+    loop = AgentLoop4(multi_mcp=multi_mcp)
+    active_loops[run_id] = loop
+    try:
+        summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
+        found_file = _find_session_file(run_id, summaries_dir)
+        if not found_file:
+            raise FileNotFoundError(f"Run {run_id} not found")
+
+        data = json.loads(found_file.read_text(encoding="utf-8", errors="ignore"))
+        query = data.get("graph", {}).get("original_query") or ""
+        memory_context = data.get("graph", {}).get("memory_context")
+        if memory_context is None and query:
+            memory_context, results = await _build_memory_context(run_id, query)
+
+        context = await loop.resume(found_file, memory_context=memory_context)
+    except Exception as e:
+        print(f"Resume {run_id} failed: {e}")
+    finally:
+        if run_id in active_loops:
+            del active_loops[run_id]
+
+        if context and context.plan_graph:
+            for node_id in context.plan_graph.nodes:
+                node = context.plan_graph.nodes[node_id]
+                if node.get("status") == "failed":
+                    final_result["status"] = "failed"
+                    final_result["error"] = node.get("error")
+                    break
+            else:
+                final_result["status"] = context.plan_graph.graph.get("status", "completed")
+
+        return final_result
+
+
 # === Endpoints ===
 
 @router.post("/runs")
@@ -509,6 +553,33 @@ async def create_run(
         "created_at": datetime.now().isoformat(),
         "query": request.query,
         "idempotency_key": idempotency_key,
+        "poll_timeout_seconds": get_run_poll_timeout(),
+    }
+
+
+@router.post("/runs/{run_id}/resume")
+async def resume_run(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+    user: Dict[str, Any] = Depends(require_supabase_user),
+):
+    if run_id in active_loops:
+        return {
+            "id": run_id,
+            "status": "running",
+            "poll_timeout_seconds": get_run_poll_timeout(),
+        }
+
+    summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
+    found_file = _find_session_file(run_id, summaries_dir)
+    if not found_file:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    background_tasks.add_task(process_resume, run_id)
+    return {
+        "id": run_id,
+        "status": "resuming",
+        "created_at": datetime.now().isoformat(),
         "poll_timeout_seconds": get_run_poll_timeout(),
     }
 

@@ -57,6 +57,8 @@ class ExecutionContextManager:
         self.plan_graph.graph['created_at'] = datetime.utcnow().isoformat()
         self.plan_graph.graph['status'] = 'running'
         self.plan_graph.graph['globals_schema'] = {}
+        self.plan_graph.graph['api_mode'] = api_mode
+        self.plan_graph.graph['memory_context'] = None
         if original_query is not None:
             self.plan_graph.graph['globals_schema']['original_query'] = original_query
         self.failure_replan_requested = False
@@ -682,22 +684,34 @@ class ExecutionContextManager:
         session_file = date_dir / f"session_{session_id}.json"
         
         graph_data = nx.node_link_data(self.plan_graph)
-        
-        with open(session_file, 'w', encoding='utf-8') as f:
+        temp_file = session_file.with_suffix(".json.tmp")
+        with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(graph_data, f, indent=2, default=str, ensure_ascii=False)
+        temp_file.replace(session_file)
 
     @classmethod
     def load_session(cls, session_file: Path, debug_mode: bool = False):
         """Load a NetworkX graph session from disk"""
         with open(session_file, 'r', encoding='utf-8') as f:
             graph_data = json.load(f)
-        
-        plan_graph = nx.node_link_graph(graph_data, edges="links")
-        
+
+        if "links" in graph_data:
+            plan_graph = nx.node_link_graph(graph_data, edges="links")
+        elif "edges" in graph_data:
+            plan_graph = nx.node_link_graph(graph_data, edges="edges")
+        else:
+            graph_data["edges"] = []
+            plan_graph = nx.node_link_graph(graph_data, edges="edges")
+
         context = cls.__new__(cls)
         context.plan_graph = plan_graph
         context.debug_mode = debug_mode
         context.stop_requested = False
+        context.api_mode = bool(plan_graph.graph.get("api_mode", True))
+        context.user_input_event = asyncio.Event()
+        context.user_input_value = None
+        context.memory_context = plan_graph.graph.get("memory_context")
+        context._live_display = None
         context.failure_replan_requested = False
         context.failure_replan_attempts = 0
         context._failure_replan_payload = None
