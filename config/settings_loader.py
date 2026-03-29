@@ -130,8 +130,8 @@ def get_timeout() -> int:
     return load_settings()["ollama"]["timeout"]
 
 def get_run_poll_timeout() -> int:
-    """Recommended timeout in seconds for clients polling GET /runs/{id}. Runs can take ~2 min; use this so the client does not abort too early."""
-    return load_settings().get("run_poll_timeout_seconds", 300)
+    """Recommended timeout in seconds for clients polling GET /runs/{id}. Full runs often exceed 5 minutes."""
+    return load_settings().get("run_poll_timeout_seconds", 900)
 
 # --- Initialize on import ---
 settings = load_settings()

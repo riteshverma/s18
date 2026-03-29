@@ -33,3 +33,60 @@ def test_repair_cbc_plan_dependencies_wires_summary_after_ehr():
 
     assert "patient_record" in new_nodes[0]["reads"]
     assert {"source": "T002", "target": "T001"} in new_edges
+
+
+def test_enforce_cbc_full_mode_minimum_plan_when_single_thinker():
+    loop = AgentLoop4(MagicMock())
+    query = (
+        "[Patient ID: abc] [Execution Mode: full] "
+        'Request: {"hemoglobin": 7.0, "wbc": 14000, "platelets": 250000}'
+    )
+    out = {
+        "plan_graph": {
+            "nodes": [
+                {
+                    "id": "T001",
+                    "agent": "ThinkerAgent",
+                    "reads": ["original_query"],
+                    "writes": ["response"],
+                    "status": "pending",
+                }
+            ],
+            "edges": [{"source": "Query", "target": "T001"}],
+        },
+        "next_step_id": "T001",
+    }
+
+    loop._enforce_cbc_full_mode_minimum_plan(query, out)
+
+    nodes = out["plan_graph"]["nodes"]
+    assert len(nodes) == 2
+    assert nodes[0]["agent"] == "EHRDataMinerAgent"
+    assert nodes[1]["agent"] == "ClinicalReasoningAgent"
+    assert out["next_step_id"] == "T001"
+    assert {"source": "Query", "target": "T001"} in out["plan_graph"]["edges"]
+    assert {"source": "T001", "target": "T002"} in out["plan_graph"]["edges"]
+
+
+def test_filter_memory_context_for_cbc_removes_mental_health_lines():
+    loop = AgentLoop4(MagicMock())
+    query = (
+        "[Patient ID: abc] [Execution Mode: full] "
+        'Request: {"hemoglobin": 8.0, "wbc": 14000, "platelets": 250000}'
+    )
+    memory_context = (
+        "PREVIOUS MEMORIES ABOUT USER:\n"
+        "- CBC: low hemoglobin with high wbc.\n"
+        "- Task: mental_health PHQ9 12 and GAD7 8.\n"
+        "- anxiety and depression screening details.\n"
+        "- Keep this CBC trend note."
+    )
+
+    filtered = loop._filter_memory_context_for_cbc(query, memory_context)
+
+    assert isinstance(filtered, str)
+    assert "CBC: low hemoglobin" in filtered
+    assert "Keep this CBC trend note" in filtered
+    assert "mental_health" not in filtered
+    assert "PHQ9" not in filtered
+    assert "anxiety" not in filtered.lower()

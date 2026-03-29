@@ -79,6 +79,8 @@ def _infer_query_type(query: str) -> str:
         return "rac"
     if "abdm" in q or "fhir" in q:
         return "abdm_fhir"
+    if "mental_health" in q or "phq9" in q or "gad7" in q:
+        return "mental_health"
     return "generic"
 
 

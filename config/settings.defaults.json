@@ -1,5 +1,5 @@
 {
-    "run_poll_timeout_seconds": 300,
+    "run_poll_timeout_seconds": 900,
     "ollama": {
         "base_url": "http://127.0.0.1:11434",
         "timeout": 360
