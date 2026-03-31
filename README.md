@@ -26,6 +26,12 @@
 - **Canonical (Mar 2026 sync)** - `docs/architecture/WISE_AI_CDSS_Architecture_2026-03.md`
 - **Previous conceptual baseline** - `docs/architecture/WISE_AI_CDSS_Architecture.md` in wise-ai/TSAI-EAG-Capstone
 
+### Full stack with wise-ai
+
+Set **`WISE_MOCKEHR_BASE_URL`** to the base URL of the wise-ai FastAPI app (Mock EHR). Use whatever host and port actually serve that API—for example `http://localhost:8000` when wise-ai runs on your machine, or a Compose service URL such as `http://backend:8000` when both stacks share a Docker network. The integration is the same whether wise-ai is started with `uvicorn`, Docker, or another wrapper, as long as S18 can reach the URL.
+
+For **Docker Compose** flows that run wise-ai together with S18 (local builds, images from GHCR, or the full-stack compose file), see the wise-ai repo: **[`deployment/docker/README.md`](https://github.com/wiseaihub/TSAI-EAG-Capstone/tree/main/deployment/docker)** — use the **Build and run locally**, **Run from GitHub Container Registry**, and **Full stack (wise-ai + S18Share)** subsections as needed.
+
 ### Quick verification (local)
 
 Run API:
@@ -94,7 +100,7 @@ Optional:
 
 - **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
-- **WISE_MOCKEHR_BASE_URL** – Base URL of wise-ai Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from wise-ai for end-to-end integration. Example: `http://backend:8000` (Docker) or `http://localhost:8000` (host).
+- **WISE_MOCKEHR_BASE_URL** – Base URL of the wise-ai Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from wise-ai for end-to-end integration. Examples: `http://localhost:8000` (wise-ai on host), `http://backend:8000` (typical Compose service name on the shared network). Match the URL to how you run wise-ai, not only to Docker.
 
 ### Supabase integration contract (S18)
 
