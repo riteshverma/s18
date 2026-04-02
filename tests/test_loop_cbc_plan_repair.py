@@ -90,3 +90,67 @@ def test_filter_memory_context_for_cbc_removes_mental_health_lines():
     assert "mental_health" not in filtered
     assert "PHQ9" not in filtered
     assert "anxiety" not in filtered.lower()
+
+
+def test_filter_memory_context_for_mental_health_removes_cbc_lines():
+    loop = AgentLoop4(MagicMock())
+    query = (
+        "[Task: mental_health] [Patient ID: abc] [Execution Mode: full] "
+        'Request: {"task": "mental_health", "patient_payload": {"phq9_total": 11, "gad7_total": 8}}'
+    )
+    memory_context = (
+        "PREVIOUS MEMORIES ABOUT USER:\n"
+        "- CBC: low hemoglobin with high wbc.\n"
+        "- Platelets trend looked stable.\n"
+        "- Task: mental_health PHQ9 12 and GAD7 8.\n"
+        "- Keep this anxiety follow-up note."
+    )
+
+    filtered = loop._filter_memory_context_for_mental_health(query, memory_context)
+
+    assert isinstance(filtered, str)
+    assert "mental_health" in filtered
+    assert "anxiety follow-up note" in filtered
+    assert "hemoglobin" not in filtered.lower()
+    assert "platelets" not in filtered.lower()
+
+
+def test_enforce_mental_health_plan_guard_rewrites_cbc_agents():
+    loop = AgentLoop4(MagicMock())
+    query = (
+        "[Task: mental_health] [Patient ID: abc] [Execution Mode: full] "
+        'Request: {"task": "mental_health", "patient_payload": {"phq9_total": 14, "gad7_total": 9}}'
+    )
+    out = {
+        "plan_graph": {
+            "nodes": [
+                {
+                    "id": "T001",
+                    "agent": "CBCAgent",
+                    "reads": ["original_query"],
+                    "writes": ["cbc_results"],
+                    "status": "pending",
+                },
+                {
+                    "id": "T002",
+                    "agent": "ClinicalReasoningAgent",
+                    "reads": ["cbc_results"],
+                    "writes": ["response"],
+                    "status": "pending",
+                },
+            ],
+            "edges": [
+                {"source": "Query", "target": "T001"},
+                {"source": "T001", "target": "T002"},
+            ],
+        },
+        "next_step_id": "T001",
+    }
+
+    loop._enforce_mental_health_plan_guard(query, out)
+
+    nodes = out["plan_graph"]["nodes"]
+    assert len(nodes) == 1
+    assert nodes[0]["agent"] == "ThinkerAgent"
+    assert out["next_step_id"] == "T001"
+    assert out["plan_graph"]["edges"] == [{"source": "Query", "target": "T001"}]

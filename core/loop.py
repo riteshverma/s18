@@ -270,6 +270,7 @@ class AgentLoop4:
                         raise RuntimeError(msg)
 
                 planner_memory_context = self._filter_memory_context_for_cbc(query, memory_context)
+                planner_memory_context = self._filter_memory_context_for_mental_health(query, planner_memory_context)
 
                 if self._is_cbc_payload_query(query) and self._is_fast_mode(query):
                     plan_result = {
@@ -388,6 +389,12 @@ class AgentLoop4:
                     out["next_step_id"] = "T001"
                 # For CBC full mode, enforce a deterministic minimum multi-step graph.
                 self._enforce_cbc_full_mode_minimum_plan(query, out)
+                # For mental-health tasks, block CBC/lab-miner routing leakage.
+                mh_guard_applied = self._enforce_mental_health_plan_guard(query, out)
+                if mh_guard_applied:
+                    # Surface a compact marker in planner output so downstream adapters
+                    # can expose this in API/debug flags without parsing full graphs.
+                    out["mental_health_plan_guard_applied"] = True
                 pg = out["plan_graph"]
 
                 # ===== AUTO-CLARIFICATION CHECK =====
@@ -519,6 +526,14 @@ class AgentLoop4:
     def _is_fast_mode(self, query: str) -> bool:
         return "[execution mode: fast]" in (query or "").lower()
 
+    def _is_mental_health_task_query(self, query: str) -> bool:
+        q = (query or "").lower()
+        return (
+            "[task: mental_health]" in q
+            or '"task": "mental_health"' in q
+            or '"task":"mental_health"' in q
+        )
+
     def _filter_memory_context_for_cbc(self, query: str, memory_context):
         """
         For CBC planning, remove unrelated mental-health memory lines that can bias
@@ -554,6 +569,43 @@ class AgentLoop4:
             return memory_context
         filtered = "\n".join(kept_lines).strip()
         log_step(f"🧹 Filtered {removed} mental-health memory lines for CBC planning", symbol="🧹")
+        return filtered if filtered else None
+
+    def _filter_memory_context_for_mental_health(self, query: str, memory_context):
+        """
+        For mental-health planning, remove CBC/lab-specific memory lines that can
+        bias planner outputs toward CBC-style retrieval plans.
+        """
+        if not self._is_mental_health_task_query(query):
+            return memory_context
+        if not isinstance(memory_context, str) or not memory_context.strip():
+            return memory_context
+
+        cbc_markers = (
+            "cbc",
+            "hemoglobin",
+            "wbc",
+            "rbc",
+            "platelets",
+            "anemia",
+            "leukocytosis",
+            "task: cbc",
+            "cbc_results",
+        )
+
+        kept_lines = []
+        removed = 0
+        for line in memory_context.splitlines():
+            low = line.lower()
+            if any(marker in low for marker in cbc_markers):
+                removed += 1
+                continue
+            kept_lines.append(line)
+
+        if removed == 0:
+            return memory_context
+        filtered = "\n".join(kept_lines).strip()
+        log_step(f"🧹 Filtered {removed} CBC memory lines for mental-health planning", symbol="🧹")
         return filtered if filtered else None
 
     def _enforce_cbc_full_mode_minimum_plan(self, query: str, out: dict):
@@ -606,6 +658,50 @@ class AgentLoop4:
         ]
         out["next_step_id"] = "T001"
         log_step("🔧 Enforced CBC full-mode minimum multi-step plan", symbol="🔧")
+
+    def _enforce_mental_health_plan_guard(self, query: str, out: dict) -> bool:
+        """
+        Mental-health guard:
+        If planner leaks CBC/lab-retrieval agents into a mental-health task, replace
+        with a deterministic single-step reasoning plan.
+        """
+        if not self._is_mental_health_task_query(query):
+            return False
+        if not isinstance(out, dict):
+            return False
+
+        pg = out.get("plan_graph")
+        if not isinstance(pg, dict):
+            pg = {"nodes": [], "edges": []}
+            out["plan_graph"] = pg
+
+        nodes = pg.get("nodes")
+        if not isinstance(nodes, list):
+            nodes = []
+            pg["nodes"] = nodes
+
+        blocked_agents = {"CBCAgent", "EHRDataMinerAgent", "TrendAgent", "SearchLabsAgent"}
+        has_blocked = any(
+            isinstance(node, dict) and node.get("agent") in blocked_agents
+            for node in nodes
+        )
+        if not has_blocked:
+            return False
+
+        pg["nodes"] = [
+            {
+                "id": "T001",
+                "agent": "ThinkerAgent",
+                "description": "Analyze mental-health payload and produce risk, confidence, and flags.",
+                "reads": ["original_query"],
+                "writes": ["response"],
+                "status": "pending",
+            }
+        ]
+        pg["edges"] = [{"source": "Query", "target": "T001"}]
+        out["next_step_id"] = "T001"
+        log_step("🛡️ Enforced mental-health plan guard (removed CBC/lab routing)", symbol="🛡️")
+        return True
 
     def _should_replan(self):
         """
