@@ -4,7 +4,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python -m uvicorn api:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 75 --access-log"
+startCommand = "sh -c 'exec python -m uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000} --timeout-keep-alive 75 --access-log'"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
