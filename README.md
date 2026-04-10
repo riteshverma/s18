@@ -112,6 +112,7 @@ Optional:
 4. **`AUTH_ENABLED` / `S18_AUTH_ENABLED`** – Use `false` for staging unless valid Supabase JWTs are sent from wise-ai (`Authorization` or `X-Forwarded-Authorization`). Both env names are honored.
 5. **wise-ai → S18** – Point the Capstone/orchestrator base URL at this service’s public URL (e.g. `https://s18-production.up.railway.app`).
 6. **Browser UI** – If the wise-ai **frontend** calls S18 directly, set **`CORS_ALLOWED_ORIGINS`** to that frontend origin.
+7. **502 / only “Starting Container” in logs** – Clear any **custom Start Command** in Railway so the image’s **`ENTRYPOINT`** runs ([`scripts/docker-entrypoint.sh`](scripts/docker-entrypoint.sh)). After redeploy you should see `[s18] entrypoint PORT=…` and `Uvicorn running on http://0.0.0.0:…`. Config-as-code: [`railway.toml`](railway.toml) (`healthcheckPath = "/health"`). MCP startup errors are logged but no longer take down the API process.
 
 ### Supabase integration contract (S18)
 

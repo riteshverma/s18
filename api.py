@@ -2,6 +2,7 @@ import sys
 import os
 import asyncio
 import subprocess
+import traceback
 from pathlib import Path
 
 # Windows: ProactorEventLoop required for asyncio subprocess (git clone, uv run)
@@ -100,7 +101,12 @@ async def lifespan(app: FastAPI):
     scheduler_service.initialize()
     scheduler_service.register_morning_briefing()
     persistence_manager.load_snapshot()
-    await _start_mcp_with_timeout()
+    try:
+        await _start_mcp_with_timeout()
+    except Exception:
+        # Do not fail HTTP readiness: MCP stdio servers often misbehave in minimal containers.
+        print("⚠️ MCP startup failed; API will stay up. Traceback:")
+        traceback.print_exc()
     
     # Check git
     try:
