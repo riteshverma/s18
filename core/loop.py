@@ -50,51 +50,71 @@ def sanitize_io_keys_list(keys):
 
 # ===== EXPONENTIAL BACKOFF FOR TRANSIENT FAILURES =====
 
+def _is_transient_llm_error(exc: BaseException) -> bool:
+    """Return True for errors that should be retried (rate-limit, capacity, transient network)."""
+    msg = str(exc).lower()
+    # Gemini ServerError with 503 / 429 status codes
+    try:
+        from google.genai.errors import ServerError
+        if isinstance(exc, ServerError):
+            code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+            if code in (503, 429) or "503" in msg or "429" in msg or "unavailable" in msg or "rate" in msg:
+                return True
+    except ImportError:
+        pass
+    # Generic network / timeout variants
+    if isinstance(exc, (asyncio.TimeoutError, ConnectionError, TimeoutError)):
+        return True
+    # httpx / aiohttp / requests transient patterns
+    if any(kw in msg for kw in ("503", "429", "unavailable", "rate limit", "too many requests", "timed out", "connection")):
+        return True
+    return False
+
+
 async def retry_with_backoff(
-    async_func, 
-    max_retries: int = 3, 
-    base_delay: float = 1.0,
-    retryable_errors: tuple = None
+    async_func,
+    max_retries: int = 5,
+    base_delay: float = 3.0,
+    retryable_errors: tuple = None,
 ):
     """
     Retry an async function with exponential backoff.
-    
+
     Args:
         async_func: Async callable to execute
-        max_retries: Maximum retry attempts (default: 3)
-        base_delay: Initial delay in seconds (default: 1.0)
-        retryable_errors: Tuple of exception types to retry on
-        
+        max_retries: Maximum retry attempts (default: 5)
+        base_delay: Initial delay in seconds (default: 3.0)
+        retryable_errors: Deprecated – transient detection uses _is_transient_llm_error.
+
     Returns:
         Result of async_func on success
-        
+
     Raises:
         Last exception if all retries exhausted
     """
-    if retryable_errors is None:
-        retryable_errors = (
-            asyncio.TimeoutError,
-            ConnectionError,
-            TimeoutError,
-        )
-    
     last_exception = None
-    
+
     for attempt in range(max_retries):
         try:
             return await async_func()
-        except retryable_errors as e:
-            last_exception = e
-            if attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt)  # 1s, 2s, 4s
-                log_step(f"Transient error: {type(e).__name__}. Retrying in {delay}s (attempt {attempt + 1}/{max_retries})", symbol="🔄")
-                await asyncio.sleep(delay)
+        except BaseException as e:
+            if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)):
+                raise
+            if _is_transient_llm_error(e):
+                last_exception = e
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # 3s, 6s, 12s, 24s
+                    log_step(
+                        f"Transient error ({type(e).__name__}). Retrying in {delay:.0f}s "
+                        f"(attempt {attempt + 1}/{max_retries})",
+                        symbol="🔄",
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    log_error(f"All {max_retries} retry attempts exhausted: {e}")
             else:
-                log_error(f"All {max_retries} retry attempts failed: {e}")
-        except Exception as e:
-            # Non-retryable error, raise immediately
-            raise
-    
+                raise
+
     raise last_exception
 
 

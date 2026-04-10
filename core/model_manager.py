@@ -196,23 +196,45 @@ class ModelManager:
             ModelManager._last_call = time.time()
 
 
+    # Fallback model chain: tried in order when the primary model returns 503/429.
+    _GEMINI_FALLBACK_CHAIN = ["gemini-2.0-flash", "gemini-1.5-flash"]
+
+    def _is_capacity_error(self, exc: BaseException) -> bool:
+        """True for 503/429 capacity or rate-limit responses from Gemini."""
+        if isinstance(exc, ServerError):
+            code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+            msg = str(exc).lower()
+            return code in (503, 429) or "503" in msg or "429" in msg or "unavailable" in msg
+        return False
+
     async def _gemini_generate(self, prompt: str) -> str:
         await self._wait_for_rate_limit()
-        try:
-            # ✅ CORRECT: Use synchronous SDK client in thread to bypass aiohttp/DNS issues common on macOS
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.model_info["model"],
-                contents=prompt
-            )
-            return response.text.strip()
-
-        except ServerError as e:
-            # ✅ FIXED: Raise the exception instead of returning it
-            raise e
-        except Exception as e:
-            # ✅ Handle other potential errors
-            raise RuntimeError(f"Gemini generation failed: {str(e)}")
+        primary_model = self.model_info["model"]
+        models_to_try = [primary_model] + [
+            m for m in self._GEMINI_FALLBACK_CHAIN if m != primary_model
+        ]
+        last_exc: Exception = RuntimeError("No Gemini model available")
+        for model in models_to_try:
+            try:
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=model,
+                    contents=prompt,
+                )
+                if model != primary_model:
+                    print(f"[ModelManager] Gemini fallback used: {model} (primary {primary_model} unavailable)")
+                return response.text.strip()
+            except ServerError as e:
+                last_exc = e
+                if self._is_capacity_error(e) and model != models_to_try[-1]:
+                    wait = 5
+                    print(f"[ModelManager] {model} capacity error ({e}); trying next fallback in {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
+                raise
+            except Exception as e:
+                raise RuntimeError(f"Gemini generation failed: {str(e)}")
+        raise last_exc
 
     async def _gemini_generate_content(self, contents: list) -> str:
         """Generate content with support for text and images using Gemini SDK"""
