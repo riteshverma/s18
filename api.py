@@ -50,6 +50,28 @@ from core.prometheus_metrics import (
 
 from contextlib import asynccontextmanager
 
+
+def _build_cors_origins() -> List[str]:
+    base = ["http://localhost:5173", "http://127.0.0.1:5173", "app://."]
+    raw = (os.getenv("CORS_ALLOWED_ORIGINS") or "").strip()
+    if not raw:
+        return base
+    out = list(base)
+    for origin in raw.split(","):
+        o = origin.strip().rstrip("/")
+        if o and o not in out:
+            out.append(o)
+    return out
+
+
+def _cors_origin_regex() -> Optional[str]:
+    raw = os.getenv("CORS_ALLOW_ORIGIN_REGEX")
+    if raw is None:
+        return r"http://localhost:(517\d|5555)"
+    stripped = raw.strip()
+    return stripped if stripped else None
+
+
 # Get shared instances
 multi_mcp = get_multi_mcp()
 remme_store = get_remme_store()
@@ -115,11 +137,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Enable CORS for Frontend
+# Enable CORS for Frontend (extend with CORS_ALLOWED_ORIGINS for production wise-ai origins)
+_cors_regex = _cors_origin_regex()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "app://."], # Explicitly allow frontend
-    allow_origin_regex=r"http://localhost:(517\d|5555)", 
+    allow_origins=_build_cors_origins(),
+    allow_origin_regex=_cors_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -95,12 +95,23 @@ pip install -e .
 | `SUPABASE_JWT_AUDIENCE` | Expected access-token `aud` claim for backend verification (default `authenticated`) |
 | `SUPABASE_LOGGING_ENABLED` | Enable request/result persistence to Supabase tables (`true`/`false`) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key for backend writes to Supabase tables |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call S18 (e.g. `https://your-wise-ai.up.railway.app`). Dev localhost defaults stay enabled. |
+| `CORS_ALLOW_ORIGIN_REGEX` | Optional regex for extra origins; set empty to disable the default localhost pattern. |
 
 Optional:
 
 - **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
-- **WISE_MOCKEHR_BASE_URL** – Base URL of the wise-ai Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from wise-ai for end-to-end integration. Examples: `http://localhost:8000` (wise-ai on host), `http://backend:8000` (typical Compose service name on the shared network). Match the URL to how you run wise-ai, not only to Docker.
+- **WISE_MOCKEHR_BASE_URL** – Base URL of the wise-ai Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from wise-ai for end-to-end integration. Examples: `http://localhost:8000` (wise-ai on host), `http://backend:8000` (typical Compose service name on the shared network), `https://your-wise-ai.up.railway.app` on Railway. Match the URL to how you run wise-ai, not only to Docker.
+
+#### Railway / wise-ai checklist
+
+1. **Listen port** – The Docker image binds **`PORT`** when set (Railway), otherwise `8000`. Align the Railway service **public port** with that listen port, or rely on Railway’s injected `PORT` (recommended).
+2. **`GEMINI_API_KEY`** – Set on S18 so the agent uses Google Gemini instead of unreachable localhost Ollama (see `settings_loader` runtime override when this key is present).
+3. **`WISE_MOCKEHR_BASE_URL`** – Set to the **public HTTPS base URL** of wise-ai so S18’s mockehr MCP can load Mock EHR data.
+4. **`AUTH_ENABLED` / `S18_AUTH_ENABLED`** – Use `false` for staging unless valid Supabase JWTs are sent from wise-ai (`Authorization` or `X-Forwarded-Authorization`). Both env names are honored.
+5. **wise-ai → S18** – Point the Capstone/orchestrator base URL at this service’s public URL (e.g. `https://s18-production.up.railway.app`).
+6. **Browser UI** – If the wise-ai **frontend** calls S18 directly, set **`CORS_ALLOWED_ORIGINS`** to that frontend origin.
 
 ### Supabase integration contract (S18)
 

@@ -56,6 +56,8 @@ def load_settings() -> dict:
             _settings_cache["run_poll_timeout_seconds"] = int(env_run_poll)
         # Supabase/Auth runtime overrides
         env_auth_enabled = os.getenv("AUTH_ENABLED")
+        if env_auth_enabled is None:
+            env_auth_enabled = os.getenv("S18_AUTH_ENABLED")
         if env_auth_enabled is not None:
             _settings_cache.setdefault("auth", {})
             _settings_cache["auth"]["enabled"] = env_auth_enabled.strip().lower() in {"1", "true", "yes", "on"}
@@ -83,6 +85,15 @@ def load_settings() -> dict:
         if env_service_role:
             _settings_cache.setdefault("supabase_logging", {})
             _settings_cache["supabase_logging"]["service_role_key"] = env_service_role
+        # Hosted deploys (e.g. Railway): prefer Gemini when key present so agent does not require local Ollama.
+        if os.getenv("GEMINI_API_KEY", "").strip():
+            _settings_cache.setdefault("agent", {})
+            _settings_cache["agent"]["model_provider"] = "gemini"
+            dm = str(_settings_cache["agent"].get("default_model") or "")
+            if not dm.lower().startswith("gemini"):
+                _settings_cache["agent"]["default_model"] = "gemini-2.5-flash"
+            _settings_cache.setdefault("models", {})
+            _settings_cache["models"]["insights_provider"] = "gemini"
     return _settings_cache
 
 def save_settings() -> None:

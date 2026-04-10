@@ -16,6 +16,8 @@ def _auth_settings() -> Dict[str, Any]:
 
 def is_auth_enabled() -> bool:
     env_override = os.getenv("AUTH_ENABLED")
+    if env_override is None:
+        env_override = os.getenv("S18_AUTH_ENABLED")
     if env_override is not None:
         return env_override.strip().lower() in {"1", "true", "yes", "on"}
     return bool(_auth_settings().get("enabled", False))
