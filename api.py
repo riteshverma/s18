@@ -80,49 +80,47 @@ remme_extractor = get_remme_extractor()
 _mcp_start_task: Optional[asyncio.Task] = None
 
 
-async def _start_mcp_with_timeout(timeout_seconds: float = 5.0) -> None:
-    """
-    Start MCP servers without blocking API readiness for long boot phases.
-    If startup exceeds timeout, continue startup in background.
-    """
-    global _mcp_start_task
-    _mcp_start_task = asyncio.create_task(multi_mcp.start())
-    try:
-        await asyncio.wait_for(asyncio.shield(_mcp_start_task), timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        print(f"⚠️ MCP startup exceeded {timeout_seconds}s; continuing in background.")
-    except Exception:
-        # Re-raise non-timeout failures so startup still surfaces real errors.
-        raise
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("API starting up...")
+    print("[s18] lifespan: starting scheduler...")
     scheduler_service.initialize()
     scheduler_service.register_morning_briefing()
     persistence_manager.load_snapshot()
-    try:
-        await _start_mcp_with_timeout()
-    except Exception:
-        # Do not fail HTTP readiness: MCP stdio servers often misbehave in minimal containers.
-        print("⚠️ MCP startup failed; API will stay up. Traceback:")
-        traceback.print_exc()
-    
-    # Check git
+
     try:
         subprocess.run(["git", "--version"], capture_output=True, check=True)
-        print("Git found.")
+        print("[s18] git: found")
     except Exception:
-        print("WARNING: Git NOT found. GitHub explorer features will fail.")
-    
-    # 🧠 Start Smart Sync in background
-    asyncio.create_task(background_smart_scan())
-    
+        print("[s18] git: NOT found – GitHub explorer features will fail")
+
+    # MCP and RemMe background scan are started AFTER yield so /health is
+    # immediately reachable.  On Railway the yahoo_finance server does a full
+    # git-clone + uv-install on first boot which can take several minutes.
+    # Blocking the lifespan startup causes 503 for the entire healthcheck window.
+    global _mcp_start_task
+    _mcp_start_task = None
+
+    def _safe_bg(coro, label: str):
+        """Wrap a coroutine so background task errors are logged but never fatal."""
+        async def _wrapper():
+            try:
+                await coro
+            except Exception:
+                print(f"[s18] background task '{label}' error:")
+                traceback.print_exc()
+        return _wrapper()
+
+    # Fire-and-forget: MCP servers and RemMe smart-scan run in the background
+    # *while* the HTTP server is live.  They must be created before yield so
+    # they are running during the server lifetime (not at shutdown).
+    _mcp_start_task = asyncio.create_task(_safe_bg(multi_mcp.start(), "mcp_start"))
+    asyncio.create_task(_safe_bg(background_smart_scan(), "smart_scan"))
+
+    print("[s18] lifespan: ready – handing off to HTTP server")
     yield
 
     print("API shutting down...")
     persistence_manager.save_snapshot()
-    global _mcp_start_task
     try:
         if _mcp_start_task and not _mcp_start_task.done():
             _mcp_start_task.cancel()

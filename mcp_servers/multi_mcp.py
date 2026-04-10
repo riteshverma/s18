@@ -286,15 +286,30 @@ class MultiMCP:
         except BaseException as e:
             builtins.print(f"[MCP] {name} CRITICAL FAILURE: {e}")
 
+    def _is_hosted_env(self) -> bool:
+        """True when running on Railway or any hosted env that injects RAILWAY_* vars."""
+        return bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_SERVICE_ID"))
+
     async def start(self):
         """Start all configured servers"""
-        # Use plain ASCII to avoid Windows console encoding issues with emojis
-        builtins.print("[MCP] Starting MCP Servers...")
+        hosted = self._is_hosted_env()
+        builtins.print(f"[MCP] Starting MCP Servers... (hosted={hosted})")
         for name, config in self.server_configs.items():
-            if config.get("enabled", True):
-                await self._start_server(name, config)
-            else:
+            if not config.get("enabled", True):
                 builtins.print(f"[MCP] Skipping disabled server: {name}")
+                continue
+            # stdio-git servers clone repos and install packages at first boot.
+            # On hosted Railway environments this can take many minutes and block
+            # the event loop's IO, so we skip them unless explicitly opted-in via
+            # MCP_ENABLE_GIT_SERVERS=1.
+            if hosted and config.get("type") == "stdio-git":
+                if not os.getenv("MCP_ENABLE_GIT_SERVERS", "").strip():
+                    builtins.print(
+                        f"[MCP] Skipping stdio-git server '{name}' on hosted env "
+                        "(set MCP_ENABLE_GIT_SERVERS=1 to enable)"
+                    )
+                    continue
+            await self._start_server(name, config)
 
     async def stop(self):
         """Stop all servers"""
