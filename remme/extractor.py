@@ -186,6 +186,7 @@ def apply_preferences_to_hubs(preferences: Dict) -> List[str]:
     """
     from remme.hubs import get_preferences_hub, get_operating_context_hub, get_soft_identity_hub
     from remme.engines import get_evidence_log
+    from remme.gbrain_bridge import GBrainBridge
     
     prefs_hub = get_preferences_hub()
     context_hub = get_operating_context_hub()
@@ -331,6 +332,18 @@ def apply_preferences_to_hubs(preferences: Dict) -> List[str]:
         context_hub.save()
         soft_hub.save()
         evidence_log.save()
+        if GBrainBridge.dual_write_enabled():
+            try:
+                bridge = GBrainBridge()
+                bridge.sync_hubs_snapshot(
+                    {
+                        "preferences": prefs_hub.to_dict(),
+                        "operating_context": context_hub.to_dict(),
+                        "soft_identity": soft_hub.to_dict(),
+                    }
+                )
+            except Exception as e:
+                print(f"[WARN] GBrain bridge hub sync failed: {e}")
         
         print(f"✅ Applied {len(changes)} preference changes to hubs")
     

@@ -12,6 +12,8 @@ from shared.state import (
     PROJECT_ROOT,
 )
 from remme.utils import get_embedding
+from remme.gbrain_bridge import GBrainBridge
+from config.settings_loader import load_settings, save_settings, reload_settings
 from core.model_manager import ModelManager
 from core.prometheus_metrics import (
     MEMORY_OPERATIONS_TOTAL,
@@ -32,6 +34,9 @@ remme_extractor = get_remme_extractor()
 class AddMemoryRequest(BaseModel):
     text: str
     category: str = "general"
+
+class GBrainCanaryToggleRequest(BaseModel):
+    enabled: bool
 
 
 # === Background Tasks ===
@@ -104,7 +109,7 @@ async def background_smart_scan():
                 # Search Context
                 existing = []
                 try:
-                    existing = remme_store.search(query, limit=5)
+                    existing = remme_store.search_text(query, limit=5)
                 except:
                     pass
                 
@@ -164,6 +169,68 @@ async def background_smart_scan():
 
 
 # === Endpoints ===
+
+@router.get("/gbrain/status")
+async def gbrain_bridge_status():
+    """Return current GBrain bridge config and mirror health."""
+    try:
+        bridge = GBrainBridge()
+        mapping = bridge.mapping if isinstance(bridge.mapping, dict) else {}
+        total_mapped = len(mapping)
+        deleted_count = sum(1 for v in mapping.values() if isinstance(v, dict) and v.get("deleted"))
+        active_count = total_mapped - deleted_count
+        pages_exist = sum(
+            1
+            for v in mapping.values()
+            if isinstance(v, dict) and Path(v.get("path", "")).exists()
+        )
+
+        profile_page = bridge.pages_dir / "remme-user-profile.md"
+        return {
+            "status": "success",
+            "gbrain": {
+                "enabled": bridge.is_enabled(),
+                "dual_write": bridge.dual_write_enabled(),
+                "read_from_bridge": bridge.read_from_bridge_enabled(),
+                "mirror_root": str(bridge.root),
+                "pages_dir": str(bridge.pages_dir),
+                "mapping_file": str(bridge.meta_path),
+            },
+            "mirror_health": {
+                "mapped_total": total_mapped,
+                "mapped_active": active_count,
+                "mapped_deleted": deleted_count,
+                "page_files_found": pages_exist,
+                "profile_page_exists": profile_page.exists(),
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/gbrain/canary/read_from_bridge")
+async def set_gbrain_read_canary(request: GBrainCanaryToggleRequest):
+    """
+    Canary toggle for routing memory reads to bridge-backed lookup.
+    Persists under remme.gbrain.read_from_bridge in settings.json.
+    """
+    try:
+        cfg = load_settings()
+        remme_cfg = cfg.setdefault("remme", {})
+        gbrain_cfg = remme_cfg.setdefault("gbrain", {})
+        gbrain_cfg["read_from_bridge"] = bool(request.enabled)
+        save_settings()
+        fresh = reload_settings().get("remme", {}).get("gbrain", {})
+        return {
+            "status": "success",
+            "message": "Updated read_from_bridge canary toggle.",
+            "gbrain": {
+                "enabled": bool(fresh.get("enabled", False)),
+                "dual_write": bool(fresh.get("dual_write", False)),
+                "read_from_bridge": bool(fresh.get("read_from_bridge", False)),
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/memories")
 async def get_memories():

@@ -125,8 +125,7 @@ def _find_session_file(run_id: str, summaries_dir: Path) -> Optional[Path]:
 
 
 def _retrieve_memories_sync(query: str):
-    emb = get_embedding(query, task_type="search_query")
-    return remme_store.search(emb, query_text=query, k=3)
+    return remme_store.search_text(query, limit=3)
 
 
 async def _build_memory_context(run_id: str, query: str):
