@@ -60,3 +60,6 @@ memory/remme_index/
 memory/remme_staging.json
 memory/remme_scanned_sources.json
 data/conversation_history/
+
+# Local GBrain checkout (install via: git clone https://github.com/garrytan/gbrain.git gbrain && cd gbrain && bun install)
+gbrain/

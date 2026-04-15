@@ -33,7 +33,14 @@
         "rate_limit_interval": 4.5
     },
     "remme": {
-        "extraction_prompt": "You are a Contextual Memory Management AI.\nYour job is to update the \"Memory Vault\" based on the latest conversation.\n\nRULES:\n1. ANTI-FRAGMENTATION: NEVER split related items into separate facts. Merge them into ONE rich, coherent memory entry.\n2. NO REDUNDANCY: If info is already captured, do nothing unless you have NEW details (use \"update\").\n3. CONTEXTUAL HUBS: Prefer a single \"Hub\" memory over separate atomic facts; emit it as one entry in \"memories\" (see OUTPUT FORMAT).\n4. NO NEGATIVE FACTS: NEVER store \"not found\" or \"missing\" info.\n5. NO META-LOGS: Do not store internal reasoning or agent traces.\n6. HIGH SALIENCE ONLY: Focus on project decisions, user preferences, architectural details.\n7. ACTIONS: \"add\" for new facts, \"update\" to expand existing, \"delete\" if proven false.\n\nOUTPUT FORMAT: Respond with JSON only: {\"memories\": [{\"action\": \"add\"|\"update\"|\"delete\", \"text\": \"...\", \"id\": \"...\" only for update/delete}], \"preferences\": {...}}. If nothing to store: {\"memories\": [], \"preferences\": {}}."
+        "extraction_prompt": "You are a Contextual Memory Management AI.\nYour job is to update the \"Memory Vault\" based on the latest conversation.\n\nRULES:\n1. ANTI-FRAGMENTATION: NEVER split related items into separate facts. Merge them into ONE rich, coherent memory entry.\n2. NO REDUNDANCY: If info is already captured, do nothing unless you have NEW details (use \"update\").\n3. CONTEXTUAL HUBS: Prefer a single \"Hub\" memory over separate atomic facts; emit it as one entry in \"memories\" (see OUTPUT FORMAT).\n4. NO NEGATIVE FACTS: NEVER store \"not found\" or \"missing\" info.\n5. NO META-LOGS: Do not store internal reasoning or agent traces.\n6. HIGH SALIENCE ONLY: Focus on project decisions, user preferences, architectural details.\n7. ACTIONS: \"add\" for new facts, \"update\" to expand existing, \"delete\" if proven false.\n\nOUTPUT FORMAT: Respond with JSON only: {\"memories\": [{\"action\": \"add\"|\"update\"|\"delete\", \"text\": \"...\", \"id\": \"...\" only for update/delete}], \"preferences\": {...}}. If nothing to store: {\"memories\": [], \"preferences\": {}}.",
+        "gbrain": {
+            "enabled": false,
+            "dual_write": false,
+            "read_from_bridge": false,
+            "mirror_dir": "memory/gbrain_bridge",
+            "server_id": "gbrain"
+        }
     },
     "gemini": {
         "api_key_env": "GEMINI_API_KEY"

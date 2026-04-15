@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 import sys
+from remme.gbrain_bridge import GBrainBridge
 
 class RemmeStore:
     def __init__(self, persistence_dir: str = "memory/remme_index"):
@@ -19,6 +20,7 @@ class RemmeStore:
         self.index = None
         self.memories = []
         self.scanned_run_ids = set()
+        self.gbrain_bridge = GBrainBridge()
         
         self.load()
 
@@ -97,6 +99,11 @@ class RemmeStore:
         }
         self.memories.append(memory_item)
         self.save()
+        if self.gbrain_bridge.dual_write_enabled():
+            try:
+                self.gbrain_bridge.upsert_memory(memory_item)
+            except Exception as e:
+                print(f"GBrain dual-write add failed: {e}", file=sys.stderr)
         return memory_item
 
     def search(self, query_vector: np.ndarray, query_text: str = None, k: int = 10, score_threshold: float = 1.5):
@@ -167,6 +174,15 @@ class RemmeStore:
         """Return all memories."""
         return self.memories
 
+    def search_text(self, query_text: str, limit: int = 5):
+        """Search memories with text input only."""
+        if self.gbrain_bridge.read_from_bridge_enabled():
+            return self.gbrain_bridge.search(query_text, k=limit)
+        from remme.utils import get_embedding
+
+        query_vector = get_embedding(query_text, task_type="search_query")
+        return self.search(query_vector, query_text=query_text, k=limit)
+
     def get_scanned_run_ids(self):
         """Return a set of run IDs that have already been scanned."""
         # 1. Start with dedicated tracking file (Best source)
@@ -216,6 +232,11 @@ class RemmeStore:
             
         # Re-save metadata (so it's gone from UI)
         self.save()
+        if self.gbrain_bridge.dual_write_enabled():
+            try:
+                self.gbrain_bridge.mark_deleted(memory_id)
+            except Exception as e:
+                print(f"GBrain dual-write delete failed: {e}", file=sys.stderr)
         
         # Ideally we should rebuild the index cleanly. 
         # For now, let's just mark it deleted in metadata and handle filtering in search
@@ -247,5 +268,10 @@ class RemmeStore:
             self.memories[original_idx]["faiss_id"] = self.index.ntotal - 1
             
             self.save()
+            if self.gbrain_bridge.dual_write_enabled():
+                try:
+                    self.gbrain_bridge.upsert_memory(self.memories[original_idx])
+                except Exception as e:
+                    print(f"GBrain dual-write update failed: {e}", file=sys.stderr)
             return True
         return False

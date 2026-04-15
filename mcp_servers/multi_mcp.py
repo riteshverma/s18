@@ -228,6 +228,21 @@ class MultiMCP:
             if env:
                 final_env.update(env)
 
+            # Optional working directory (e.g. GBrain needs repo root for TS imports)
+            cwd_param = None
+            cwd_cfg = config.get("cwd")
+            if cwd_cfg:
+                cwd_path = Path(cwd_cfg)
+                if not cwd_path.is_absolute():
+                    cwd_path = self.base_dir.parent / cwd_path
+                cwd_param = str(cwd_path.resolve())
+
+            # Resolve Bun when not on PATH (typical on fresh Windows installs)
+            if cmd == "bun" and not shutil.which("bun"):
+                bun_exe = Path.home() / ".bun" / "bin" / ("bun.exe" if sys.platform == "win32" else "bun")
+                if bun_exe.is_file():
+                    cmd = str(bun_exe)
+
             # Check if uv exists fallback
             if cmd == "uv" and not shutil.which("uv"):
                 cmd = sys.executable
@@ -248,7 +263,8 @@ class MultiMCP:
             server_params = StdioServerParameters(
                 command=cmd,
                 args=args,
-                env=final_env
+                env=final_env,
+                cwd=cwd_param,
             )
             
             # Connect with timeout
@@ -425,7 +441,7 @@ class MultiMCP:
                 import json
                 return json.loads(self.cache_path.read_text())
             except Exception as e:
-                print(f"  ⚠️ Failed to load MCP cache: {e}")
+                builtins.print(f"[MCP] Failed to load MCP cache: {e}")
         return {}
 
     def _save_to_cache(self, server_name: str, tools: list):
@@ -450,14 +466,14 @@ class MultiMCP:
             
             # Write back
             self.cache_path.write_text(json.dumps(cache, indent=2))
-            print(f"  💾 Cached metadata for [cyan]{server_name}[/cyan]")
+            builtins.print(f"[MCP] Cached metadata for {server_name}")
         except Exception as e:
-            print(f"  ⚠️ Failed to save MCP cache for {server_name}: {e}")
+            builtins.print(f"[MCP] Failed to save MCP cache for {server_name}: {e}")
 
     async def refresh_server(self, server_name: str):
         """Force refresh tool metadata for a server"""
         if server_name in self.sessions:
-            print(f"  🔄 Refreshing tools for [cyan]{server_name}[/cyan]...")
+            builtins.print(f"[MCP] Refreshing tools for {server_name}...")
             result = await self.sessions[server_name].list_tools()
             self.tools[server_name] = result.tools
             self._save_to_cache(server_name, result.tools)
