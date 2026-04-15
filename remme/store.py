@@ -6,6 +6,8 @@ from datetime import datetime
 import uuid
 import sys
 
+from config.settings_loader import load_settings
+
 class RemmeStore:
     def __init__(self, persistence_dir: str = "memory/remme_index"):
         self.root = Path(__file__).parent.parent / persistence_dir
@@ -15,7 +17,8 @@ class RemmeStore:
         self.metadata_path = self.root / "memories.json"
         self.scanned_runs_path = self.root / "scanned_runs.json"
         
-        self.dimension = 768 # Default for nomic-embed-text
+        default_dim = load_settings().get("azure_openai", {}).get("embedding_dimension", 768)
+        self.dimension = int(default_dim or 768)
         self.index = None
         self.memories = []
         self.scanned_run_ids = set()
@@ -82,6 +85,11 @@ class RemmeStore:
                     return m
 
         # Add to FAISS
+        if self.index is not None and getattr(self.index, "d", len(embedding)) != len(embedding):
+            raise ValueError(
+                f"Embedding dimension mismatch: index dimension={self.index.d}, incoming={len(embedding)}. "
+                "Rebuild REMME index before switching embedding models."
+            )
         self.index.add(embedding.reshape(1, -1))
         
         # Add to Metadata

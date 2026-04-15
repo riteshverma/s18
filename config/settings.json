@@ -6,6 +6,7 @@
   },
   "models": {
     "embedding": "nomic-embed-text",
+    "embedding_provider": "ollama",
     "semantic_chunking": "gemma3:4b",
     "image_captioning": "gemma3:4b",
     "memory_extraction": "gemma3:4b",
@@ -45,6 +46,16 @@
   },
   "gemini": {
     "api_key_env": "GEMINI_API_KEY"
+  },
+  "azure_openai": {
+    "endpoint": "",
+    "api_key_env": "AZURE_OPENAI_API_KEY",
+    "api_version": "2024-10-21",
+    "chat_deployment": "",
+    "embedding_deployment": "",
+    "embedding_dimension": 1536,
+    "fallback_provider": "gemini",
+    "fallback_model": "gemini-2.5-flash"
   },
   "news": {
     "sources": [

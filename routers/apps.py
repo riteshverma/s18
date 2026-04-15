@@ -12,8 +12,19 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from shared.state import PROJECT_ROOT
+from config.settings_loader import load_settings
+from core.model_manager import ModelManager
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
+
+async def _generate_with_configured_model(prompt: str, model_override: Optional[str] = None) -> str:
+    runtime_settings = load_settings()
+    agent_settings = runtime_settings.get("agent", {})
+    model_provider = agent_settings.get("model_provider", "gemini")
+    default_model = agent_settings.get("default_model", "gemini-2.5-flash")
+    selected_model = model_override or default_model
+    manager = ModelManager(selected_model, provider=model_provider)
+    return await manager.generate_text(prompt)
 
 
 # === Pydantic Models ===
@@ -186,24 +197,9 @@ async def generate_app(request: GenerateAppRequest):
             model = request.model
         print(f"[Generate] Using model: {model} (from config key: {model_key})")
         
-        # Call Gemini for generation with Google Search enabled
-        from google import genai
-        from google.genai import types
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        
-        # Enable Google Search for real-time data
-        google_search_tool = types.Tool(google_search=types.GoogleSearch())
-        
-        print("[Generate] Calling Gemini with Google Search enabled...")
-        response = client.models.generate_content(
-            model=model,
-            contents=generation_prompt,
-            config=types.GenerateContentConfig(
-                tools=[google_search_tool],
-                temperature=0.3  # Slightly higher for creativity in layout
-            )
-        )
-        response_text = response.text.strip()
+        # Provider-driven generation (Azure/Gemini/Ollama via ModelManager)
+        print("[Generate] Calling configured provider...")
+        response_text = (await _generate_with_configured_model(generation_prompt, request.model or model)).strip()
         print(f"[Generate] Got response, length: {len(response_text)} chars")
         
         # Clean up response - extract JSON from markdown fences or explanatory text
@@ -301,21 +297,8 @@ async def generate_from_report(request: GenerateFromReportRequest):
             model = request.model
         print(f"[GenerateFromReport] Using model: {model} (from config key: {model_key})")
         
-        # Call Gemini
-        from google import genai
-        from google.genai import types
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        
-        # No Google Search needed - we have the report
-        print("[GenerateFromReport] Calling Gemini...")
-        response = client.models.generate_content(
-            model=model,
-            contents=generation_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.3
-            )
-        )
-        response_text = response.text.strip()
+        print("[GenerateFromReport] Calling configured provider...")
+        response_text = (await _generate_with_configured_model(generation_prompt, request.model or model)).strip()
         print(f"[GenerateFromReport] Got response, length: {len(response_text)} chars")
         
         # Clean up response
@@ -415,24 +398,8 @@ async def hydrate_app(app_id: str, request: HydrateRequest = None):
             model = request.model
         print(f"[Hydrate] Using model: {model} (from config key: {model_key})")
         
-        # Call Gemini for hydration with Google Search enabled for real-time data
-        from google import genai
-        from google.genai import types
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        
-        # Enable Google Search grounding for real-time data
-        google_search_tool = types.Tool(google_search=types.GoogleSearch())
-        
-        print("[Hydrate] Calling Gemini with Google Search enabled...")
-        response = client.models.generate_content(
-            model=model,
-            contents=hydration_prompt,
-            config=types.GenerateContentConfig(
-                tools=[google_search_tool],
-                temperature=0.2  # Lower temperature for factual data
-            )
-        )
-        response_text = response.text.strip()
+        print("[Hydrate] Calling configured provider...")
+        response_text = (await _generate_with_configured_model(hydration_prompt, request.model or model)).strip()
         print(f"[Hydrate] Got response, length: {len(response_text)} chars")
         
         # Clean up response - extract JSON from markdown fences or explanatory text

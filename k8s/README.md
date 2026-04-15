@@ -14,8 +14,9 @@ This directory contains baseline manifests to run S18Share on Kubernetes.
 
 1. Copy and edit secret template:
    - `k8s/secret.template.yaml` -> `k8s/secret.yaml`
-2. Set `GEMINI_API_KEY` in `k8s/secret.yaml`.
-3. Update `image:` in `k8s/deployment.yaml`.
+2. Set `AZURE_OPENAI_API_KEY` (and optionally `GEMINI_API_KEY` for fallback) in `k8s/secret.yaml`.
+3. Set `AZURE_OPENAI_ENDPOINT`, `OPENAI_API_VERSION`, `AZURE_OPENAI_CHAT_DEPLOYMENT`, and `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` in `k8s/configmap.yaml`.
+4. Update `image:` in `k8s/deployment.yaml`.
 
 ## 2) Apply manifests
 
