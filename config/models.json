@@ -19,13 +19,13 @@
         "embed": "http://localhost:11434/api/embeddings"
       }
     },
-    "gemma3:12b": {
+    "gemma3:4b": {
       "type": "ollama",
-      "model": "gemma3:12b",
-      "embedding_model": "gemma3:12b",
+      "model": "gemma3:4b",
+      "embedding_model": "nomic-embed-text",
       "url": {
         "generate": "http://localhost:11434/api/generate",
-        "embed": "http://localhost:11434/api/embeddings"
+        "embed": "http://localhost:11434/api/embed"
       }
     },
     "qwen2.5:32b-instruct-q4_0": {
@@ -62,9 +62,20 @@
         "embed": "http://localhost:11434/api/embeddings"
       }
     },
+    "nomic-embed-text": {
+      "type": "ollama",
+      "model": "nomic-embed-text",
+      "url": {
+        "embed": "http://localhost:11434/api/embed"
+      },
+      "embedding_dimension": 768
+    },
     "nomic": {
-      "type": "huggingface",
-      "model": "nomic-ai/nomic-embed-text-v1",
+      "type": "ollama",
+      "model": "nomic-embed-text",
+      "url": {
+        "embed": "http://localhost:11434/api/embed"
+      },
       "embedding_dimension": 768
     }
   }

@@ -86,7 +86,9 @@ def load_settings() -> dict:
             _settings_cache.setdefault("supabase_logging", {})
             _settings_cache["supabase_logging"]["service_role_key"] = env_service_role
         # Hosted deploys (e.g. Railway): prefer Gemini when key present so agent does not require local Ollama.
-        if os.getenv("GEMINI_API_KEY", "").strip():
+        # Only apply if the user has NOT explicitly configured ollama as their provider in settings.json.
+        _explicit_provider = _settings_cache.get("agent", {}).get("model_provider", "")
+        if os.getenv("GEMINI_API_KEY", "").strip() and _explicit_provider != "ollama":
             _settings_cache.setdefault("agent", {})
             _settings_cache["agent"]["model_provider"] = "gemini"
             dm = str(_settings_cache["agent"].get("default_model") or "")

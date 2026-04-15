@@ -123,9 +123,16 @@ def get_rg_path():
 
 
 def get_embedding(text: str) -> np.ndarray:
-    result = requests.post(EMBED_URL, json={"model": EMBED_MODEL, "prompt": text}, timeout=OLLAMA_TIMEOUT)
+    # Use /api/embed (newer Ollama format) with "input" key; response is {"embeddings": [[...]]}
+    embed_url = get_ollama_url("embed")
+    result = requests.post(embed_url, json={"model": EMBED_MODEL, "input": text}, timeout=OLLAMA_TIMEOUT)
     result.raise_for_status()
-    return np.array(result.json()["embedding"], dtype=np.float32)
+    data = result.json()
+    # /api/embed returns {"embeddings": [[...float...]]} (list of lists)
+    if "embeddings" in data:
+        return np.array(data["embeddings"][0], dtype=np.float32)
+    # fallback for older Ollama versions that return {"embedding": [...]}
+    return np.array(data["embedding"], dtype=np.float32)
 
 def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     words = text.split()
@@ -1469,7 +1476,7 @@ def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
             batch = batch_texts[i : i + BATCH_SIZE]
             
             try:
-                batch_url = EMBED_URL.replace("/api/embeddings", "/api/embed")
+                batch_url = get_ollama_url("embed")
                 res = requests.post(batch_url, json={
                     "model": EMBED_MODEL,
                     "input": batch
@@ -1625,7 +1632,7 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
                         # 2. Add new
                         if index is None:
                             dim = len(new_embs[0])
-                            index = faiss.IndexFlatL2(dim)
+                            index = faiss.IndexHNSWFlat(dim, 32)
                         
                         index.add(np.stack(new_embs))
                         metadata.extend(new_meta)
@@ -1810,7 +1817,7 @@ async def index_images() -> str:
     # Save Updates
     if new_embeddings:
         if index is None:
-             index = faiss.IndexFlatL2(len(new_embeddings[0]))
+             index = faiss.IndexHNSWFlat(len(new_embeddings[0]), 32)
         index.add(np.stack(new_embeddings))
         metadata.extend(new_meta)
         
@@ -1939,7 +1946,7 @@ def start_background_services():
                 if new_embs:
                     if index is None:
                         dim = len(new_embs[0])
-                        index = faiss.IndexFlatL2(dim)
+                        index = faiss.IndexHNSWFlat(dim, 32)
                     
                     index.add(np.stack(new_embs))
                     metadata.extend(new_meta)

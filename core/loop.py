@@ -19,6 +19,7 @@ from core.prometheus_metrics import (
     elapsed_ms,
     now_ms,
 )
+from core.plan_graph_validate import validate_merged_plan_graph
 from ui.visualizer import ExecutionVisualizer
 from rich.live import Live
 from rich.console import Console
@@ -958,6 +959,25 @@ class AgentLoop4:
                                                 self.context.plan_graph.nodes[successor_id]["reads"].append(write_key)
                                 break
         
+        # Validate the merged graph — break any cycles the planner introduced.
+        errors, warnings = validate_merged_plan_graph(self.context.plan_graph)
+        for w in warnings:
+            log_step(f"⚠️ Plan graph warning: {w}", symbol="⚠️")
+        for err in errors:
+            if "graph_has_cycles" in err:
+                log_step(f"🔄 Cycle detected in plan graph — removing back-edges: {err}", symbol="🔄")
+                try:
+                    for cycle in nx.simple_cycles(self.context.plan_graph):
+                        # Remove the back-edge (last node → first node in the cycle)
+                        back_src, back_tgt = cycle[-1], cycle[0]
+                        if self.context.plan_graph.has_edge(back_src, back_tgt):
+                            self.context.plan_graph.remove_edge(back_src, back_tgt)
+                            log_step(f"🔄 Removed back-edge {back_src} -> {back_tgt} to break cycle", symbol="🔄")
+                except Exception as cycle_err:
+                    log_step(f"⚠️ Could not auto-repair cycle: {cycle_err}", symbol="⚠️")
+            else:
+                log_step(f"❌ Plan graph error: {err}", symbol="❌")
+
         self.context._save_session()
         log_step("✅ Plan merged into execution context", symbol="🌳")
 
