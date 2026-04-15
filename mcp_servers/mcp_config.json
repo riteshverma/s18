@@ -46,11 +46,14 @@
     "enabled": true
   },
   "gbrain": {
-    "command": "gbrain",
+    "command": "bun",
     "args": [
+      "run",
+      "src/cli.ts",
       "serve"
     ],
+    "cwd": "gbrain",
     "type": "local-command",
-    "enabled": false
+    "enabled": true
   }
 }

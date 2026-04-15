@@ -13,9 +13,10 @@ def main() -> int:
         return 1
 
     expected = {
-        "command": "gbrain",
-        "args": ["serve"],
-        "enabled": False,
+        "command": "bun",
+        "args": ["run", "src/cli.ts", "serve"],
+        "cwd": "gbrain",
+        "enabled": True,
     }
     for key, value in expected.items():
         if gbrain.get(key) != value:

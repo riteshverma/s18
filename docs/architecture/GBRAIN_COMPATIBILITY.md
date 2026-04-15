@@ -45,14 +45,38 @@ Configured under `remme.gbrain` in `config/settings.defaults.json`.
 
 ## 4) MCP Bridge Registration
 
-`mcp_servers/mcp_config.json` now includes a disabled template entry:
+`mcp_servers/mcp_config.json` includes a `gbrain` server entry that runs the
+official CLI in MCP stdio mode via Bun from a local checkout:
 
 - id: `gbrain`
-- command: `gbrain`
-- args: `["serve"]`
-- enabled: `false` by default
+- command: `bun` (resolved to `~/.bun/bin/bun.exe` on Windows if Bun is not on `PATH`)
+- args: `["run", "src/cli.ts", "serve"]`
+- `cwd`: `gbrain` (resolved relative to the S18 project root by `MultiMCP`)
 
-This keeps current deployments unchanged until explicitly enabled.
+### Local install (one-time)
+
+1. Install [Bun](https://bun.sh/) (GBrain is Bun-first).
+2. From the S18 project root:
+
+   ```bash
+   git clone https://github.com/garrytan/gbrain.git gbrain
+   cd gbrain && bun install && bun run src/cli.ts init && cd ..
+   ```
+
+   The last command initializes the PGLite brain under the user profile (e.g.
+   `%USERPROFILE%\.gbrain\` on Windows).
+
+3. Keep `gbrain/` out of git if you prefer: it is listed in `.gitignore`.
+
+### Verify MCP from this repo
+
+```bash
+uv run python scripts/test_gbrain_mcp_registration.py
+uv run python scripts/test_gbrain_mcp_live.py
+```
+
+The live test expects `gbrain` to be **enabled** in `mcp_config.json` and reports
+`PASS` when the server connects and exposes tools (30+).
 
 ## 5) Rollout Plan (phased)
 
