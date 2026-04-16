@@ -1,0 +1,11 @@
+{
+  "integration_id": "wiseai",
+  "workflow_id": "cdss",
+  "contract_version": "v1",
+  "risk_profile": "clinical_default",
+  "response_profile": "wise_cbc_v1",
+  "field_aliases": {
+    "event_id": "external_event_id",
+    "payload": "raw_payload"
+  }
+}

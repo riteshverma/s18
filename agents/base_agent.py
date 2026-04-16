@@ -5,13 +5,15 @@ from pathlib import Path
 from typing import Optional
 from core.model_manager import ModelManager
 from core.json_parser import parse_llm_json, parse_llm_json_or_fallback
-from core.schemas.clinical import (
-    derive_risk_level_from_cbc_evidence,
-    extract_request_payload_from_query,
-    merge_wise_flags_with_cbc_evidence,
-    validate_cbc_payload,
-)
 from core.utils import log_step, log_error
+from integrations.adapters.wise_output import (
+    apply_cbc_evidence_to_wise_output,
+    ensure_wise_output_schema,
+    extract_wise_from_text,
+    merge_wise_flag_lists,
+    normalize_wise_flags,
+    sync_wise_response_footer,
+)
 from PIL import Image
 from datetime import datetime
 import os
@@ -134,213 +136,22 @@ class AgentRunner:
         return output
 
     def _extract_wise_from_text(self, text: str) -> dict:
-        """
-        Extract risk_level, confidence, and flags from raw LLM response text
-        (e.g. markdown with "Risk Level: High", "Flags: [...]") for WISE integration.
-        Returns a dict with keys risk_level, confidence, flags; missing keys or None
-        mean "not found".
-        """
-        if not text or not isinstance(text, str):
-            return {}
-        out = {}
-        # risk_level: "Risk Level: High", "*Risk Level:* moderate", risk_level": "low"
-        for pattern in (
-            r"(?i)risk_level[\"']?\s*:\s*[\"']?(\w+)",
-            r"(?i)\*?\s*Risk\s+Level\s*\*?\s*:\s*(\w+)",
-            r"(?i)Risk\s+Level:\s*(\w+)",
-        ):
-            m = re.search(pattern, text)
-            if m:
-                raw = m.group(1).lower().strip()
-                if raw in ("low", "moderate", "high"):
-                    out["risk_level"] = raw
-                elif raw in ("normal", "medium"):
-                    out["risk_level"] = "moderate"
-                else:
-                    out["risk_level"] = "moderate"
-                break
-        # confidence: "Confidence: 0.85", "*Confidence:* 0.85", "85%"
-        for pattern in (
-            r"(?i)confidence[\"']?\s*:\s*([\d.]+)",
-            r"(?i)\*?\s*Confidence\s*\*?\s*:\s*([\d.]+)",
-            r"(?i)Confidence:\s*([\d.]+)",
-            r"(\d+)\s*%",
-        ):
-            m = re.search(pattern, text)
-            if m:
-                try:
-                    v = float(m.group(1))
-                    if v > 1:
-                        v = v / 100.0
-                    out["confidence"] = max(0.0, min(1.0, v))
-                except (TypeError, ValueError):
-                    pass
-                if "confidence" in out:
-                    break
-        # flags: "Flags: [\"low_hemoglobin\", \"high_wbc\"]" or "Flags: ['low_hemoglobin', 'high_wbc']"
-        for pattern in (
-            r"(?i)flags[\"']?\s*:\s*\[\s*([^\]]*)\s*\]",
-            r"(?i)Flags:\s*\[\s*([^\]]*)\s*\]",
-        ):
-            m = re.search(pattern, text)
-            if m:
-                inner = m.group(1).strip()
-                if not inner:
-                    out["flags"] = []
-                else:
-                    parts = [p.strip().strip('"\'') for p in re.split(r",", inner)]
-                    out["flags"] = [p for p in parts if p]
-                break
-        return out
+        return extract_wise_from_text(text)
 
     def _normalize_wise_flags(self, value) -> list:
-        """
-        Coerce model-provided flags to a list of non-empty strings.
-        Supports list, dict (keys with truthy values), or a single string.
-        """
-        if value is None:
-            return []
-        if isinstance(value, list):
-            seen: set = set()
-            out: list = []
-            for x in value:
-                s = str(x).strip() if x is not None else ""
-                if s and s not in seen:
-                    seen.add(s)
-                    out.append(s)
-            return out
-        if isinstance(value, dict):
-            seen = set()
-            out = []
-            for k, v in value.items():
-                key = str(k).strip() if k is not None else ""
-                if not key:
-                    continue
-                truthy = False
-                if isinstance(v, bool):
-                    truthy = v
-                elif isinstance(v, (int, float)):
-                    truthy = bool(v) and v != 0
-                elif isinstance(v, str):
-                    truthy = v.strip().lower() in ("true", "1", "yes")
-                else:
-                    truthy = bool(v)
-                if truthy and key not in seen:
-                    seen.add(key)
-                    out.append(key)
-            return out
-        if isinstance(value, str):
-            s = value.strip()
-            return [s] if s else []
-        return []
+        return normalize_wise_flags(value)
 
     def _merge_wise_flag_lists(self, *lists) -> list:
-        """Union of flag lists, preserving order (first list wins, then append new)."""
-        seen = set()
-        out = []
-        for lst in lists:
-            if not lst:
-                continue
-            for item in lst:
-                if item not in seen:
-                    seen.add(item)
-                    out.append(item)
-        return out
+        return merge_wise_flag_lists(*lists)
 
     def _ensure_wise_output_schema(self, output, raw_response: str) -> dict:
-        """
-        Ensure ThinkerAgent output includes risk_level, confidence, flags for WISE integration.
-        When parsed output is missing these (e.g. fallback to {response: "..."}), extract from
-        raw text before applying defaults.
-        """
-        if isinstance(output, list) and output and isinstance(output[0], dict):
-            output = output[0]
-        if not isinstance(output, dict):
-            output = {"response": str(output) if output is not None else raw_response}
-        source = (raw_response or "").strip() or (output.get("response") if isinstance(output.get("response"), str) else "")
-        extracted = self._extract_wise_from_text(source) if source else {}
-        # risk_level
-        if output.get("risk_level") not in ("low", "moderate", "high"):
-            output["risk_level"] = extracted.get("risk_level") or output.get("risk_level") or "moderate"
-            if output["risk_level"] not in ("low", "moderate", "high"):
-                output["risk_level"] = "moderate"
-        # confidence
-        if output.get("confidence") is None:
-            output["confidence"] = extracted.get("confidence") if extracted.get("confidence") is not None else 0.5
-        else:
-            try:
-                output["confidence"] = float(output["confidence"])
-            except (TypeError, ValueError):
-                output["confidence"] = extracted.get("confidence") if extracted.get("confidence") is not None else 0.5
-        # flags: normalize list/dict/str; merge with footer/text extraction
-        parsed_flags = self._normalize_wise_flags(output.get("flags"))
-        extracted_flags = self._normalize_wise_flags(extracted.get("flags"))
-        output["flags"] = self._merge_wise_flag_lists(parsed_flags, extracted_flags)
-        return output
+        return ensure_wise_output_schema(output, raw_response)
 
     def _apply_cbc_evidence_to_wise_output(self, output: dict, input_data: dict) -> dict:
-        """
-        When the run query includes a validated CBC Request JSON, align WISE flags and risk
-        with WHO-style screening thresholds instead of trusting contradictory LLM labels.
-        """
-        if not isinstance(output, dict):
-            return output
-        q = (input_data or {}).get("original_query") or ""
-        payload = extract_request_payload_from_query(q)
-        if not payload:
-            return output
-        validated, err = validate_cbc_payload(payload)
-        if err or validated is None:
-            return output
-        llm_flags = self._normalize_wise_flags(output.get("flags"))
-        output["flags"] = merge_wise_flags_with_cbc_evidence(llm_flags, validated)
-        output["risk_level"] = derive_risk_level_from_cbc_evidence(output["flags"], validated)
-        try:
-            conf = float(output.get("confidence", 0.8))
-        except (TypeError, ValueError):
-            conf = 0.8
-        if not output["flags"]:
-            output["confidence"] = min(conf, 0.92)
-        else:
-            output["confidence"] = min(max(conf, 0.72), 0.95)
-        return output
+        return apply_cbc_evidence_to_wise_output(output, input_data)
 
     def _sync_wise_response_footer(self, output: dict) -> dict:
-        """
-        Keep markdown footer fields aligned with structured risk/confidence/flags.
-        This prevents the UI from showing contradictory narrative vs JSON state.
-        """
-        if not isinstance(output, dict):
-            return output
-        response = output.get("response")
-        if not isinstance(response, str):
-            return output
-
-        response = re.sub(
-            r"(?im)^[-*]?\s*Risk\s+Level\s*:\s*.*$",
-            f"- Risk Level: {output.get('risk_level', 'low')}",
-            response,
-        )
-        response = re.sub(
-            r"(?im)^[-*]?\s*Confidence\s*:\s*.*$",
-            f"- Confidence: {output.get('confidence', 0.5)}",
-            response,
-        )
-        response = re.sub(
-            r"(?im)^[-*]?\s*Flags\s*:\s*.*$",
-            f"- Flags: {json.dumps(output.get('flags', []))}",
-            response,
-        )
-
-        if "Flags:" not in response:
-            response = response.rstrip() + f"\n\n- Flags: {json.dumps(output.get('flags', []))}"
-        if "Risk Level:" not in response:
-            response = response.rstrip() + f"\n- Risk Level: {output.get('risk_level', 'low')}"
-        if "Confidence:" not in response:
-            response = response.rstrip() + f"\n- Confidence: {output.get('confidence', 0.5)}"
-
-        output["response"] = response
-        return output
+        return sync_wise_response_footer(output)
 
     async def run_agent(self, agent_type: str, input_data: dict, image_path: Optional[str] = None) -> dict:
         """Run a specific agent with input data and optional image"""

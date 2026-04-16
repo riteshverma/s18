@@ -19,6 +19,15 @@ from core.prometheus_metrics import (
     elapsed_ms,
     now_ms,
 )
+from integrations.policies.workflow_guards import (
+    enforce_cbc_full_mode_minimum_plan,
+    enforce_mental_health_plan_guard,
+    filter_memory_context_for_cbc,
+    filter_memory_context_for_mental_health,
+    is_cbc_payload_query,
+    is_fast_mode,
+    is_mental_health_task_query,
+)
 from ui.visualizer import ExecutionVisualizer
 from rich.live import Live
 from rich.console import Console
@@ -509,199 +518,46 @@ class AgentLoop4:
             final_status = "stopped"
             return self.context
         finally:
-            ORCHESTRATOR_RUNS_TOTAL.labels(status=final_status).inc()
+            integration_id = "default"
+            workflow_id = "generic"
+            contract_version = "v1"
+            try:
+                gs = (self.context.plan_graph.graph or {}).get("globals_schema", {}) if self.context else {}
+                meta = gs.get("_integration_meta", {}) if isinstance(gs, dict) else {}
+                if isinstance(meta, dict):
+                    integration_id = str(meta.get("integration_id") or integration_id)
+                    workflow_id = str(meta.get("workflow_id") or workflow_id)
+                    contract_version = str(meta.get("contract_version") or contract_version)
+            except Exception:
+                pass
+            ORCHESTRATOR_RUNS_TOTAL.labels(
+                status=final_status,
+                integration_id=integration_id,
+                workflow_id=workflow_id,
+                contract_version=contract_version,
+            ).inc()
             ORCHESTRATOR_RUN_LATENCY_MS.observe(elapsed_ms(run_start_ms))
 
     def _is_cbc_payload_query(self, query: str) -> bool:
-        """Detect any CBC payload query (fast or full mode)."""
-        q = (query or "").lower()
-        return (
-            "[patient id:" in q
-            and "request:" in q
-            and "hemoglobin" in q
-            and "wbc" in q
-            and "platelets" in q
-        )
+        return is_cbc_payload_query(query)
 
     def _is_fast_mode(self, query: str) -> bool:
-        return "[execution mode: fast]" in (query or "").lower()
+        return is_fast_mode(query)
 
     def _is_mental_health_task_query(self, query: str) -> bool:
-        q = (query or "").lower()
-        return (
-            "[task: mental_health]" in q
-            or '"task": "mental_health"' in q
-            or '"task":"mental_health"' in q
-        )
+        return is_mental_health_task_query(query)
 
     def _filter_memory_context_for_cbc(self, query: str, memory_context):
-        """
-        For CBC planning, remove unrelated mental-health memory lines that can bias
-        planner outputs toward generic single-agent responses.
-        """
-        if not self._is_cbc_payload_query(query):
-            return memory_context
-        if not isinstance(memory_context, str) or not memory_context.strip():
-            return memory_context
-
-        mh_markers = (
-            "mental_health",
-            "task: mental_health",
-            "phq9",
-            "gad7",
-            "suicidal",
-            "self_harm",
-            "depression",
-            "anxiety",
-            "local screening",
-        )
-
-        kept_lines = []
-        removed = 0
-        for line in memory_context.splitlines():
-            low = line.lower()
-            if any(marker in low for marker in mh_markers):
-                removed += 1
-                continue
-            kept_lines.append(line)
-
-        if removed == 0:
-            return memory_context
-        filtered = "\n".join(kept_lines).strip()
-        log_step(f"🧹 Filtered {removed} mental-health memory lines for CBC planning", symbol="🧹")
-        return filtered if filtered else None
+        return filter_memory_context_for_cbc(query, memory_context)
 
     def _filter_memory_context_for_mental_health(self, query: str, memory_context):
-        """
-        For mental-health planning, remove CBC/lab-specific memory lines that can
-        bias planner outputs toward CBC-style retrieval plans.
-        """
-        if not self._is_mental_health_task_query(query):
-            return memory_context
-        if not isinstance(memory_context, str) or not memory_context.strip():
-            return memory_context
-
-        cbc_markers = (
-            "cbc",
-            "hemoglobin",
-            "wbc",
-            "rbc",
-            "platelets",
-            "anemia",
-            "leukocytosis",
-            "task: cbc",
-            "cbc_results",
-        )
-
-        kept_lines = []
-        removed = 0
-        for line in memory_context.splitlines():
-            low = line.lower()
-            if any(marker in low for marker in cbc_markers):
-                removed += 1
-                continue
-            kept_lines.append(line)
-
-        if removed == 0:
-            return memory_context
-        filtered = "\n".join(kept_lines).strip()
-        log_step(f"🧹 Filtered {removed} CBC memory lines for mental-health planning", symbol="🧹")
-        return filtered if filtered else None
+        return filter_memory_context_for_mental_health(query, memory_context)
 
     def _enforce_cbc_full_mode_minimum_plan(self, query: str, out: dict):
-        """
-        CBC full-mode guard:
-        Ensure at least a 2-step plan with explicit lab retrieval before reasoning.
-        """
-        if not self._is_cbc_payload_query(query) or self._is_fast_mode(query):
-            return
-        if not isinstance(out, dict):
-            return
-
-        pg = out.get("plan_graph")
-        if not isinstance(pg, dict):
-            pg = {"nodes": [], "edges": []}
-            out["plan_graph"] = pg
-        nodes = pg.get("nodes")
-        if not isinstance(nodes, list):
-            nodes = []
-            pg["nodes"] = nodes
-
-        has_miner = any(
-            isinstance(n, dict) and n.get("agent") == "EHRDataMinerAgent"
-            for n in nodes
-        )
-        if len(nodes) >= 2 and has_miner:
-            return
-
-        pg["nodes"] = [
-            {
-                "id": "T001",
-                "agent": "EHRDataMinerAgent",
-                "description": "Retrieve patient's CBC context from available records.",
-                "reads": ["original_query"],
-                "writes": ["cbc_results"],
-                "status": "pending",
-            },
-            {
-                "id": "T002",
-                "agent": "ClinicalReasoningAgent",
-                "description": "Interpret CBC payload/results and produce risk, confidence, and flags.",
-                "reads": ["cbc_results"],
-                "writes": ["response"],
-                "status": "pending",
-            },
-        ]
-        pg["edges"] = [
-            {"source": "Query", "target": "T001"},
-            {"source": "T001", "target": "T002"},
-        ]
-        out["next_step_id"] = "T001"
-        log_step("🔧 Enforced CBC full-mode minimum multi-step plan", symbol="🔧")
+        enforce_cbc_full_mode_minimum_plan(query, out)
 
     def _enforce_mental_health_plan_guard(self, query: str, out: dict) -> bool:
-        """
-        Mental-health guard:
-        If planner leaks CBC/lab-retrieval agents into a mental-health task, replace
-        with a deterministic single-step reasoning plan.
-        """
-        if not self._is_mental_health_task_query(query):
-            return False
-        if not isinstance(out, dict):
-            return False
-
-        pg = out.get("plan_graph")
-        if not isinstance(pg, dict):
-            pg = {"nodes": [], "edges": []}
-            out["plan_graph"] = pg
-
-        nodes = pg.get("nodes")
-        if not isinstance(nodes, list):
-            nodes = []
-            pg["nodes"] = nodes
-
-        blocked_agents = {"CBCAgent", "EHRDataMinerAgent", "TrendAgent", "SearchLabsAgent"}
-        has_blocked = any(
-            isinstance(node, dict) and node.get("agent") in blocked_agents
-            for node in nodes
-        )
-        if not has_blocked:
-            return False
-
-        pg["nodes"] = [
-            {
-                "id": "T001",
-                "agent": "ThinkerAgent",
-                "description": "Analyze mental-health payload and produce risk, confidence, and flags.",
-                "reads": ["original_query"],
-                "writes": ["response"],
-                "status": "pending",
-            }
-        ]
-        pg["edges"] = [{"source": "Query", "target": "T001"}]
-        out["next_step_id"] = "T001"
-        log_step("🛡️ Enforced mental-health plan guard (removed CBC/lab routing)", symbol="🛡️")
-        return True
+        return enforce_mental_health_plan_guard(query, out)
 
     def _should_replan(self):
         """

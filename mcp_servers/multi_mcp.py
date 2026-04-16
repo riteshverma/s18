@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import builtins
+import contextvars
 from pathlib import Path
 
 # Windows: ProactorEventLoop required for asyncio subprocess (uv run MCP server)
@@ -38,6 +39,19 @@ class MultiMCP:
         self.disabled_tools = set() # { "server:tool" }
         self.disabled_tools_path = self.base_dir.parent / "config" / "disabled_tools.json"
         self._load_disabled_tools()
+        self._trace_context: contextvars.ContextVar[dict] = contextvars.ContextVar(
+            "mcp_trace_context",
+            default={},
+        )
+
+    def set_trace_context(self, trace_context: dict | None):
+        """Set request-scoped metadata and return reset token."""
+        return self._trace_context.set(trace_context or {})
+
+    def reset_trace_context(self, token):
+        """Reset request-scoped metadata with the provided token."""
+        if token is not None:
+            self._trace_context.reset(token)
 
     def _load_config(self) -> dict:
         """Load server configuration from JSON"""
@@ -376,13 +390,24 @@ class MultiMCP:
         """Call a tool on a specific server"""
         if server_name not in self.sessions:
             raise ValueError(f"Server '{server_name}' not connected")
-        
+        trace_context = self._trace_context.get()
+        if trace_context:
+            print(
+                f"[MCP trace] server={server_name} tool={tool_name} "
+                f"integration_id={trace_context.get('integration_id', 'default')} "
+                f"workflow_id={trace_context.get('workflow_id', 'generic')} "
+                f"contract_version={trace_context.get('contract_version', 'v1')}"
+            )
         return await self.sessions[server_name].call_tool(tool_name, arguments)
 
     # Helper to route tool call by finding which server has it
     async def route_tool_call(self, tool_name: str, arguments: dict):
         from core.circuit_breaker import get_breaker, CircuitOpenError
         start_ms = now_ms()
+        trace_context = self._trace_context.get()
+        integration_id = trace_context.get("integration_id", "default")
+        workflow_id = trace_context.get("workflow_id", "generic")
+        contract_version = trace_context.get("contract_version", "v1")
         
         # Get or create circuit breaker for this tool
         breaker = get_breaker(tool_name, failure_threshold=5, recovery_timeout=60.0)
@@ -422,17 +447,40 @@ class MultiMCP:
 
             result = await self.call_tool(selected_server, tool_name, arguments)
             breaker.record_success()
-            MCP_TOOL_CALLS_TOTAL.labels(tool=tool_name, status="success").inc()
+            MCP_TOOL_CALLS_TOTAL.labels(
+                tool=tool_name,
+                status="success",
+                integration_id=integration_id,
+                workflow_id=workflow_id,
+                contract_version=contract_version,
+            ).inc()
             return result
         except CircuitOpenError:
-            MCP_TOOL_CALLS_TOTAL.labels(tool=tool_name, status="circuit_open").inc()
+            MCP_TOOL_CALLS_TOTAL.labels(
+                tool=tool_name,
+                status="circuit_open",
+                integration_id=integration_id,
+                workflow_id=workflow_id,
+                contract_version=contract_version,
+            ).inc()
             raise  # Re-raise circuit errors without recording failure
         except Exception as e:
             breaker.record_failure()
-            MCP_TOOL_CALLS_TOTAL.labels(tool=tool_name, status="error").inc()
+            MCP_TOOL_CALLS_TOTAL.labels(
+                tool=tool_name,
+                status="error",
+                integration_id=integration_id,
+                workflow_id=workflow_id,
+                contract_version=contract_version,
+            ).inc()
             raise
         finally:
-            MCP_TOOL_LATENCY_MS.labels(tool=tool_name).observe(elapsed_ms(start_ms))
+            MCP_TOOL_LATENCY_MS.labels(
+                tool=tool_name,
+                integration_id=integration_id,
+                workflow_id=workflow_id,
+                contract_version=contract_version,
+            ).observe(elapsed_ms(start_ms))
 
     def _load_cache(self) -> dict:
         """Load metadata cache from file"""
