@@ -5,6 +5,42 @@
 - **Python:** 3.11+
 - **Version:** 0.2.0
 
+## Workflow-agnostic integrations (Apr 2026)
+
+S18Share is designed to **decouple external product/workflow specifics from the orchestration core**. Ingress requests are normalized into a **canonical run contract**, then routed through an **integration adapter** selected by `integration_id` (or `source_system` fallback).
+
+- **Canonical contract models:** `integrations/contracts.py`
+- **Adapter interface + implementations:** `integrations/base.py`, `integrations/adapters/*`
+- **Adapter registry + backward-compatible aliases:** `integrations/registry.py`
+- **Config-driven integration profiles:** `config/integrations/*.json` (example: `wiseai_cdss_v1.json`)
+- **Architecture deep-dive:** `docs/architecture/S18_WORKFLOW_AGNOSTIC_TARGET.md`
+
+### Quick start: run with canonical metadata
+
+`POST /runs` accepts optional integration metadata. If omitted, S18 falls back to the `default` adapter (`integration_id=default`, `workflow_id=generic`, `contract_version=v1`).
+
+```bash
+curl -X POST "http://localhost:8000/runs" \
+  -H "Authorization: Bearer <supabase_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "interpret CBC and suggest next steps",
+    "integration_id": "wiseai",
+    "workflow_id": "cdss",
+    "contract_version": "v1",
+    "source_system": "wiseai",
+    "external_event_id": "evt_123",
+    "consent_ref": "consent_abc",
+    "raw_payload": {"hemoglobin": 12.1, "wbc": 7.5, "platelets": 220}
+  }'
+```
+
+### Add a new integration (high level)
+
+- Implement an adapter in `integrations/adapters/<your_integration>.py` (map **raw → canonical**, and **canonical result → response envelope**).
+- Add a profile `config/integrations/<integration>_<workflow>_<version>.json` for risk/response profiles and field aliases.
+- Add contract/registry/adapter tests under `tests/integrations/`.
+
 ## Wise-AI Integration Sync (Mar 2026)
 
 ### Integration-focused technical changes completed
@@ -58,6 +94,7 @@ python scripts/check_supabase_integration.py
 
 - **Agent loop** – Multi-step planning and execution with retries and circuit breakers
 - **REMME (Remember Me)** – User memory and preferences: extraction, staging, normalizer, belief updates, and hubs (Preferences, Operating Context, Soft Identity). See [remme/ARCHITECTURE.md](remme/ARCHITECTURE.md).
+- **GBrain memory bridge (optional)** – Interop layer that can mirror REMME memories/hubs into GBrain pages (dual-write) and optionally cut reads over to the bridge. See `docs/architecture/GBRAIN_COMPATIBILITY.md`.
 - **RAG** – Document indexing and search (FAISS + optional BM25), chunking, and ingestion
 - **MCP servers** – RAG, browser, sandbox, and configurable external servers
 - **Scheduler** – Cron-style jobs with skill routing (e.g. Market Analyst, System Monitor, Web Clipper) and inbox integration
@@ -282,6 +319,26 @@ The CI target uses pinned dependencies from `requirements-ci.txt` (exported from
 - **Main settings:** `config/settings.json` (created from `config/settings.defaults.json` if missing).
 - **Agent prompts and MCP:** `config/agent_config.yaml`.
 - **REMME extraction prompt and options:** under `remme` in settings.
+- **GBrain bridge flags:** under `remme.gbrain` in `config/settings.defaults.json`:
+  - `enabled`, `dual_write`, `read_from_bridge`, `mirror_dir`, `server_id`
+
+### GBrain bridge setup (optional)
+
+GBrain runs Bun-first and can be wired as an MCP server (stdio). For the implemented mapping model and rollout plan, see `docs/architecture/GBRAIN_COMPATIBILITY.md`.
+
+One-time local setup (from repo root):
+
+```bash
+git clone https://github.com/garrytan/gbrain.git gbrain
+cd gbrain && bun install && bun run src/cli.ts init && cd ..
+```
+
+Verify MCP registration:
+
+```bash
+uv run python scripts/test_gbrain_mcp_registration.py
+uv run python scripts/test_gbrain_mcp_live.py
+```
 
 ---
 
