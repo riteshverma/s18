@@ -1,0 +1,8 @@
+{
+  "integration_id": "default",
+  "workflow_id": "generic",
+  "contract_version": "v1",
+  "risk_profile": "generic_default",
+  "response_profile": "default_v1",
+  "field_aliases": {}
+}

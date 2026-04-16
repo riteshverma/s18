@@ -26,6 +26,8 @@ from core.supabase_logging import (
 )
 from remme.utils import get_embedding
 from config.settings_loader import settings, get_run_poll_timeout
+from integrations.contracts import CanonicalRunRequest
+from integrations.registry import get_integration_adapter
 
 router = APIRouter(tags=["Runs"])
 
@@ -40,6 +42,9 @@ remme_extractor = get_remme_extractor()
 class RunRequest(BaseModel):
     query: str
     model: str = None  # Will use settings default if not provided
+    contract_version: Optional[str] = "v1"
+    integration_id: Optional[str] = None
+    workflow_id: Optional[str] = None
     source_system: Optional[str] = "s18"
     external_event_id: Optional[str] = None
     consent_ref: Optional[str] = None
@@ -82,6 +87,13 @@ def _infer_query_type(query: str) -> str:
     if "mental_health" in q or "phq9" in q or "gad7" in q:
         return "mental_health"
     return "generic"
+
+
+def _infer_query_type_from_canonical(canonical_request: CanonicalRunRequest) -> str:
+    workflow_id = (canonical_request.workflow_id or "").strip().lower()
+    if workflow_id and workflow_id != "generic":
+        return workflow_id
+    return _infer_query_type(canonical_request.query)
 
 
 def _session_file_candidates(run_id: str, summaries_dir: Path):
@@ -167,23 +179,48 @@ async def _build_memory_context(run_id: str, query: str):
     return memory_context, results
 
 
-async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str, Any]] = None):
+async def process_run(
+    run_id: str,
+    canonical_request: CanonicalRunRequest,
+    audit_context: Optional[Dict[str, Any]] = None,
+):
     """Background task to execute the agent loop"""
     final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete"}
     context = None
     results = []
     loop = AgentLoop4(multi_mcp=multi_mcp)
     active_loops[run_id] = loop
+    trace_token = multi_mcp.set_trace_context(
+        {
+            "integration_id": canonical_request.integration_id,
+            "workflow_id": canonical_request.workflow_id,
+            "contract_version": canonical_request.contract_version,
+        }
+    )
     try:
         # 1. RETRIEVE MEMORIES (Remme)
         # Search for past relevant facts to injecting into this run
+        query = canonical_request.query
         memory_context, results = await _build_memory_context(run_id, query)
 
         # Execute the loop
         # The loop will maintain its own internal context
         print(f"[{run_id}] MEMORY CONTEXT READY ({len(memory_context)} chars)")
         try:
-             context = await loop.run(query, [], {}, [], session_id=run_id, memory_context=memory_context)
+             context = await loop.run(
+                 query,
+                 [],
+                 {
+                     "_integration_meta": {
+                         "integration_id": canonical_request.integration_id,
+                         "workflow_id": canonical_request.workflow_id,
+                         "contract_version": canonical_request.contract_version,
+                     }
+                 },
+                 [],
+                 session_id=run_id,
+                 memory_context=memory_context,
+             )
         except asyncio.CancelledError:
              print(f"[{run_id}] Run cancelled.")
              context = loop.context # Recovery context from loop if possible
@@ -196,6 +233,7 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
     except Exception as e:
         print(f"Run {run_id} failed: {e}")
     finally:
+        multi_mcp.reset_trace_context(trace_token)
         # Clean up
         if run_id in active_loops:
             del active_loops[run_id]
@@ -442,11 +480,14 @@ async def process_run(run_id: str, query: str, audit_context: Optional[Dict[str,
                         "run_id": run_id,
                         "request_id": audit_context.get("request_id"),
                         "idempotency_key": audit_context["idempotency_key"],
-                        "query_type": _infer_query_type(query),
+                        "query_type": _infer_query_type_from_canonical(canonical_request),
                         "normalized_result": {
                             "summary": final_result.get("summary"),
                             "output": final_result.get("output"),
                         },
+                        "integration_id": canonical_request.integration_id,
+                        "workflow_id": canonical_request.workflow_id,
+                        "contract_version": canonical_request.contract_version,
                         "summary": final_result.get("summary"),
                         "triage_flag": "high" if final_status == "failed" else "normal",
                         "status": final_status,
@@ -510,11 +551,17 @@ async def create_run(
     # Millisecond precision avoids collisions when multiple runs start in the same second.
     run_id = str(int(datetime.now().timestamp() * 1000))
     
-    payload_hash = compute_payload_hash(request.query, request.raw_payload)
-    source_system = (request.source_system or "s18").strip().lower()
-    idempotency_key = request.idempotency_key or build_idempotency_key(
+    adapter = get_integration_adapter(
+        integration_id=request.integration_id,
+        source_system=request.source_system,
+    )
+    canonical_request = adapter.to_canonical(request.model_dump())
+
+    payload_hash = compute_payload_hash(canonical_request.query, canonical_request.raw_payload)
+    source_system = (canonical_request.source_system or "s18").strip().lower()
+    idempotency_key = canonical_request.idempotency_key or build_idempotency_key(
         source_system,
-        request.external_event_id or "",
+        canonical_request.external_event_id or "",
         payload_hash,
     )
     request_id = f"req_{run_id}"
@@ -530,14 +577,17 @@ async def create_run(
                 "run_id": run_id,
                 "request_id": request_id,
                 "source_system": source_system,
-                "external_event_id": request.external_event_id,
+                "external_event_id": canonical_request.external_event_id,
                 "idempotency_key": idempotency_key,
                 "payload_hash": payload_hash,
-                "query": request.query,
-                "raw_payload": request.raw_payload,
+                "query": canonical_request.query,
+                "raw_payload": canonical_request.raw_payload,
+                "integration_id": canonical_request.integration_id,
+                "workflow_id": canonical_request.workflow_id,
+                "contract_version": canonical_request.contract_version,
                 "auth_sub": user.get("sub"),
                 "auth_email": user.get("email"),
-                "consent_ref": request.consent_ref,
+                "consent_ref": canonical_request.consent_ref,
                 "status": "accepted",
             }
         )
@@ -545,17 +595,20 @@ async def create_run(
         print(f"⚠️ Supabase inbound logging failed for run {run_id}: {e}")
 
     # Start background execution
-    background_tasks.add_task(process_run, run_id, request.query, audit_context)
+    background_tasks.add_task(process_run, run_id, canonical_request, audit_context)
     
-    return {
+    return adapter.from_canonical(
+        {
         "id": run_id,
         "request_id": request_id,
         "status": "starting",
         "created_at": datetime.now().isoformat(),
-        "query": request.query,
+        "query": canonical_request.query,
         "idempotency_key": idempotency_key,
         "poll_timeout_seconds": get_run_poll_timeout(),
-    }
+        },
+        canonical_request,
+    )
 
 
 @router.post("/runs/{run_id}/resume")

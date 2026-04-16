@@ -26,7 +26,7 @@ API_REQUEST_LATENCY_MS = Histogram(
 ORCHESTRATOR_RUNS_TOTAL = Counter(
     "wiseai_orchestrator_runs_total",
     "Total orchestrator runs by final status",
-    ["status"],
+    ["status", "integration_id", "workflow_id", "contract_version"],
 )
 
 ORCHESTRATOR_RUN_LATENCY_MS = Histogram(
@@ -100,13 +100,13 @@ RAG_EMPTY_RESULT_TOTAL = Counter(
 MCP_TOOL_CALLS_TOTAL = Counter(
     "wiseai_mcp_tool_calls_total",
     "Total MCP tool calls by status",
-    ["tool", "status"],
+    ["tool", "status", "integration_id", "workflow_id", "contract_version"],
 )
 
 MCP_TOOL_LATENCY_MS = Histogram(
     "wiseai_mcp_tool_latency_ms",
     "MCP tool call latency in milliseconds",
-    ["tool"],
+    ["tool", "integration_id", "workflow_id", "contract_version"],
     buckets=(5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000),
 )
 
