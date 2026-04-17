@@ -10,6 +10,9 @@ class CanonicalRunRequest(BaseModel):
     query: str
     model: Optional[str] = None
     source_system: str = "s18"
+    tenant_id: str = "default"
+    tenant_tier: str = "starter"
+    data_region: Optional[str] = None
     external_event_id: Optional[str] = None
     consent_ref: Optional[str] = None
     raw_payload: Optional[Dict[str, Any]] = None

@@ -45,3 +45,30 @@ def test_runs_accepts_explicit_canonical_fields():
     assert body["integration_id"] == "wiseai"
     assert body["workflow_id"] == "cdss"
     assert body["contract_version"] == "v1"
+    assert body["tenant_id"] == "default"
+    assert body["tenant_tier"] == "starter"
+
+
+def test_runs_accepts_explicit_tenant_context():
+    client = _make_client()
+    with patch("routers.runs.log_inbound_request", new=AsyncMock(return_value=None)):
+        with patch("routers.runs.process_run", new=AsyncMock(return_value=None)):
+            resp = client.post(
+                "/runs",
+                json={
+                    "query": "interpret cbc",
+                    "integration_id": "wiseai",
+                    "workflow_id": "cdss",
+                    "contract_version": "v1",
+                    "source_system": "wiseai",
+                    "tenant_id": "acme-health",
+                    "tenant_tier": "growth",
+                    "data_region": "in",
+                },
+                headers={"Authorization": "Bearer token"},
+            )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["tenant_id"] == "acme-health"
+    assert body["tenant_tier"] == "growth"
+    assert body["data_region"] == "in"

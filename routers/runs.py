@@ -28,6 +28,7 @@ from remme.utils import get_embedding
 from config.settings_loader import settings, get_run_poll_timeout
 from integrations.contracts import CanonicalRunRequest
 from integrations.registry import get_integration_adapter
+from integrations.tenancy import can_route_to_growth, resolve_tenant_context
 
 router = APIRouter(tags=["Runs"])
 
@@ -46,6 +47,9 @@ class RunRequest(BaseModel):
     integration_id: Optional[str] = None
     workflow_id: Optional[str] = None
     source_system: Optional[str] = "s18"
+    tenant_id: Optional[str] = None
+    tenant_tier: Optional[str] = None
+    data_region: Optional[str] = None
     external_event_id: Optional[str] = None
     consent_ref: Optional[str] = None
     raw_payload: Optional[Dict[str, Any]] = None
@@ -195,6 +199,9 @@ async def process_run(
             "integration_id": canonical_request.integration_id,
             "workflow_id": canonical_request.workflow_id,
             "contract_version": canonical_request.contract_version,
+            "tenant_id": canonical_request.tenant_id,
+            "tenant_tier": canonical_request.tenant_tier,
+            "data_region": canonical_request.data_region,
         }
     )
     try:
@@ -488,6 +495,9 @@ async def process_run(
                         "integration_id": canonical_request.integration_id,
                         "workflow_id": canonical_request.workflow_id,
                         "contract_version": canonical_request.contract_version,
+                        "tenant_id": canonical_request.tenant_id,
+                        "tenant_tier": canonical_request.tenant_tier,
+                        "data_region": canonical_request.data_region,
                         "summary": final_result.get("summary"),
                         "triage_flag": "high" if final_status == "failed" else "normal",
                         "status": final_status,
@@ -555,7 +565,20 @@ async def create_run(
         integration_id=request.integration_id,
         source_system=request.source_system,
     )
-    canonical_request = adapter.to_canonical(request.model_dump())
+    request_payload = request.model_dump()
+    tenant_context = resolve_tenant_context(
+        request_payload=request_payload,
+        user=user,
+        tenancy_settings=settings.get("tenancy", {}),
+    )
+    request_payload.update(
+        {
+            "tenant_id": tenant_context["tenant_id"],
+            "tenant_tier": tenant_context["tenant_tier"],
+            "data_region": tenant_context["data_region"],
+        }
+    )
+    canonical_request = adapter.to_canonical(request_payload)
 
     payload_hash = compute_payload_hash(canonical_request.query, canonical_request.raw_payload)
     source_system = (canonical_request.source_system or "s18").strip().lower()
@@ -570,6 +593,11 @@ async def create_run(
         "request_id": request_id,
         "idempotency_key": idempotency_key,
     }
+    if can_route_to_growth(tenant_context, settings.get("tenancy", {})):
+        print(
+            f"[{run_id}] Growth routing hook active for tenant={tenant_context['tenant_id']} "
+            f"tier={tenant_context['tenant_tier']} region={tenant_context['data_region']}"
+        )
 
     try:
         await log_inbound_request(
@@ -588,6 +616,9 @@ async def create_run(
                 "auth_sub": user.get("sub"),
                 "auth_email": user.get("email"),
                 "consent_ref": canonical_request.consent_ref,
+                "tenant_id": canonical_request.tenant_id,
+                "tenant_tier": canonical_request.tenant_tier,
+                "data_region": canonical_request.data_region,
                 "status": "accepted",
             }
         )
@@ -605,6 +636,9 @@ async def create_run(
         "created_at": datetime.now().isoformat(),
         "query": canonical_request.query,
         "idempotency_key": idempotency_key,
+        "tenant_id": canonical_request.tenant_id,
+        "tenant_tier": canonical_request.tenant_tier,
+        "data_region": canonical_request.data_region,
         "poll_timeout_seconds": get_run_poll_timeout(),
         },
         canonical_request,

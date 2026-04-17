@@ -51,6 +51,12 @@
     "supabase_anon_key": "",
     "supabase_jwt_audience": "authenticated"
   },
+  "tenancy": {
+    "default_tier": "starter",
+    "default_tenant_id": "default",
+    "default_data_region": "in",
+    "growth_routing_enabled": false
+  },
   "supabase_logging": {
     "enabled": false,
     "supabase_url": "",

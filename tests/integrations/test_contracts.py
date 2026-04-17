@@ -14,6 +14,8 @@ def test_canonical_contract_defaults():
     assert req.integration_id == "default"
     assert req.workflow_id == "generic"
     assert req.source_system == "s18"
+    assert req.tenant_id == "default"
+    assert req.tenant_tier == "starter"
 
 
 def test_canonical_contract_required_query():

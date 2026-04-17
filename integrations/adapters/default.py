@@ -20,6 +20,9 @@ class DefaultIntegrationAdapter:
             query=raw_request.get("query") or "",
             model=raw_request.get("model"),
             source_system=(raw_request.get("source_system") or "s18").strip().lower(),
+            tenant_id=(raw_request.get("tenant_id") or "default").strip().lower(),
+            tenant_tier=(raw_request.get("tenant_tier") or "starter").strip().lower(),
+            data_region=(raw_request.get("data_region") or "in").strip().lower(),
             external_event_id=raw_request.get("external_event_id"),
             consent_ref=raw_request.get("consent_ref"),
             raw_payload=payload,
@@ -40,4 +43,7 @@ class DefaultIntegrationAdapter:
         response["integration_id"] = context.integration_id
         response["workflow_id"] = context.workflow_id
         response["contract_version"] = context.contract_version
+        response["tenant_id"] = context.tenant_id
+        response["tenant_tier"] = context.tenant_tier
+        response["data_region"] = context.data_region
         return response

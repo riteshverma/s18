@@ -41,6 +41,13 @@ curl -X POST "http://localhost:8000/runs" \
 - Add a profile `config/integrations/<integration>_<workflow>_<version>.json` for risk/response profiles and field aliases.
 - Add contract/registry/adapter tests under `tests/integrations/`.
 
+### Tenancy baseline (Starter default, Growth-ready routing)
+
+- Default tier is `starter` (shared-schema style) and is configured under `config/settings*.json` -> `tenancy`.
+- `POST /runs` accepts optional `tenant_id`, `tenant_tier`, and `data_region`.
+- If omitted, S18 applies defaults (`tenant_id=default`, `tenant_tier=starter`, `data_region=in`).
+- Growth migration hook is pre-wired via `tenancy.growth_routing_enabled` so selected healthcare tenants can be routed to isolated infrastructure later without changing request contracts.
+
 ## Wise-AI Integration Sync (Mar 2026)
 
 ### Integration-focused technical changes completed

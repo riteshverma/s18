@@ -83,6 +83,24 @@ def load_settings() -> dict:
         if env_service_role:
             _settings_cache.setdefault("supabase_logging", {})
             _settings_cache["supabase_logging"]["service_role_key"] = env_service_role
+        env_default_tenant_id = os.getenv("TENANCY_DEFAULT_TENANT_ID")
+        if env_default_tenant_id:
+            _settings_cache.setdefault("tenancy", {})
+            _settings_cache["tenancy"]["default_tenant_id"] = env_default_tenant_id
+        env_default_tier = os.getenv("TENANCY_DEFAULT_TIER")
+        if env_default_tier:
+            _settings_cache.setdefault("tenancy", {})
+            _settings_cache["tenancy"]["default_tier"] = env_default_tier.strip().lower()
+        env_default_region = os.getenv("TENANCY_DEFAULT_DATA_REGION")
+        if env_default_region:
+            _settings_cache.setdefault("tenancy", {})
+            _settings_cache["tenancy"]["default_data_region"] = env_default_region.strip().lower()
+        env_growth_routing = os.getenv("TENANCY_GROWTH_ROUTING_ENABLED")
+        if env_growth_routing is not None:
+            _settings_cache.setdefault("tenancy", {})
+            _settings_cache["tenancy"]["growth_routing_enabled"] = (
+                env_growth_routing.strip().lower() in {"1", "true", "yes", "on"}
+            )
     return _settings_cache
 
 def save_settings() -> None:
