@@ -78,24 +78,38 @@ async def stress_event_bus(count: int = 5000):
     # 2. Async Publish Task
     start = time.time()
     
+    producer_done = asyncio.Event()
+
     async def producer():
         for i in range(count):
             await event_bus.publish("stress_test", "tester", {"seq": i})
             # No sleep, max throughput
+        producer_done.set()
             
     # 3. Consumer Task
     received = 0
     async def consumer():
         nonlocal received
-        while received < count:
-            await queue.get()
-            received += 1
+        # Drain until producer is done and queue remains empty for a short period.
+        while True:
+            if producer_done.is_set() and queue.empty():
+                break
+            try:
+                await asyncio.wait_for(queue.get(), timeout=0.5)
+                received += 1
+            except asyncio.TimeoutError:
+                if producer_done.is_set() and queue.empty():
+                    break
             
     await asyncio.gather(producer(), consumer())
     
     duration = time.time() - start
-    rate = count / duration
-    logger.info(f"✅ event_bus: Processed {count} in {duration:.2f}s ({rate:.0f} events/s)")
+    processed_rate = received / duration if duration > 0 else 0
+    dropped = max(count - received, 0)
+    logger.info(
+        f"✅ event_bus: Delivered {received}/{count} in {duration:.2f}s "
+        f"({processed_rate:.0f} events/s), dropped≈{dropped}"
+    )
     
     event_bus.unsubscribe(queue)
 
