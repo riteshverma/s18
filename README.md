@@ -5,6 +5,89 @@
 - **Python:** 3.11+
 - **Version:** 0.2.0
 
+## Start Here
+
+If you are new to this repo, use this sequence:
+
+1. **Install deps:** `uv sync`
+2. **Set env:** copy `.env.example` to `.env`, then set `GEMINI_API_KEY`
+3. **Run API:** `uv run python api.py`
+4. **Verify:** open `http://localhost:8000/health` and `http://localhost:8000/docs`
+5. **Run a canonical workflow:** `POST /runs` with optional integration metadata
+
+Key docs for common tasks:
+
+- **Run contract and adapter architecture:** `integrations/contracts.py`, `integrations/adapters/*`
+- **Settings and runtime overrides:** `config/settings.json`, `config/settings_loader.py`
+- **Wise-AI integration details:** [Wise-AI Integration Sync](#wise-ai-integration-sync-mar-2026)
+- **Docker + monitoring:** [Docker](#docker), [Monitoring (Dev + Staging Baseline)](#monitoring-dev--staging-baseline)
+
+## Audience Paths
+
+### Developer quickstart
+
+Use this path if you want to run code and ship features quickly.
+
+1. Follow [Quick start](#quick-start) (deps, env, run API).
+2. Send a run request using [Workflow-agnostic integrations](#workflow-agnostic-integrations-apr-2026).
+3. Use [Project structure](#project-structure) to find where to change code.
+4. Validate with tests in `tests/` and scripts in `scripts/`.
+
+Primary files:
+
+- `integrations/contracts.py`
+- `integrations/adapters/*`
+- `routers/runs.py`
+- `config/settings_loader.py`
+
+### Platform/operator
+
+Use this path if you manage deployment, runtime reliability, and observability.
+
+1. Start with [Docker](#docker) for local/staging orchestration.
+2. Configure metrics/alerts via [Monitoring (Dev + Staging Baseline)](#monitoring-dev--staging-baseline).
+3. Review runtime behavior in [Configuration](#configuration) (`config/settings*.json`).
+4. Track auth/logging posture in [Quick start](#quick-start) -> Supabase integration contract.
+
+Primary files:
+
+- `docker-compose.yml`
+- `monitoring/docker-compose.monitoring.yml`
+- `monitoring/prometheus/`
+- `config/settings.json`
+
+### Integration partner (wise-ai)
+
+Use this path if you are integrating S18 with wise-ai workflows/endpoints.
+
+1. Read [Wise-AI Integration Sync (Mar 2026)](#wise-ai-integration-sync-mar-2026).
+2. Set `WISE_MOCKEHR_BASE_URL` and verify endpoint reachability.
+3. Send canonical `POST /runs` payloads with `integration_id=wiseai`, `workflow_id=cdss`.
+4. Run the cross-stack verification commands in the Wise-AI section.
+
+Primary files:
+
+- `integrations/adapters/wiseai.py`
+- `config/integrations/wiseai_cdss_v1.json`
+- `tests/integrations/`
+
+## Document Map
+
+- [Start Here](#start-here)
+- [Audience Paths](#audience-paths)
+- [Developer quickstart](#developer-quickstart)
+- [Platform/operator](#platformoperator)
+- [Integration partner (wise-ai)](#integration-partner-wise-ai)
+- [Workflow-agnostic integrations (Apr 2026)](#workflow-agnostic-integrations-apr-2026)
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Docker](#docker)
+- [Monitoring (Dev + Staging Baseline)](#monitoring-dev--staging-baseline)
+- [Project structure](#project-structure)
+- [Configuration](#configuration)
+- [Wise-AI Integration Sync (Mar 2026)](#wise-ai-integration-sync-mar-2026)
+- [License](#license)
+
 ## Workflow-agnostic integrations (Apr 2026)
 
 S18Share is designed to **decouple external product/workflow specifics from the orchestration core**. Ingress requests are normalized into a **canonical run contract**, then routed through an **integration adapter** selected by `integration_id` (or `source_system` fallback).
@@ -47,55 +130,6 @@ curl -X POST "http://localhost:8000/runs" \
 - `POST /runs` accepts optional `tenant_id`, `tenant_tier`, and `data_region`.
 - If omitted, S18 applies defaults (`tenant_id=default`, `tenant_tier=starter`, `data_region=in`).
 - Growth migration hook is pre-wired via `tenancy.growth_routing_enabled` so selected healthcare tenants can be routed to isolated infrastructure later without changing request contracts.
-
-## Wise-AI Integration Sync (Mar 2026)
-
-### Integration-focused technical changes completed
-
-- **MockEHR + Wise adapter path** - Wise-side MockEHR adapter and S18-compatible tool stubs were integrated for cross-repo interoperability, with S18 consuming MockEHR data through MCP flows.
-- **CBC schema hardening** - Added Pydantic clinical schema validation and follow-up fixes for CBC unit normalization and stable fast/full CDSS payload handling.
-- **MCP routing/tool-calling robustness** - Improved MCP routing, timeout handling, retry/error behavior, and agent alias support for more reliable tool execution.
-- **Supabase integration touchpoints** - Added/expanded Supabase-backed auth verification and optional request/result logging paths used by S18 integration flows.
-
-### Capstone issue-sync status (Wise-AI + S18 reconciliation)
-
-- **Closed as implemented** - `#69`, `#127`, `#128`
-- **Progress-updated and intentionally open** - `#67`, `#73`, `#129`, `#130`, `#156`, `#202`, `#205`, `#206`
-- **Kept open for future/compliance stage** - `#155`, `#210`, `#211`, and `#183+`
-- Detailed matrix and evidence links: `docs/governance/WISE_S18_issue_reconciliation_2026-03-17.md`
-
-### Fresh architecture reference (latest)
-
-- **Canonical (Mar 2026 sync)** - `docs/architecture/WISE_AI_CDSS_Architecture_2026-03.md`
-- **Previous conceptual baseline** - `docs/architecture/WISE_AI_CDSS_Architecture.md` in wise-ai/TSAI-EAG-Capstone
-
-### Full stack with wise-ai
-
-Set **`WISE_MOCKEHR_BASE_URL`** to the base URL of the wise-ai FastAPI app (Mock EHR). Use whatever host and port actually serve that API—for example `http://localhost:8000` when wise-ai runs on your machine, or a Compose service URL such as `http://backend:8000` when both stacks share a Docker network. The integration is the same whether wise-ai is started with `uvicorn`, Docker, or another wrapper, as long as S18 can reach the URL.
-
-For **Docker Compose** flows that run wise-ai together with S18 (local builds, images from GHCR, or the full-stack compose file), see the wise-ai repo: **[`deployment/docker/README.md`](https://github.com/wiseaihub/TSAI-EAG-Capstone/tree/main/deployment/docker)** — use the **Build and run locally**, **Run from GitHub Container Registry**, and **Full stack (wise-ai + S18Share)** subsections as needed.
-
-### Quick verification (local)
-
-Run API:
-
-```bash
-uv run python api.py
-```
-
-Run targeted integration tests:
-
-```bash
-uv run pytest tests/test_mockehr_mcp.py tests/test_clinical_schema.py test_e2e.py
-```
-
-Optional Supabase readiness check:
-
-```bash
-python scripts/check_supabase_integration.py
-```
-
----
 
 ## Features
 
@@ -345,6 +379,57 @@ Verify MCP registration:
 ```bash
 uv run python scripts/test_gbrain_mcp_registration.py
 uv run python scripts/test_gbrain_mcp_live.py
+```
+
+---
+
+## Wise-AI Integration Sync (Mar 2026)
+
+This section is a cross-repo integration reference. If you are onboarding to S18 itself, start with [Start Here](#start-here) and [Quick start](#quick-start).
+
+### Integration-focused technical changes completed
+
+- **MockEHR + Wise adapter path** - Wise-side MockEHR adapter and S18-compatible tool stubs were integrated for cross-repo interoperability, with S18 consuming MockEHR data through MCP flows.
+- **CBC schema hardening** - Added Pydantic clinical schema validation and follow-up fixes for CBC unit normalization and stable fast/full CDSS payload handling.
+- **MCP routing/tool-calling robustness** - Improved MCP routing, timeout handling, retry/error behavior, and agent alias support for more reliable tool execution.
+- **Supabase integration touchpoints** - Added/expanded Supabase-backed auth verification and optional request/result logging paths used by S18 integration flows.
+
+### Capstone issue-sync status (Wise-AI + S18 reconciliation)
+
+- **Closed as implemented** - `#69`, `#127`, `#128`
+- **Progress-updated and intentionally open** - `#67`, `#73`, `#129`, `#130`, `#156`, `#202`, `#205`, `#206`
+- **Kept open for future/compliance stage** - `#155`, `#210`, `#211`, and `#183+`
+- Detailed matrix and evidence links: `docs/governance/WISE_S18_issue_reconciliation_2026-03-17.md`
+
+### Fresh architecture reference (latest)
+
+- **Canonical (Mar 2026 sync)** - `docs/architecture/WISE_AI_CDSS_Architecture_2026-03.md`
+- **Previous conceptual baseline** - `docs/architecture/WISE_AI_CDSS_Architecture.md` in wise-ai/TSAI-EAG-Capstone
+
+### Full stack with wise-ai
+
+Set **`WISE_MOCKEHR_BASE_URL`** to the base URL of the wise-ai FastAPI app (Mock EHR). Use whatever host and port actually serve that API—for example `http://localhost:8000` when wise-ai runs on your machine, or a Compose service URL such as `http://backend:8000` when both stacks share a Docker network. The integration is the same whether wise-ai is started with `uvicorn`, Docker, or another wrapper, as long as S18 can reach the URL.
+
+For **Docker Compose** flows that run wise-ai together with S18 (local builds, images from GHCR, or the full-stack compose file), see the wise-ai repo: **[`deployment/docker/README.md`](https://github.com/wiseaihub/TSAI-EAG-Capstone/tree/main/deployment/docker)** — use the **Build and run locally**, **Run from GitHub Container Registry**, and **Full stack (wise-ai + S18Share)** subsections as needed.
+
+### Quick verification (local)
+
+Run API:
+
+```bash
+uv run python api.py
+```
+
+Run targeted integration tests:
+
+```bash
+uv run pytest tests/test_mockehr_mcp.py tests/test_clinical_schema.py test_e2e.py
+```
+
+Optional Supabase readiness check:
+
+```bash
+python scripts/check_supabase_integration.py
 ```
 
 ---
