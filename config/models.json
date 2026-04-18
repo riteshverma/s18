@@ -37,6 +37,15 @@
         "embed": "http://localhost:11434/api/embeddings"
       }
     },
+    "qwen2.5:7b-instruct": {
+      "type": "ollama",
+      "model": "qwen2.5:7b-instruct",
+      "embedding_model": "nomic-embed-text",
+      "url": {
+        "generate": "http://localhost:11434/api/generate",
+        "embed": "http://localhost:11434/api/embeddings"
+      }
+    },
     "qwen2.5vl:32b": {
       "type": "ollama",
       "model": "qwen2.5vl:32b",
@@ -65,6 +74,11 @@
     "nomic": {
       "type": "huggingface",
       "model": "nomic-ai/nomic-embed-text-v1",
+      "embedding_dimension": 768
+    },
+    "bge-base-en-v1.5": {
+      "type": "huggingface",
+      "model": "BAAI/bge-base-en-v1.5",
       "embedding_dimension": 768
     }
   }

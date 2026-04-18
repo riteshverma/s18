@@ -151,6 +151,12 @@ def get_model(purpose: str) -> str:
     """Get model name for a specific purpose."""
     return load_settings()["models"].get(purpose, "gemma3:4b")
 
+
+def get_embedding_provider() -> str:
+    """Embedding backend: ollama (default) or sentence_transformers (Hugging Face model id)."""
+    return load_settings()["models"].get("embedding_provider", "ollama")
+
+
 def get_timeout() -> int:
     """Get Ollama timeout in seconds."""
     return load_settings()["ollama"]["timeout"]
