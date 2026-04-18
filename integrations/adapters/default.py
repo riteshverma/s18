@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from integrations.contracts import CanonicalRunRequest
+from integrations.contracts import CanonicalRunRequest, CanonicalRunResponse
 from integrations.profiles import load_integration_profile
 
 
@@ -13,11 +13,14 @@ class DefaultIntegrationAdapter:
         contract_version = raw_request.get("contract_version") or "v1"
         profile = load_integration_profile(integration_id, workflow_id, contract_version)
         payload = raw_request.get("raw_payload")
+        query = (raw_request.get("query") or "").strip()
+        if not query:
+            raise ValueError("query must be non-empty")
         return CanonicalRunRequest(
             contract_version=contract_version,
             integration_id=integration_id,
             workflow_id=workflow_id,
-            query=raw_request.get("query") or "",
+            query=query,
             model=raw_request.get("model"),
             source_system=(raw_request.get("source_system") or "s18").strip().lower(),
             tenant_id=(raw_request.get("tenant_id") or "default").strip().lower(),
@@ -46,4 +49,5 @@ class DefaultIntegrationAdapter:
         response["tenant_id"] = context.tenant_id
         response["tenant_tier"] = context.tenant_tier
         response["data_region"] = context.data_region
-        return response
+        canonical = CanonicalRunResponse.model_validate(response)
+        return canonical.model_dump()

@@ -54,6 +54,14 @@ def load_settings() -> dict:
         env_run_poll = os.getenv("RUN_POLL_TIMEOUT_SECONDS")
         if env_run_poll and env_run_poll.isdigit():
             _settings_cache["run_poll_timeout_seconds"] = int(env_run_poll)
+        env_mcp_tool_timeout = os.getenv("MCP_TOOL_TIMEOUT_SECONDS")
+        if env_mcp_tool_timeout and env_mcp_tool_timeout.isdigit():
+            _settings_cache.setdefault("mcp", {})
+            _settings_cache["mcp"]["tool_timeout_seconds"] = int(env_mcp_tool_timeout)
+        env_scheduler_tz = os.getenv("SCHEDULER_TIMEZONE")
+        if env_scheduler_tz:
+            _settings_cache.setdefault("scheduler", {})
+            _settings_cache["scheduler"]["timezone"] = env_scheduler_tz
         # Supabase/Auth runtime overrides
         env_auth_enabled = os.getenv("AUTH_ENABLED")
         if env_auth_enabled is not None:

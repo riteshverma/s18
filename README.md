@@ -358,6 +358,7 @@ The CI target uses pinned dependencies from `requirements-ci.txt` (exported from
 ## Configuration
 
 - **Main settings:** `config/settings.json` (created from `config/settings.defaults.json` if missing).
+- **Override policy:** keep stable defaults in `config/settings.defaults.json`, keep environment-specific values in `config/settings.json`, and prefer env vars for runtime overrides (`AUTH_ENABLED`, `SUPABASE_*`, `TENANCY_*`, `RUN_POLL_TIMEOUT_SECONDS`).
 - **Agent prompts and MCP:** `config/agent_config.yaml`.
 - **REMME extraction prompt and options:** under `remme` in settings.
 - **GBrain bridge flags:** under `remme.gbrain` in `config/settings.defaults.json`:
