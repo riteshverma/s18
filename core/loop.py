@@ -183,12 +183,23 @@ class AgentLoop4:
                 session_id=self.context.plan_graph.graph.get("session_id"),
                 memory_context=self.context.memory_context,
                 existing_context=self.context,
+                storage_namespace=self.context.plan_graph.graph.get("storage_namespace", "shared"),
             )
 
         await self._track_task(self._execute_dag(self.context))
         return self.context
 
-    async def run(self, query, file_manifest, globals_schema, uploaded_files, session_id=None, memory_context=None, existing_context=None):
+    async def run(
+        self,
+        query,
+        file_manifest,
+        globals_schema,
+        uploaded_files,
+        session_id=None,
+        memory_context=None,
+        existing_context=None,
+        storage_namespace: str = "shared",
+    ):
         run_start_ms = now_ms()
         final_status = "failed"
         try:
@@ -216,13 +227,15 @@ class AgentLoop4:
                     bootstrap_graph,
                     session_id=session_id,
                     original_query=query,
-                    file_manifest=file_manifest
+                    file_manifest=file_manifest,
+                    storage_namespace=storage_namespace,
                 )
                 log_step("✅ Session initialized with Query processing", symbol="🌱")
             else:
                 self.context = existing_context
                 self.context.set_multi_mcp(self.multi_mcp)
                 self.context.plan_graph.graph["file_manifest"] = file_manifest
+                self.context.plan_graph.graph["storage_namespace"] = storage_namespace
                 query_node = self.context.plan_graph.nodes["Query"] if "Query" in self.context.plan_graph else None
                 if query_node and query_node.get("status") != "completed":
                     query_node["status"] = "running"
@@ -238,7 +251,7 @@ class AgentLoop4:
             merged_query = self.context.plan_graph.graph['globals_schema'].get("original_query")
             if (merged_query is None or merged_query == "") and seeded_query not in (None, ""):
                 self.context.plan_graph.graph['globals_schema']['original_query'] = seeded_query
-            self.context._save_session()
+            await self.context.save_session_async()
         except Exception as e:
             print(f"❌ ERROR initializing context: {e}")
             raise
@@ -484,7 +497,7 @@ class AgentLoop4:
                         log_step("♻️ Adaptive Re-planning: Clarification resolved, formulating next steps...", symbol="🔄")
                         # Reactivate Query node for UI
                         self.context.plan_graph.nodes["Query"]["status"] = "running"
-                        self.context._save_session()
+                        await self.context.save_session_async()
                         continue
                     else:
                         # No more work or re-planning needed
@@ -512,7 +525,7 @@ class AgentLoop4:
                 self.context.plan_graph.graph['status'] = final_status
                 if final_status == "failed":
                     self.context.plan_graph.graph['error'] = str(e)
-                self.context._save_session()
+                await self.context.save_session_async()
             if not isinstance(e, asyncio.CancelledError) and not self.context.stop_requested:
                 raise e
             final_status = "stopped"
@@ -834,7 +847,7 @@ class AgentLoop4:
                 for n_id in context.plan_graph.nodes:
                     if context.plan_graph.nodes[n_id].get("status") == "running":
                         context.plan_graph.nodes[n_id]["status"] = "stopped"
-                context._save_session()
+                await context.save_session_async()
                 break
             
             # Get ready nodes
@@ -905,7 +918,7 @@ class AgentLoop4:
                      # Preserve partial output
                      if "output" in result:
                          context.plan_graph.nodes[step_id]["output"] = result["output"]
-                     context._save_session()
+                     await context.save_session_async()
                      log_step(f"⏳ {step_id}: Waiting for user input...", symbol="⏳")
                      continue
                 
