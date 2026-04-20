@@ -24,3 +24,11 @@ def test_canonical_contract_required_query():
         assert False, "Expected validation error for missing query"
     except Exception:
         assert True
+
+
+def test_canonical_contract_rejects_empty_query():
+    try:
+        CanonicalRunRequest(query="")
+        assert False, "Expected validation error for empty query"
+    except Exception:
+        assert True

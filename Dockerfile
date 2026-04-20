@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Regenerate with: uv export --format requirements-txt --no-dev --extra local-embed -o requirements-ci.txt
 COPY requirements-ci.txt /app/requirements-ci.txt
 
 RUN pip install --upgrade pip && \

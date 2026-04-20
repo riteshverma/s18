@@ -4,6 +4,7 @@ from typing import Dict, Any
 from datetime import datetime
 from collections import deque
 import weakref
+import time
 
 logger = logging.getLogger("event_bus")
 
@@ -16,7 +17,18 @@ class EventBus:
             cls._instance = super().__new__(cls)
             cls._instance._subscribers = set()
             cls._instance._history = deque(maxlen=100)
+            cls._instance._drop_counters = {}
+            cls._instance._last_drop_log_at = 0.0
+            cls._instance._drop_sample_seconds = 1.0
+            cls._instance._disconnect_on_drop = False
         return cls._instance
+
+    def configure(self, *, disconnect_on_drop: bool = False, drop_sample_seconds: float = 1.0):
+        self._disconnect_on_drop = disconnect_on_drop
+        self._drop_sample_seconds = max(0.1, float(drop_sample_seconds))
+
+    def drop_stats(self) -> Dict[str, int]:
+        return dict(self._drop_counters)
 
     async def publish(self, event_type: str, source: str, data: Dict[str, Any]):
         event = {
@@ -39,7 +51,20 @@ class EventBus:
             try:
                 q.put_nowait(event)  # Non-blocking
             except asyncio.QueueFull:
-                logger.warning("Dropping event due to full subscriber queue")
+                key = f"{event_type}:{source}"
+                self._drop_counters[key] = self._drop_counters.get(key, 0) + 1
+                now = time.monotonic()
+                if now - self._last_drop_log_at >= self._drop_sample_seconds:
+                    logger.warning(
+                        "Dropping event due to full subscriber queue type=%s source=%s dropped=%s subscribers=%s",
+                        event_type,
+                        source,
+                        self._drop_counters[key],
+                        len(self._subscribers),
+                    )
+                    self._last_drop_log_at = now
+                if self._disconnect_on_drop:
+                    dead.append(ref)
 
         # Cleanup dead references
         for ref in dead:

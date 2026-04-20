@@ -27,6 +27,7 @@ from remme.utils import get_embedding
 from config.settings_loader import settings, save_settings, reset_settings, reload_settings, get_run_poll_timeout
 from core.supabase_auth import is_auth_enabled
 from core.supabase_logging import is_logging_enabled
+from core.supabase_config import get_supabase_config
 
 
 # Import shared state
@@ -211,24 +212,18 @@ async def health_check():
 @app.get("/health/auth")
 async def health_auth():
     """Quick auth/logging diagnostics without exposing secrets."""
-    auth_cfg = settings.get("auth", {})
-    log_cfg = settings.get("supabase_logging", {})
-
-    supabase_url = os.getenv("SUPABASE_URL") or auth_cfg.get("supabase_url", "")
-    supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or auth_cfg.get("supabase_anon_key", "")
-    supabase_jwt_audience = os.getenv("SUPABASE_JWT_AUDIENCE") or auth_cfg.get("supabase_jwt_audience", "")
-    supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or log_cfg.get("service_role_key", "")
+    cfg = get_supabase_config()
 
     return {
         "status": "ok",
         "auth_enabled": is_auth_enabled(),
         "supabase_logging_enabled": is_logging_enabled(),
-        "supabase_url_configured": bool(supabase_url),
-        "supabase_jwt_audience_configured": bool(supabase_jwt_audience),
-        "supabase_anon_key_configured": bool(supabase_anon_key),
-        "supabase_service_role_key_configured": bool(supabase_service_key),
-        "request_table": log_cfg.get("request_table", "ehr_request_log"),
-        "result_table": log_cfg.get("result_table", "ehr_clinical_result"),
+        "supabase_url_configured": bool(cfg.get("url")),
+        "supabase_jwt_audience_configured": bool(cfg.get("jwt_audience")),
+        "supabase_anon_key_configured": bool(cfg.get("anon_key")),
+        "supabase_service_role_key_configured": bool(cfg.get("service_role_key")),
+        "request_table": cfg.get("request_table", "ehr_request_log"),
+        "result_table": cfg.get("result_table", "ehr_clinical_result"),
     }
 
 

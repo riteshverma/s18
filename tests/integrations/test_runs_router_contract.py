@@ -1,6 +1,8 @@
 import sys
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -72,3 +74,10 @@ def test_runs_accepts_explicit_tenant_context():
     assert body["tenant_id"] == "acme-health"
     assert body["tenant_tier"] == "growth"
     assert body["data_region"] == "in"
+
+
+def test_build_memory_context_parses_rag_snippet_literals():
+    rag_payload = SimpleNamespace(content=[SimpleNamespace(text='["snippet one", "snippet two"]')])
+    with patch("routers.runs.multi_mcp.call_tool", new=AsyncMock(return_value=rag_payload)):
+        memory_context, _ = asyncio.run(runs._build_memory_context("run-1", "hello"))
+    assert "snippet one" in memory_context

@@ -244,6 +244,37 @@ class RemmeStore:
         # Let's keep it simple: Just Metadata Update. The "Ghost" vector might return but we filter it.
         return True
 
+    def rebuild_embeddings_from_texts(self) -> int:
+        """Re-embed every memory with the current embedding model and rebuild FAISS.
+
+        Run after switching `models.embedding` or `embedding_provider` so vectors match queries.
+        Returns the number of memories indexed.
+        """
+        from remme.utils import get_embedding
+
+        if not self.memories:
+            self.index = faiss.IndexFlatL2(self.dimension)
+            self.save()
+            return 0
+
+        vectors: list[np.ndarray] = []
+        for m in self.memories:
+            text = m.get("text") or ""
+            vec = get_embedding(text, task_type="search_document")
+            vectors.append(vec.astype(np.float32))
+
+        dim = len(vectors[0])
+        self.dimension = dim
+        stacked = np.vstack(vectors)
+        new_index = faiss.IndexFlatL2(dim)
+        new_index.add(stacked)
+
+        self.index = new_index
+        for i, m in enumerate(self.memories):
+            m["faiss_id"] = i
+        self.save()
+        return len(self.memories)
+
     def update_text(self, memory_id: str, new_text: str, new_embedding: np.ndarray):
         """Update the text of a memory."""
         # 1. Soft delete the old vector (by removing metadata mapping)

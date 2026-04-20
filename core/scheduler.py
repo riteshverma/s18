@@ -8,12 +8,16 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel
 import uuid
+import pytz
+from config.settings_loader import settings
 
 # Setup logging
 logger = logging.getLogger("scheduler")
 
 # Path to persist jobs
 JOBS_FILE = Path("data/system/jobs.json")
+_scheduler_tz = settings.get("scheduler", {}).get("timezone", "UTC")
+SCHEDULER_TIMEZONE = pytz.timezone(_scheduler_tz)
 
 class JobDefinition(BaseModel):
     id: str
@@ -33,7 +37,7 @@ class SchedulerService:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(SchedulerService, cls).__new__(cls)
-            cls._instance.scheduler = AsyncIOScheduler()
+            cls._instance.scheduler = AsyncIOScheduler(timezone=SCHEDULER_TIMEZONE)
             cls._instance.jobs: Dict[str, JobDefinition] = {}
             cls._instance.initialized = False
         return cls._instance
@@ -72,6 +76,9 @@ class SchedulerService:
         data = [job.dict() for job in self.jobs.values()]
         JOBS_FILE.write_text(json.dumps(data, indent=2))
 
+    async def save_jobs_async(self):
+        await asyncio.to_thread(self.save_jobs)
+
     def _schedule_job(self, job: JobDefinition):
         """Internal method to add job to APScheduler."""
         
@@ -82,6 +89,7 @@ class SchedulerService:
             from .skills.manager import skill_manager
             from core.event_bus import event_bus
             from routers.inbox import send_to_inbox
+            from integrations.contracts import CanonicalRunRequest
             
             run_id = f"auto_{job.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
@@ -99,7 +107,7 @@ class SchedulerService:
             
             # Update last run
             job.last_run = datetime.now().isoformat()
-            self.save_jobs()
+            await self.save_jobs_async()
             
             try:
                 # Skill Lifecycle Execution
@@ -122,7 +130,8 @@ class SchedulerService:
                         await event_bus.publish("log", "scheduler", {"message": msg})
 
                 # 3. Execution (The standard run)
-                result = await process_run(run_id, effective_query)
+                canonical_request = CanonicalRunRequest(query=effective_query)
+                result = await process_run(run_id, canonical_request)
                 
                 # 4. Hook: On Success (The "Doing")
                 skill_result = None
@@ -142,7 +151,7 @@ class SchedulerService:
                 
                 # Update job with result
                 job.last_output = skill_result.get("summary") if skill_result else (result.get("summary") if result else "Success")
-                self.save_jobs()
+                await self.save_jobs_async()
 
                 # Build rich notification body
                 notif_body = f"Job '{job.name}' finished.\n\n"
@@ -200,7 +209,7 @@ class SchedulerService:
             aps_job = self.scheduler.get_job(job.id)
             if aps_job and aps_job.next_run_time:
                 job.next_run = aps_job.next_run_time.isoformat()
-                self.save_jobs()
+                asyncio.create_task(self.save_jobs_async())
                 
         except Exception as e:
             logger.error(f"Invalid cron expression for {job.name}: {e}")

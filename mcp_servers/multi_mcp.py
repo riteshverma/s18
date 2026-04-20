@@ -18,6 +18,7 @@ from mcp.client.stdio import stdio_client
 from mcp.types import Tool
 from rich import print as rich_print
 from core.prometheus_metrics import MCP_TOOL_CALLS_TOTAL, MCP_TOOL_LATENCY_MS, elapsed_ms, now_ms
+from config.settings_loader import settings
 
 class MultiMCP:
     def __init__(self):
@@ -445,7 +446,16 @@ class MultiMCP:
                         f"choosing '{selected_server}' from {matching_servers}"
                     )
 
-            result = await self.call_tool(selected_server, tool_name, arguments)
+            timeout_seconds = float(settings.get("mcp", {}).get("tool_timeout_seconds", 45))
+            try:
+                result = await asyncio.wait_for(
+                    self.call_tool(selected_server, tool_name, arguments),
+                    timeout=timeout_seconds,
+                )
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(
+                    f"MCP tool timeout tool={tool_name} server={selected_server} timeout_seconds={timeout_seconds}"
+                ) from exc
             breaker.record_success()
             MCP_TOOL_CALLS_TOTAL.labels(
                 tool=tool_name,

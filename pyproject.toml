@@ -43,3 +43,8 @@ dependencies = [
     "prometheus-client>=0.21.1",
     "pyjwt[crypto]>=2.10.1",
 ]
+
+[project.optional-dependencies]
+local-embed = [
+    "sentence-transformers>=3.0.0",
+]

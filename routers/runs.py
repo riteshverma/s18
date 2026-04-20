@@ -1,10 +1,11 @@
 # Runs Router - Handles agent run execution, listing, and management
 import asyncio
+import ast
 import json
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Body, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional
 
 from shared.state import (
@@ -28,9 +29,14 @@ from remme.utils import get_embedding
 from config.settings_loader import settings, get_run_poll_timeout
 from integrations.contracts import CanonicalRunRequest
 from integrations.registry import get_integration_adapter
-from integrations.tenancy import can_route_to_growth, resolve_tenant_context
+from integrations.tenancy import (
+    can_route_to_growth,
+    resolve_tenant_context,
+    storage_namespace_for_tenant,
+)
 
 router = APIRouter(tags=["Runs"])
+RUNS_INDEX_FILE = PROJECT_ROOT / "memory" / "runs.index.json"
 
 # Get shared instances
 multi_mcp = get_multi_mcp()
@@ -41,7 +47,7 @@ remme_extractor = get_remme_extractor()
 # === Pydantic Models ===
 
 class RunRequest(BaseModel):
-    query: str
+    query: str = Field(min_length=1)
     model: str = None  # Will use settings default if not provided
     contract_version: Optional[str] = "v1"
     integration_id: Optional[str] = None
@@ -71,11 +77,6 @@ class RunResponse(BaseModel):
 class UserInputRequest(BaseModel):
     node_id: str
     response: str
-
-
-class AgentTestRequest(BaseModel):
-    """Optional request body for agent testing"""
-    pass
 
 
 # === Background Tasks ===
@@ -127,7 +128,7 @@ def _session_file_candidates(run_id: str, summaries_dir: Path):
             pass
 
     # Compatibility fallback for custom/non-timestamp run ids.
-    for path in summaries_dir.glob(f"*/*/*/{filename}"):
+    for path in summaries_dir.glob(f"**/{filename}"):
         candidates.append(path)
 
     return candidates
@@ -138,6 +139,68 @@ def _find_session_file(run_id: str, summaries_dir: Path) -> Optional[Path]:
         if candidate.exists():
             return candidate
     return None
+
+
+def _read_run_entry_sync(session_file: Path) -> Optional[Dict[str, Any]]:
+    try:
+        data = json.loads(session_file.read_text(encoding="utf-8", errors="ignore"))
+        graph_details = data.get("graph", {})
+        query = graph_details.get("original_query") or graph_details.get("globals", {}).get("original_query", "Unknown Query")
+        created_at = graph_details.get("created_at") or datetime.fromtimestamp(session_file.stat().st_ctime).isoformat()
+        nodes = data.get("nodes", [])
+        node_statuses = [n.get("status", "pending") for n in nodes if n.get("id") != "ROOT"]
+        if any(s == "running" for s in node_statuses):
+            computed_status = "running"
+        elif any(s == "failed" for s in node_statuses):
+            computed_status = "failed"
+        elif all(s == "completed" for s in node_statuses) and node_statuses:
+            computed_status = "completed"
+        else:
+            computed_status = graph_details.get("status", "completed")
+        total_tokens = sum((n.get("total_tokens", 0) or 0) for n in nodes)
+        return {
+            "id": session_file.stem.replace("session_", ""),
+            "query": query,
+            "created_at": created_at,
+            "status": computed_status,
+            "total_tokens": total_tokens,
+            "path": str(session_file),
+        }
+    except Exception:
+        return None
+
+
+def _write_runs_index_sync(index_rows: list[Dict[str, Any]]) -> None:
+    RUNS_INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = RUNS_INDEX_FILE.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(index_rows, fh, indent=2)
+    tmp.replace(RUNS_INDEX_FILE)
+
+
+async def _refresh_runs_index() -> list[Dict[str, Any]]:
+    summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
+    if not summaries_dir.exists():
+        return []
+    session_files = list(summaries_dir.glob("**/session_*.json"))
+    rows = []
+    for entry in await asyncio.gather(*[asyncio.to_thread(_read_run_entry_sync, path) for path in session_files]):
+        if entry:
+            rows.append(entry)
+    rows.sort(key=lambda x: x["id"], reverse=True)
+    await asyncio.to_thread(_write_runs_index_sync, rows)
+    return rows
+
+
+async def _load_runs_index() -> list[Dict[str, Any]]:
+    if RUNS_INDEX_FILE.exists():
+        try:
+            data = await asyncio.to_thread(lambda: json.loads(RUNS_INDEX_FILE.read_text(encoding="utf-8")))
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+    return await _refresh_runs_index()
 
 
 def _retrieve_memories_sync(query: str):
@@ -187,9 +250,16 @@ async def process_run(
     run_id: str,
     canonical_request: CanonicalRunRequest,
     audit_context: Optional[Dict[str, Any]] = None,
+    tenant_context: Optional[Dict[str, str]] = None,
 ):
     """Background task to execute the agent loop"""
-    final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete"}
+    tenant_context = tenant_context or {
+        "tenant_id": canonical_request.tenant_id,
+        "tenant_tier": canonical_request.tenant_tier,
+        "data_region": canonical_request.data_region or "in",
+    }
+    storage_namespace = storage_namespace_for_tenant(tenant_context, settings.get("tenancy", {}))
+    final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete", "run_id": run_id}
     context = None
     results = []
     loop = AgentLoop4(multi_mcp=multi_mcp)
@@ -202,6 +272,7 @@ async def process_run(
             "tenant_id": canonical_request.tenant_id,
             "tenant_tier": canonical_request.tenant_tier,
             "data_region": canonical_request.data_region,
+            "storage_namespace": storage_namespace,
         }
     )
     try:
@@ -227,6 +298,7 @@ async def process_run(
                  [],
                  session_id=run_id,
                  memory_context=memory_context,
+                 storage_namespace=storage_namespace,
              )
         except asyncio.CancelledError:
              print(f"[{run_id}] Run cancelled.")
@@ -279,27 +351,41 @@ async def process_run(
             )
             
             if commands:
+                # Skip embedding work entirely once Ollama has failed on this
+                # run - each failing call can block ~12 minutes (two endpoints
+                # x OLLAMA_TIMEOUT). Fail fast and keep the event loop healthy.
+                embedding_available = True
                 for cmd in commands:
                     if not isinstance(cmd, dict):
                         print(f"⚠️ Remme: Skipping invalid command format: {cmd}")
                         continue
-                        
+
                     action = cmd.get("action")
                     text = cmd.get("text")
                     target_id = cmd.get("id")
-                    
+
                     try:
                         if action == "add" and text:
-                            emb = get_embedding(text, task_type="search_document")
+                            if not embedding_available:
+                                continue
+                            emb = await asyncio.to_thread(get_embedding, text, "search_document")
                             remme_store.add(text, emb, category="derived", source=f"run_{run_id}")
                             print(f"✅ Remme: Added new fact: {text}")
                         elif action == "update" and target_id and text:
-                            emb = get_embedding(text, task_type="search_document")
+                            if not embedding_available:
+                                continue
+                            emb = await asyncio.to_thread(get_embedding, text, "search_document")
                             remme_store.update_text(target_id, text, emb)
                             print(f"🔄 Remme: Updated fact {target_id}: {text}")
                         elif action == "delete" and target_id:
                             remme_store.delete(target_id)
                             print(f"🗑️ Remme: Deleted fact {target_id}")
+                    except RuntimeError as e:
+                        # core.embedding raises RuntimeError when Ollama is
+                        # unreachable. Trip the breaker so we don't pay the
+                        # timeout again for the remaining commands.
+                        embedding_available = False
+                        print(f"❌ Remme Action Failed (embedding unavailable): {e}")
                     except Exception as e:
                         print(f"❌ Remme Action Failed: {e}")
             
@@ -372,16 +458,39 @@ async def process_run(
         except Exception as e:
             print(f"⚠️ Failed to auto-save report: {e}")
             
-        # Return result for Scheduler/Skills
-        final_result = {"status": "completed", "run_id": run_id}
         if context and context.plan_graph:
-            # Check for any failed nodes
+            # Derive status from the plan graph instead of optimistically flipping
+            # to "completed". Mirrors the logic used in process_resume so a run
+            # that was cancelled or crashed mid-flight is not reported as done.
+            failed_node_id = None
+            failed_error = None
             for node_id in context.plan_graph.nodes:
                 node = context.plan_graph.nodes[node_id]
                 if node.get("status") == "failed":
-                    final_result["status"] = "failed"
-                    final_result["error"] = node.get("error")
+                    failed_node_id = node_id
+                    failed_error = node.get("error")
                     break
+            if failed_node_id is not None:
+                final_result["status"] = "failed"
+                final_result["run_id"] = run_id
+                final_result["error"] = failed_error
+            else:
+                graph_status = context.plan_graph.graph.get("status")
+                node_statuses = [
+                    context.plan_graph.nodes[n].get("status", "pending")
+                    for n in context.plan_graph.nodes
+                    if n != "ROOT"
+                ]
+                if graph_status in {"completed", "failed", "paused", "stopped"}:
+                    derived_status = graph_status
+                elif node_statuses and all(s == "completed" for s in node_statuses):
+                    derived_status = "completed"
+                else:
+                    # Partial / running / interrupted - keep as failed so the run
+                    # does not masquerade as successful.
+                    derived_status = "failed"
+                final_result["status"] = derived_status
+                final_result["run_id"] = run_id
         
         if context:
              try:
@@ -506,13 +615,17 @@ async def process_run(
                 )
             except Exception as e:
                 print(f"⚠️ Supabase result logging failed for run {run_id}: {e}")
+        try:
+            await _refresh_runs_index()
+        except Exception:
+            pass
 
         return final_result
 
 
 async def process_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = None):
     """Background task to resume a saved run from disk."""
-    final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete"}
+    final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete", "run_id": run_id}
     context = None
     results = []
     query = ""
@@ -524,7 +637,7 @@ async def process_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = 
         if not found_file:
             raise FileNotFoundError(f"Run {run_id} not found")
 
-        data = json.loads(found_file.read_text(encoding="utf-8", errors="ignore"))
+        data = await asyncio.to_thread(lambda: json.loads(found_file.read_text(encoding="utf-8", errors="ignore")))
         query = data.get("graph", {}).get("original_query") or ""
         memory_context = data.get("graph", {}).get("memory_context")
         if memory_context is None and query:
@@ -547,6 +660,38 @@ async def process_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = 
             else:
                 final_result["status"] = context.plan_graph.graph.get("status", "completed")
 
+        if audit_context:
+            try:
+                await update_request_status(
+                    idempotency_key=audit_context["idempotency_key"],
+                    run_id=run_id,
+                    status=final_result.get("status", "failed"),
+                    error_code=final_result.get("error"),
+                )
+                await log_clinical_result(
+                    {
+                        "run_id": run_id,
+                        "request_id": audit_context.get("request_id"),
+                        "idempotency_key": audit_context["idempotency_key"],
+                        "query_type": _infer_query_type(query),
+                        "normalized_result": {
+                            "summary": final_result.get("summary"),
+                            "output": final_result.get("output"),
+                        },
+                        "summary": final_result.get("summary"),
+                        "triage_flag": "high" if final_result.get("status") == "failed" else "normal",
+                        "status": final_result.get("status", "failed"),
+                        "error_code": final_result.get("error"),
+                        "event": "resume",
+                    }
+                )
+            except Exception as e:
+                print(f"⚠️ Supabase resume logging failed for run {run_id}: {e}")
+        try:
+            await _refresh_runs_index()
+        except Exception:
+            pass
+
         return final_result
 
 
@@ -560,11 +705,6 @@ async def create_run(
 ):
     # Millisecond precision avoids collisions when multiple runs start in the same second.
     run_id = str(int(datetime.now().timestamp() * 1000))
-    
-    adapter = get_integration_adapter(
-        integration_id=request.integration_id,
-        source_system=request.source_system,
-    )
     request_payload = request.model_dump()
     tenant_context = resolve_tenant_context(
         request_payload=request_payload,
@@ -578,7 +718,15 @@ async def create_run(
             "data_region": tenant_context["data_region"],
         }
     )
-    canonical_request = adapter.to_canonical(request_payload)
+    adapter = get_integration_adapter(
+        integration_id=request.integration_id,
+        source_system=request.source_system,
+        tenant_context=tenant_context,
+    )
+    try:
+        canonical_request = adapter.to_canonical(request_payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
     payload_hash = compute_payload_hash(canonical_request.query, canonical_request.raw_payload)
     source_system = (canonical_request.source_system or "s18").strip().lower()
@@ -626,7 +774,7 @@ async def create_run(
         print(f"⚠️ Supabase inbound logging failed for run {run_id}: {e}")
 
     # Start background execution
-    background_tasks.add_task(process_run, run_id, canonical_request, audit_context)
+    background_tasks.add_task(process_run, run_id, canonical_request, audit_context, tenant_context)
     
     return adapter.from_canonical(
         {
@@ -663,7 +811,28 @@ async def resume_run(
     if not found_file:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    background_tasks.add_task(process_resume, run_id)
+    request_id = f"resume_{run_id}"
+    idempotency_key = f"resume:{run_id}"
+    audit_context = {"request_id": request_id, "idempotency_key": idempotency_key}
+    try:
+        await log_inbound_request(
+            {
+                "run_id": run_id,
+                "request_id": request_id,
+                "source_system": "s18",
+                "idempotency_key": idempotency_key,
+                "payload_hash": f"resume:{run_id}",
+                "query": "resume_run",
+                "raw_payload": {"event": "resume", "run_id": run_id},
+                "auth_sub": user.get("sub"),
+                "auth_email": user.get("email"),
+                "status": "accepted",
+            }
+        )
+    except Exception as e:
+        print(f"⚠️ Supabase inbound resume logging failed for run {run_id}: {e}")
+
+    background_tasks.add_task(process_resume, run_id, audit_context)
     return {
         "id": run_id,
         "status": "resuming",
@@ -675,61 +844,8 @@ async def resume_run(
 @router.get("/runs")
 async def list_runs(user: Dict[str, Any] = Depends(require_supabase_user)):
     """List runs from disk"""
-    summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
-    runs = []
-    
-    if summaries_dir.exists():
-        # Walk through date folders
-        for date_folder in summaries_dir.glob("*/*/*"):
-            for session_file in date_folder.glob("session_*.json"):
-                try:
-                    data = json.loads(session_file.read_text(encoding="utf-8", errors="ignore"))
-                    graph_data = data
-                    # Extract meta
-                    graph_details = graph_data.get("graph", {})
-                    
-                    # Robust Query Extraction
-                    query = graph_details.get("original_query")
-                    if not query:
-                        query = graph_details.get("globals", {}).get("original_query", "Unknown Query")
-
-                    # Timestamp Extraction
-                    created_at = graph_details.get("created_at")
-                    if not created_at:
-                        # Fallback to file creation time
-                        created_at = datetime.fromtimestamp(session_file.stat().st_ctime).isoformat()
-                    
-                    # Compute status from node statuses
-                    # Check nodes for their statuses
-                    nodes = data.get("nodes", [])
-                    node_statuses = [n.get("status", "pending") for n in nodes if n.get("id") != "ROOT"]
-                    
-                    if any(s == "running" for s in node_statuses):
-                        computed_status = "running"
-                    elif any(s == "failed" for s in node_statuses):
-                        computed_status = "failed" 
-                    elif all(s == "completed" for s in node_statuses) and node_statuses:
-                        computed_status = "completed"
-                    else:
-                        # Fallback to graph-level status or completed
-                        computed_status = graph_details.get("status", "completed")
-                    
-                    total_tokens = sum(
-                        (n.get("total_tokens", 0) or 0) for n in nodes
-                    )
-                    
-                    runs.append({
-                        "id": session_file.stem.replace("session_", ""),
-                        "query": query, 
-                        "created_at": created_at, 
-                        "status": computed_status,
-                        "total_tokens": total_tokens
-                    })
-                except:
-                    continue
-    
-    # Sort by recent
-    return sorted(runs, key=lambda x: x['id'], reverse=True)
+    runs = await _load_runs_index()
+    return [{k: v for k, v in row.items() if k != "path"} for row in runs]
 
 
 @router.get("/runs/{run_id}")
@@ -779,7 +895,7 @@ async def get_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_u
     found_file = _find_session_file(run_id, summaries_dir)
         
     if found_file:
-        data = json.loads(found_file.read_text(encoding="utf-8", errors="ignore"))
+        data = await asyncio.to_thread(lambda: json.loads(found_file.read_text(encoding="utf-8", errors="ignore")))
         # Reconstruct Graph to use adapter
         import networkx as nx
         if "edges" in data:
@@ -883,7 +999,7 @@ async def provide_input(
                 loop.context.plan_graph.nodes[selected_node_id]["status"] = "completed"
 
                 # Save the session
-                loop.context._save_session()
+                await asyncio.to_thread(loop.context._save_session)
 
                 return {
                     "id": run_id,
