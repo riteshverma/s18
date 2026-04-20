@@ -7,9 +7,9 @@
     "models": {
         "embedding_provider": "ollama",
         "embedding": "nomic-embed-text",
-        "semantic_chunking": "gemma3:4b",
-        "image_captioning": "gemma3:4b",
-        "memory_extraction": "qwen3-vl:8b",
+        "semantic_chunking": "qwen2.5:7b-instruct",
+        "image_captioning": "qwen2.5:7b-instruct",
+        "memory_extraction": "qwen2.5:7b-instruct",
         "insights_provider": "ollama"
     },
     "rag": {
@@ -25,7 +25,7 @@
         "overrides": {
             "TestAgent": {
                 "model_provider": "ollama",
-                "model": "gemma3:4b"
+                "model": "qwen2.5:7b-instruct"
             }
         },
         "max_steps": 3,

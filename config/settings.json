@@ -5,10 +5,11 @@
     "timeout": 360
   },
   "models": {
-    "embedding": "nomic-embed-text",
-    "semantic_chunking": "gemma3:4b",
-    "image_captioning": "gemma3:4b",
-    "memory_extraction": "gemma3:4b",
+   "embedding_provider": "sentence_transformers",
+    "embedding": "BAAI/bge-base-en-v1.5",
+    "semantic_chunking": "qwen2.5:7b-instruct",
+    "image_captioning": "qwen2.5:7b-instruct",
+    "memory_extraction": "qwen2.5:7b-instruct",
     "insights_provider": "ollama"
   },
   "rag": {
@@ -20,7 +21,7 @@
   },
   "agent": {
     "model_provider": "ollama",
-    "default_model": "gemma3:4b",
+    "default_model": "qwen2.5:7b-instruct",
     "overrides": {},
     "max_steps": 3,
     "max_lifelines_per_step": 3,
@@ -39,7 +40,7 @@
     "feedback_mode": "with_permission",
     "regenerate_on_type_changes": false,
     "regenerate_on_docstring_changes": false,
-    "test_agent_model": "gemma3:4b"
+    "test_agent_model": "qwen2.5:7b-instruct"
   },
   "remme": {
     "extraction_prompt": "You are a Contextual Memory Management AI.\nYour job is to update the \"Memory Vault\" based on the latest conversation.\n\nRULES:\n1. ANTI-FRAGMENTATION: NEVER split related items into separate facts. Merge them into ONE rich, coherent memory entry.\n2. NO REDUNDANCY: If info is already captured, do nothing unless you have NEW details (use \"update\").\n3. CONTEXTUAL HUBS: Prefer a single \"Hub\" memory over separate atomic facts; emit it as one entry in \"memories\" (see OUTPUT FORMAT).\n4. NO NEGATIVE FACTS: NEVER store \"not found\" or \"missing\" info.\n5. NO META-LOGS: Do not store internal reasoning or agent traces.\n6. HIGH SALIENCE ONLY: Focus on project decisions, user preferences, architectural details.\n7. ACTIONS: \"add\" for new facts, \"update\" to expand existing, \"delete\" if proven false.\n\nOUTPUT FORMAT: Respond with JSON only: {\"memories\": [{\"action\": \"add\"|\"update\"|\"delete\", \"text\": \"...\", \"id\": \"...\" only for update/delete}], \"preferences\": {...}}. If nothing to store: {\"memories\": [], \"preferences\": {}}."

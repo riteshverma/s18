@@ -1,3 +1,6 @@
+# S18 / Wise AI stack: join external `docker_default` (create if missing: docker network create docker_default).
+# From this folder: docker compose build --no-cache && docker compose up -d
+# Then pull the default LLM: docker exec s18share-ollama ollama pull qwen2.5:7b-instruct
 services:
   api:
     build:
@@ -19,6 +22,8 @@ services:
       - ./memory:/app/memory
       - ./config:/app/config
       - ./mcp_servers/faiss_index:/app/mcp_servers/faiss_index
+      # Persist Sentence Transformers / Hugging Face model downloads (e.g. BAAI/bge-base-en-v1.5)
+      - huggingface_hub_cache:/home/appuser/.cache/huggingface
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -34,13 +39,16 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama_data:/root/.ollama
+      # Default: named volume on Docker's disk. Set OLLAMA_HOST_DATA to a host folder
+      # (e.g. D:/docker/ollama) to keep models on another drive — see .env.example.
+      - ${OLLAMA_HOST_DATA:-ollama_data}:/root/.ollama
     networks:
       - default
       - shared_wise_net
 
 volumes:
   ollama_data:
+  huggingface_hub_cache:
 
 networks:
   shared_wise_net:

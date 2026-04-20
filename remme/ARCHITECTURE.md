@@ -5,6 +5,7 @@
 ## Overview
 
 REMME is the centralized system that:
+
 1. **Collects** signals from multiple sources (conversations, notes, sessions, news, browser)
 2. **Extracts** structured preferences using LLM
 3. **Stores** both unstructured memories (for RAG recall) and structured hubs (for agent injection)
@@ -56,6 +57,8 @@ flowchart TB
     PH --> IDE
     PH --> RUNS
 ```
+
+
 
 ---
 
@@ -115,6 +118,8 @@ flowchart LR
     BELIEF --> HUBS
 ```
 
+
+
 ### Stage 1: Extractor (Frequent)
 
 **Trigger:** After each conversation scan
@@ -145,6 +150,7 @@ The extractor doesn't need to know the hub schema - it just extracts any prefere
 **Trigger:** Every 10 items OR every 6 hours OR manual "Sync Now"
 
 The normalizer LLM:
+
 1. Reads current hub schema
 2. Maps extracted fields to known schema fields (diet → dietary_style)
 3. Creates new fields in `extras` for unknown concepts
@@ -162,6 +168,7 @@ The normalizer LLM:
 ### Stage 4: BeliefUpdateEngine
 
 Calculates confidence updates:
+
 - **New belief:** Base confidence (0.3)
 - **Reinforcement:** Asymptotic increase (0.3 → 0.45 → 0.55)
 - **Contradiction:** Decrement + conflict resolution
@@ -185,9 +192,11 @@ Final structured storage with confidence scores:
 ## Signal Sources
 
 ### Currently Implemented
+
 - ✅ **Conversations** - Via session smart scan
 
 ### To Be Implemented
+
 - ❌ **Notes** - Scan `data/Notes/*.md`
 - ❌ **Session Summaries** - Direct scan of `memory/session_summaries_index`
 - ❌ **News** - Track articles read in NEWS tab
@@ -227,6 +236,7 @@ USER PREFERENCES:
 ## Frontend Integration
 
 The **Preferences** tab in REMME panel shows:
+
 - All extracted preferences from hubs
 - Evidence count and confidence scores
 - Bootstrap button for manual re-extraction
@@ -241,3 +251,4 @@ The **Preferences** tab in REMME panel shows:
 3. **Dual Output** - Both memories (text) and preferences (structured)
 4. **All Agents Consume** - Apps, RAG, IDE, RUNS all get REMME context
 5. **User Control** - Transparent extraction with edit/delete capabilities
+
