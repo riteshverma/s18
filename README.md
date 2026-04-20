@@ -5,6 +5,53 @@
 - **Python:** 3.11+
 - **Version:** 0.2.0
 
+## The magic moment (under 30 seconds)
+
+**One sentence:** Send a natural-language job to **`POST /runs`**, and S18 orchestrates an **agent loop** that can call **REMME memory**, **RAG**, and **MCP tools** (browser, sandbox, custom servers) behind one canonical contract—optionally **verified by Supabase JWT** and **audited to Supabase tables**.
+
+**Proof in three steps:** `uv sync` → put `GEMINI_API_KEY` in `.env` → `uv run python api.py` → open **`/docs`** and execute **`POST /runs`** with `{"query": "…"}`. You will see a run id and the pipeline come alive without wiring a separate orchestration framework.
+
+**Go deeper in five minutes:** [docs/QUICKSTART_5_MIN.md](docs/QUICKSTART_5_MIN.md) (git clone → running agent, Swagger UI as the built-in front end).
+
+## Architecture at a glance
+
+S18 is not “a single LLM route.” The **FastAPI routers** (`/runs`, `/mcp`, `/rag`, `/remme`, …) sit in front of an **agent loop** and a **MultiMCP** layer that spawns and talks to **stdio MCP servers**. **Supabase** is the trust boundary (JWT via JWKS) and optional persistence—not a stand-in for the orchestration core.
+
+```mermaid
+flowchart LR
+  subgraph clients [Clients]
+    WEB[Browser / partner UI]
+    APIc[curl / SDK / Wise-AI]
+  end
+
+  subgraph s18 [S18Share FastAPI]
+    RT[routers /runs /mcp /rag /remme ...]
+    LOOP[Agent loop + adapters]
+    MM[MultiMCP]
+  end
+
+  subgraph mcp [MCP layer]
+    P1[RAG / FAISS]
+    P2[Browser / web tools]
+    P3[Sandbox + custom servers]
+  end
+
+  subgraph supa [Supabase]
+    JWKS[JWT verify via JWKS]
+    TBL[(Optional tables: audit + clinical)]
+  end
+
+  WEB -->|Bearer when AUTH enabled| RT
+  APIc --> RT
+  RT --> LOOP
+  LOOP --> MM
+  MM --> P1
+  MM --> P2
+  MM --> P3
+  RT -.-> JWKS
+  RT -.->|SUPABASE_LOGGING_ENABLED| TBL
+```
+
 ## Start Here
 
 If you are new to this repo, use this sequence:
@@ -13,7 +60,7 @@ If you are new to this repo, use this sequence:
 2. **Set env:** copy `.env.example` to `.env`, then set `GEMINI_API_KEY`
 3. **Run API:** `uv run python api.py`
 4. **Verify:** open `http://localhost:8000/health` and `http://localhost:8000/docs`
-5. **Run a canonical workflow:** `POST /runs` with optional integration metadata
+5. **Run a canonical workflow:** `POST /runs` with optional integration metadata (see [5-minute quickstart](docs/QUICKSTART_5_MIN.md) for the shortest path)
 
 Key docs for common tasks:
 
@@ -73,6 +120,9 @@ Primary files:
 
 ## Document Map
 
+- [The magic moment (under 30 seconds)](#the-magic-moment-under-30-seconds)
+- [Architecture at a glance](#architecture-at-a-glance)
+- [5-minute quickstart](docs/QUICKSTART_5_MIN.md)
 - [Start Here](#start-here)
 - [Audience Paths](#audience-paths)
 - [Developer quickstart](#developer-quickstart)

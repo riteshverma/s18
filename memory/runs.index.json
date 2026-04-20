@@ -1,0 +1,474 @@
+[
+  {
+    "id": "1776677609531",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.26, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 50000.0, \"differential\": null}",
+    "created_at": "2026-04-20T09:33:30.159643",
+    "status": "completed",
+    "total_tokens": 362,
+    "path": "/app/memory/session_summaries_index/shared/2026/04/20/session_1776677609531.json"
+  },
+  {
+    "id": "1776677506520",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: fast] Request: {\"sex\": \"male\", \"hemoglobin\": 7.26, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 50000.0, \"differential\": null}",
+    "created_at": "2026-04-20T09:31:57.275867",
+    "status": "completed",
+    "total_tokens": 172,
+    "path": "/app/memory/session_summaries_index/shared/2026/04/20/session_1776677506520.json"
+  },
+  {
+    "id": "1776414212933",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: fast] Request: {\"sex\": null, \"hemoglobin\": 13.5, \"wbc\": 7000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-17T08:23:33.625585",
+    "status": "completed",
+    "total_tokens": 519,
+    "path": "/app/memory/session_summaries_index/2026/04/17/session_1776414212933.json"
+  },
+  {
+    "id": "1776414123928",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: fast] Request: {\"sex\": null, \"hemoglobin\": 13.5, \"wbc\": 7000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-17T08:22:05.938260",
+    "status": "completed",
+    "total_tokens": 503,
+    "path": "/app/memory/session_summaries_index/2026/04/17/session_1776414123928.json"
+  },
+  {
+    "id": "1776409726749",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"third_gender\", \"hemoglobin\": 7.6, \"wbc\": 15000.0, \"rbc\": 4.5, \"platelets\": 50000.0, \"differential\": null}",
+    "created_at": "2026-04-17T07:08:51.968027",
+    "status": "completed",
+    "total_tokens": 1971,
+    "path": "/app/memory/session_summaries_index/2026/04/17/session_1776409726749.json"
+  },
+  {
+    "id": "1776328771034",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"third_gender\", \"hemoglobin\": 6.8, \"wbc\": 16000.0, \"rbc\": 4.5, \"platelets\": 50000.0, \"differential\": null}",
+    "created_at": "2026-04-16T08:39:31.677400",
+    "status": "completed",
+    "total_tokens": 1596,
+    "path": "/app/memory/session_summaries_index/2026/04/16/session_1776328771034.json"
+  },
+  {
+    "id": "1776233299457",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"third_gender\", \"hemoglobin\": 8.0, \"wbc\": 20000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-15T06:08:21.539576",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/15/session_1776233299457.json"
+  },
+  {
+    "id": "1776232930921",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"third_gender\", \"hemoglobin\": 8.0, \"wbc\": 20000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-15T06:02:27.049970",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/15/session_1776232930921.json"
+  },
+  {
+    "id": "1776183154073",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.5, \"wbc\": 16000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T16:12:35.100268",
+    "status": "completed",
+    "total_tokens": 3254,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776183154073.json"
+  },
+  {
+    "id": "1776182399303",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.5, \"wbc\": 16000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T15:59:59.571738",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776182399303.json"
+  },
+  {
+    "id": "1776182338877",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: fast] Request: {\"sex\": \"male\", \"hemoglobin\": 7.5, \"wbc\": 16000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T15:58:59.254947",
+    "status": "completed",
+    "total_tokens": 1204,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776182338877.json"
+  },
+  {
+    "id": "1776182140352",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.5, \"wbc\": 16000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T15:55:40.806769",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776182140352.json"
+  },
+  {
+    "id": "1776182009483",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.5, \"wbc\": 16000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T15:53:30.103537",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776182009483.json"
+  },
+  {
+    "id": "1776180981877",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"female\", \"hemoglobin\": 7.5, \"wbc\": 16000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T15:36:22.201143",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776180981877.json"
+  },
+  {
+    "id": "1776179255813",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 15000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T15:07:36.052060",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776179255813.json"
+  },
+  {
+    "id": "1776179048937",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 15000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T15:04:09.180499",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776179048937.json"
+  },
+  {
+    "id": "1776177447691",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 15000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T14:37:28.482792",
+    "status": "running",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776177447691.json"
+  },
+  {
+    "id": "1776177339841",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 15000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-14T14:35:40.476286",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/14/session_1776177339841.json"
+  },
+  {
+    "id": "1775133841920",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: fast] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-02T12:44:03.327791",
+    "status": "completed",
+    "total_tokens": 1076,
+    "path": "/app/memory/session_summaries_index/2026/04/02/session_1775133841920.json"
+  },
+  {
+    "id": "1775052278668",
+    "query": "[Task: mental_health] [Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Local screening: {\"session_id\": \"996ea06f-b1dd-4c77-92af-e2d565f11e50\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"display_labels\": [\"PHQ-9 (12): Moderate depressive symptom severity (screening, not a diagnosis).\", \"GAD-7 (8): Mild anxiety symptom severity (screening, not a diagnosis).\"], \"recommendations\": [\"Schedule clinician follow-up for depressive symptom assessment and support options.\", \"Repeat PHQ-9/GAD-7 at follow-up to monitor trend over time.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}] [Execution Mode: fast] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": false, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": true}, \"local_screening\": {\"session_id\": \"996ea06f-b1dd-4c77-92af-e2d565f11e50\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"display_labels\": [\"PHQ-9 (12): Moderate depressive symptom severity (screening, not a diagnosis).\", \"GAD-7 (8): Mild anxiety symptom severity (screening, not a diagnosis).\"], \"recommendations\": [\"Schedule clinician follow-up for depressive symptom assessment and support options.\", \"Repeat PHQ-9/GAD-7 at follow-up to monitor trend over time.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}}",
+    "created_at": "2026-04-01T14:04:39.891435",
+    "status": "completed",
+    "total_tokens": 1963,
+    "path": "/app/memory/session_summaries_index/2026/04/01/session_1775052278668.json"
+  },
+  {
+    "id": "1775052004116",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: fast] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-01T14:00:05.095428",
+    "status": "completed",
+    "total_tokens": 1064,
+    "path": "/app/memory/session_summaries_index/2026/04/01/session_1775052004116.json"
+  },
+  {
+    "id": "1775050211957",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: fast] Request: {\"sex\": \"female\", \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-01T13:30:12.899572",
+    "status": "completed",
+    "total_tokens": 1058,
+    "path": "/app/memory/session_summaries_index/2026/04/01/session_1775050211957.json"
+  },
+  {
+    "id": "1775047995003",
+    "query": "[Task: mental_health] [Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Local screening: {\"session_id\": \"8f3e8f27-75c3-42ba-b675-4ffeac2a9c60\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"display_labels\": [\"PHQ-9 (12): Moderate depressive symptom severity (screening, not a diagnosis).\", \"GAD-7 (8): Mild anxiety symptom severity (screening, not a diagnosis).\"], \"recommendations\": [\"Schedule clinician follow-up for depressive symptom assessment and support options.\", \"Repeat PHQ-9/GAD-7 at follow-up to monitor trend over time.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}] [Execution Mode: fast] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": false, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": true}, \"local_screening\": {\"session_id\": \"8f3e8f27-75c3-42ba-b675-4ffeac2a9c60\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"display_labels\": [\"PHQ-9 (12): Moderate depressive symptom severity (screening, not a diagnosis).\", \"GAD-7 (8): Mild anxiety symptom severity (screening, not a diagnosis).\"], \"recommendations\": [\"Schedule clinician follow-up for depressive symptom assessment and support options.\", \"Repeat PHQ-9/GAD-7 at follow-up to monitor trend over time.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}}",
+    "created_at": "2026-04-01T12:53:17.159775",
+    "status": "completed",
+    "total_tokens": 1532,
+    "path": "/app/memory/session_summaries_index/2026/04/01/session_1775047995003.json"
+  },
+  {
+    "id": "1775047791298",
+    "query": "[Task: mental_health] [Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Local screening: {\"session_id\": \"2d3a7f1f-dc43-454f-a57c-1ad2279f8dfc\", \"risk_level\": \"High\", \"confidence\": 0.92, \"flags\": [\"suicidal_ideation_reported\", \"crisis_referral\"], \"display_labels\": [\"Crisis: suicidal ideation reported \\u2014 seek urgent in-person or emergency care.\"], \"recommendations\": [\"Urgent in-person or emergency mental-health evaluation is recommended.\", \"Activate crisis escalation protocol and supervised safety planning.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": true}] [Execution Mode: fast] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": true, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": true}, \"local_screening\": {\"session_id\": \"2d3a7f1f-dc43-454f-a57c-1ad2279f8dfc\", \"risk_level\": \"High\", \"confidence\": 0.92, \"flags\": [\"suicidal_ideation_reported\", \"crisis_referral\"], \"display_labels\": [\"Crisis: suicidal ideation reported \\u2014 seek urgent in-person or emergency care.\"], \"recommendations\": [\"Urgent in-person or emergency mental-health evaluation is recommended.\", \"Activate crisis escalation protocol and supervised safety planning.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": true}}",
+    "created_at": "2026-04-01T12:49:53.763821",
+    "status": "failed",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/04/01/session_1775047791298.json"
+  },
+  {
+    "id": "1775047638752",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: fast] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-01T12:47:19.708002",
+    "status": "completed",
+    "total_tokens": 1087,
+    "path": "/app/memory/session_summaries_index/2026/04/01/session_1775047638752.json"
+  },
+  {
+    "id": "1775042539990",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: fast] Request: {\"sex\": null, \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-04-01T11:22:21.323482",
+    "status": "completed",
+    "total_tokens": 1299,
+    "path": "/app/memory/session_summaries_index/2026/04/01/session_1775042539990.json"
+  },
+  {
+    "id": "1774979879732",
+    "query": "[Task: mental_health] [Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Local screening: {\"session_id\": \"7d84131e-4f34-4a3c-b6b7-d6fe32be605d\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"display_labels\": [\"PHQ-9 (12): Moderate depressive symptom severity (screening, not a diagnosis).\", \"GAD-7 (8): Mild anxiety symptom severity (screening, not a diagnosis).\"], \"recommendations\": [\"Schedule clinician follow-up for depressive symptom assessment and support options.\", \"Repeat PHQ-9/GAD-7 at follow-up to monitor trend over time.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}] [Execution Mode: fast] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": false, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": true}, \"local_screening\": {\"session_id\": \"7d84131e-4f34-4a3c-b6b7-d6fe32be605d\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"display_labels\": [\"PHQ-9 (12): Moderate depressive symptom severity (screening, not a diagnosis).\", \"GAD-7 (8): Mild anxiety symptom severity (screening, not a diagnosis).\"], \"recommendations\": [\"Schedule clinician follow-up for depressive symptom assessment and support options.\", \"Repeat PHQ-9/GAD-7 at follow-up to monitor trend over time.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}}",
+    "created_at": "2026-03-31T17:58:01.817718",
+    "status": "completed",
+    "total_tokens": 1621,
+    "path": "/app/memory/session_summaries_index/2026/03/31/session_1774979879732.json"
+  },
+  {
+    "id": "1774979445017",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: fast] Request: {\"sex\": \"female\", \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-31T17:50:46.912392",
+    "status": "completed",
+    "total_tokens": 1104,
+    "path": "/app/memory/session_summaries_index/2026/03/31/session_1774979445017.json"
+  },
+  {
+    "id": "1774979264658",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: fast] Request: {\"sex\": \"male\", \"hemoglobin\": 13.5, \"wbc\": 7000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-31T17:47:48.139157",
+    "status": "completed",
+    "total_tokens": 1303,
+    "path": "/app/memory/session_summaries_index/2026/03/31/session_1774979264658.json"
+  },
+  {
+    "id": "1774859997946",
+    "query": "[Patient ID: 089af9d2-a08a-4343-a931-1331bed8ee78] [Execution Mode: fast] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-30T08:39:59.666960",
+    "status": "completed",
+    "total_tokens": 1216,
+    "path": "/app/memory/session_summaries_index/2026/03/30/session_1774859997946.json"
+  },
+  {
+    "id": "1774858034886",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: fast] Request: {\"sex\": null, \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-30T08:07:16.528795",
+    "status": "completed",
+    "total_tokens": 1358,
+    "path": "/app/memory/session_summaries_index/2026/03/30/session_1774858034886.json"
+  },
+  {
+    "id": "1774856108404",
+    "query": "[Task: mental_health] [Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Local screening: {\"session_id\": \"af71ed22-903a-4f89-86e8-e17c48a205fa\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"display_labels\": [\"PHQ-9 (12): Moderate depressive symptom severity (screening, not a diagnosis).\", \"GAD-7 (8): Mild anxiety symptom severity (screening, not a diagnosis).\"], \"recommendations\": [\"Schedule clinician follow-up for depressive symptom assessment and support options.\", \"Repeat PHQ-9/GAD-7 at follow-up to monitor trend over time.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}] [Execution Mode: full] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": false, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": false}, \"local_screening\": {\"session_id\": \"af71ed22-903a-4f89-86e8-e17c48a205fa\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"display_labels\": [\"PHQ-9 (12): Moderate depressive symptom severity (screening, not a diagnosis).\", \"GAD-7 (8): Mild anxiety symptom severity (screening, not a diagnosis).\"], \"recommendations\": [\"Schedule clinician follow-up for depressive symptom assessment and support options.\", \"Repeat PHQ-9/GAD-7 at follow-up to monitor trend over time.\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}}",
+    "created_at": "2026-03-30T07:35:11.641538",
+    "status": "completed",
+    "total_tokens": 1693,
+    "path": "/app/memory/session_summaries_index/2026/03/30/session_1774856108404.json"
+  },
+  {
+    "id": "1774854657368",
+    "query": "[Task: mental_health] [Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Local screening: {\"session_id\": \"b0ce4cee-8916-40d7-a067-59a0c4b886e9\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}] [Execution Mode: full] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": false, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": false}, \"local_screening\": {\"session_id\": \"b0ce4cee-8916-40d7-a067-59a0c4b886e9\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}}",
+    "created_at": "2026-03-30T07:10:58.874157",
+    "status": "completed",
+    "total_tokens": 1458,
+    "path": "/app/memory/session_summaries_index/2026/03/30/session_1774854657368.json"
+  },
+  {
+    "id": "1774852291927",
+    "query": "[Task: mental_health] [Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Local screening: {\"session_id\": \"9ed4b730-b5e4-4d7d-8021-835101b368c2\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}] [Execution Mode: full] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": false, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": false}, \"local_screening\": {\"session_id\": \"9ed4b730-b5e4-4d7d-8021-835101b368c2\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}}",
+    "created_at": "2026-03-30T06:31:32.954920",
+    "status": "completed",
+    "total_tokens": 1415,
+    "path": "/app/memory/session_summaries_index/2026/03/30/session_1774852291927.json"
+  },
+  {
+    "id": "1774849941881",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: full] Request: {\"sex\": null, \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-30T05:52:22.126095",
+    "status": "completed",
+    "total_tokens": 3314,
+    "path": "/app/memory/session_summaries_index/2026/03/30/session_1774849941881.json"
+  },
+  {
+    "id": "1774779430611",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: fast] Request: {\"sex\": \"male\", \"hemoglobin\": 13.5, \"wbc\": 7000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-29T10:17:11.177836",
+    "status": "completed",
+    "total_tokens": 1059,
+    "path": "/app/memory/session_summaries_index/2026/03/29/session_1774779430611.json"
+  },
+  {
+    "id": "1774776816943",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-29T09:33:37.692746",
+    "status": "completed",
+    "total_tokens": 3323,
+    "path": "/app/memory/session_summaries_index/2026/03/29/session_1774776816943.json"
+  },
+  {
+    "id": "1774774335377",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: full] Request: {\"differential\":null,\"platelets\":250000,\"sex\":\"male\",\"rbc\":4.5,\"hemoglobin\":7,\"wbc\":14000}",
+    "created_at": "2026-03-29T08:52:17.220733",
+    "status": "completed",
+    "total_tokens": 1241,
+    "path": "/app/memory/session_summaries_index/2026/03/29/session_1774774335377.json"
+  },
+  {
+    "id": "1774770412007",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 7.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-29T07:46:55.945346",
+    "status": "completed",
+    "total_tokens": 1274,
+    "path": "/app/memory/session_summaries_index/2026/03/29/session_1774770412007.json"
+  },
+  {
+    "id": "1774769989914",
+    "query": "[Task: mental_health] [Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Local screening: {\"session_id\": \"e0702b5e-829c-4e82-9754-25e8bb806ac4\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}] [Execution Mode: full] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": false, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": false}, \"local_screening\": {\"session_id\": \"e0702b5e-829c-4e82-9754-25e8bb806ac4\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}}",
+    "created_at": "2026-03-29T07:39:55.816641",
+    "status": "completed",
+    "total_tokens": 1354,
+    "path": "/app/memory/session_summaries_index/2026/03/29/session_1774769989914.json"
+  },
+  {
+    "id": "1774612614975",
+    "query": "[Task: mental_health] [Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Local screening: {\"session_id\": \"8b0b7aa2-f7e6-4388-bb43-d596cdf3540f\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}] [Execution Mode: full] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": false, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": false}, \"local_screening\": {\"session_id\": \"8b0b7aa2-f7e6-4388-bb43-d596cdf3540f\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}}",
+    "created_at": "2026-03-27T11:56:56.893564",
+    "status": "completed",
+    "total_tokens": 1360,
+    "path": "/app/memory/session_summaries_index/2026/03/27/session_1774612614975.json"
+  },
+  {
+    "id": "1774611297465",
+    "query": "[Task: mental_health] [Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Local screening: {\"session_id\": \"9d7ffb60-c96e-4de5-88d4-81b9d1bd93e1\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}] [Execution Mode: fast] Request: {\"task\": \"mental_health\", \"patient_payload\": {\"phq9_items\": null, \"phq9_total\": 12, \"gad7_total\": 8, \"suicidal_ideation\": false, \"self_harm_intent\": false, \"concern_text\": null, \"include_s18\": true, \"fast\": true}, \"local_screening\": {\"session_id\": \"9d7ffb60-c96e-4de5-88d4-81b9d1bd93e1\", \"risk_level\": \"Moderate\", \"confidence\": 0.78, \"flags\": [\"phq9_total:12\", \"phq9_severity:moderate\", \"gad7_total:8\", \"gad7_severity:mild\"], \"phq9_total\": 12, \"gad7_total\": 8, \"phq9_band\": \"moderate\", \"gad7_band\": \"mild\", \"crisis\": false}}",
+    "created_at": "2026-03-27T11:34:59.793664",
+    "status": "completed",
+    "total_tokens": 2123,
+    "path": "/app/memory/session_summaries_index/2026/03/27/session_1774611297465.json"
+  },
+  {
+    "id": "1774507164363",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 6.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-26T06:39:25.652323",
+    "status": "completed",
+    "total_tokens": 1075,
+    "path": "/app/memory/session_summaries_index/2026/03/26/session_1774507164363.json"
+  },
+  {
+    "id": "1774506578576",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: full] Request: {\"sex\": null, \"hemoglobin\": 13.5, \"wbc\": 7000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-26T06:29:39.683451",
+    "status": "completed",
+    "total_tokens": 1016,
+    "path": "/app/memory/session_summaries_index/2026/03/26/session_1774506578576.json"
+  },
+  {
+    "id": "1774503968909",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 8.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-26T05:46:09.636444",
+    "status": "completed",
+    "total_tokens": 2016,
+    "path": "/app/memory/session_summaries_index/2026/03/26/session_1774503968909.json"
+  },
+  {
+    "id": "1774502037104",
+    "query": "[Patient ID: frontend-dns-check] [Execution Mode: full] Request: {\"sex\": \"male\", \"hemoglobin\": 13.5, \"wbc\": 7000, \"rbc\": 4.5, \"platelets\": 250000}",
+    "created_at": "2026-03-26T05:13:57.320118",
+    "status": "completed",
+    "total_tokens": 1537,
+    "path": "/app/memory/session_summaries_index/2026/03/26/session_1774502037104.json"
+  },
+  {
+    "id": "1774501650793",
+    "query": "Summarize the clinical significance of low hemoglobin, high WBC, and low platelets in a CBC report with a structured answer.",
+    "created_at": "2026-03-26T05:07:34.440462",
+    "status": "completed",
+    "total_tokens": 803,
+    "path": "/app/memory/session_summaries_index/2026/03/26/session_1774501650793.json"
+  },
+  {
+    "id": "1774500846418",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: full] Request: {\"sex\": \"female\", \"hemoglobin\": 8.0, \"wbc\": 14000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-26T04:54:07.151553",
+    "status": "completed",
+    "total_tokens": 736,
+    "path": "/app/memory/session_summaries_index/2026/03/26/session_1774500846418.json"
+  },
+  {
+    "id": "1774466587584",
+    "query": "[Patient ID: 54ce03ff-9186-445c-b8cd-96d3950c7bd1] [Execution Mode: full] Request: {\"sex\": null, \"hemoglobin\": 13.5, \"wbc\": 7000.0, \"rbc\": 4.5, \"platelets\": 250000.0, \"differential\": null}",
+    "created_at": "2026-03-25T19:23:08.232262",
+    "status": "completed",
+    "total_tokens": 1145,
+    "path": "/app/memory/session_summaries_index/2026/03/25/session_1774466587584.json"
+  },
+  {
+    "id": "1774462260337",
+    "query": "Summarize the clinical significance of low hemoglobin, high WBC, and low platelets in a CBC report with a structured answer.",
+    "created_at": "2026-03-25T18:11:00.638501",
+    "status": "completed",
+    "total_tokens": 624,
+    "path": "/app/memory/session_summaries_index/2026/03/25/session_1774462260337.json"
+  },
+  {
+    "id": "1774461334184",
+    "query": "Summarize the clinical significance of low hemoglobin, high WBC, and low platelets in a CBC report with a structured answer.",
+    "created_at": "2026-03-25T17:55:34.358453",
+    "status": "completed",
+    "total_tokens": 616,
+    "path": "/app/memory/session_summaries_index/2026/03/25/session_1774461334184.json"
+  },
+  {
+    "id": "1774460382973",
+    "query": "Summarize the clinical significance of low hemoglobin, high WBC, and low platelets in a CBC report with a structured answer.",
+    "created_at": "2026-03-25T17:39:43.386978",
+    "status": "completed",
+    "total_tokens": 889,
+    "path": "/app/memory/session_summaries_index/2026/03/25/session_1774460382973.json"
+  },
+  {
+    "id": "1774459731066",
+    "query": "Summarize the clinical significance of low hemoglobin, high WBC, and low platelets in a CBC report with a structured answer.",
+    "created_at": "2026-03-25T17:28:52.529827",
+    "status": "running",
+    "total_tokens": 0,
+    "path": "/app/memory/session_summaries_index/2026/03/25/session_1774459731066.json"
+  },
+  {
+    "id": "1774459321551",
+    "query": "Summarize the clinical significance of low hemoglobin, high WBC, and low platelets in a CBC report with a structured answer.",
+    "created_at": "2026-03-25T17:22:01.633377",
+    "status": "completed",
+    "total_tokens": 664,
+    "path": "/app/memory/session_summaries_index/2026/03/25/session_1774459321551.json"
+  },
+  {
+    "id": "1774457334944",
+    "query": "Summarize the clinical significance of low hemoglobin, high WBC, and low platelets in a CBC report with a structured answer.",
+    "created_at": "2026-03-25T16:48:55.034636",
+    "status": "completed",
+    "total_tokens": 360,
+    "path": "/app/memory/session_summaries_index/2026/03/25/session_1774457334944.json"
+  },
+  {
+    "id": "1774457197110",
+    "query": "Summarize the clinical significance of low hemoglobin, high WBC, and low platelets in a CBC report with a structured answer.",
+    "created_at": "2026-03-25T16:46:37.858933",
+    "status": "completed",
+    "total_tokens": 303,
+    "path": "/app/memory/session_summaries_index/2026/03/25/session_1774457197110.json"
+  },
+  {
+    "id": "1774456730249",
+    "query": "Summarize the clinical significance of low hemoglobin, high WBC, and low platelets in a CBC report with a structured answer.",
+    "created_at": "2026-03-25T16:38:50.769911",
+    "status": "completed",
+    "total_tokens": 400,
+    "path": "/app/memory/session_summaries_index/2026/03/25/session_1774456730249.json"
+  },
+  {
+    "id": "1774171330056",
+    "query": "[Patient ID: test-e2e] [Execution Mode: fast] Request: {\"hemoglobin\": 7.7, \"wbc\": 7000, \"rbc\": 4.5, \"platelets\": 250000}",
+    "created_at": "2026-03-22T09:22:21.300874",
+    "status": "completed",
+    "total_tokens": 163,
+    "path": "/app/memory/session_summaries_index/2026/03/22/session_1774171330056.json"
+  },
+  {
+    "id": "1774171291792",
+    "query": "[Patient ID: test-e2e] [Execution Mode: fast] Request: {\"hemoglobin\": 7.7, \"wbc\": 7000, \"rbc\": 4.5, \"platelets\": 250000}",
+    "created_at": "2026-03-22T09:21:33.494074",
+    "status": "completed",
+    "total_tokens": 168,
+    "path": "/app/memory/session_summaries_index/2026/03/22/session_1774171291792.json"
+  }
+]

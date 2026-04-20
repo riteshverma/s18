@@ -1,0 +1,7 @@
+{
+  "plugins": {
+    "azure-cosmosdb": {
+      "enabled": true
+    }
+  }
+}
