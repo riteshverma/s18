@@ -21,6 +21,7 @@ Usage:
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # Paths
 CONFIG_DIR = Path(__file__).parent
@@ -29,6 +30,37 @@ DEFAULTS_FILE = CONFIG_DIR / "settings.defaults.json"
 
 # --- Settings Cache ---
 _settings_cache = None
+
+_ALLOWED_OLLAMA_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_DEFAULT_OLLAMA_PORT = 11434
+
+
+def validate_ollama_base_url(base_url: str) -> str:
+    """Validate and normalize Ollama base URL to loopback-only endpoints."""
+    raw = (base_url or "").strip()
+    if not raw:
+        raise ValueError("ollama.base_url cannot be empty")
+
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("ollama.base_url must use http or https")
+    if not parsed.hostname:
+        raise ValueError("ollama.base_url must include a hostname")
+    if parsed.username or parsed.password:
+        raise ValueError("ollama.base_url cannot include credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("ollama.base_url cannot include query or fragment")
+    if parsed.path not in {"", "/"}:
+        raise ValueError("ollama.base_url must not include a path")
+
+    host = parsed.hostname.lower()
+    if host not in _ALLOWED_OLLAMA_HOSTS:
+        raise ValueError(
+            "ollama.base_url host must be loopback (127.0.0.1, localhost, or ::1)"
+        )
+
+    port = parsed.port or _DEFAULT_OLLAMA_PORT
+    return f"{parsed.scheme}://{host}:{port}"
 
 def load_settings() -> dict:
     """Load settings from file. Uses cache if already loaded."""
@@ -136,7 +168,7 @@ def reload_settings() -> dict:
 
 def get_ollama_url(endpoint: str = "generate") -> str:
     """Get full Ollama URL for a specific endpoint."""
-    base = load_settings()["ollama"]["base_url"]
+    base = validate_ollama_base_url(load_settings()["ollama"]["base_url"])
     if endpoint == "base":
         return base  # Just return base URL without path
     endpoints = {
