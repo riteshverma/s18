@@ -18,13 +18,19 @@ from mcp.client.stdio import stdio_client
 from mcp.types import Tool
 from rich import print as rich_print
 from core.prometheus_metrics import MCP_TOOL_CALLS_TOTAL, MCP_TOOL_LATENCY_MS, elapsed_ms, now_ms
-from config.settings_loader import settings
+from config.settings_loader import (
+    get_mcp_mode,
+    get_mcp_required_servers,
+    settings,
+)
 
 class MultiMCP:
     def __init__(self):
         self.exit_stack = AsyncExitStack()
         self.sessions = {}  # server_name -> session
         self.tools = {}     # server_name -> [Tool]
+        self.start_results = {}
+        self.start_completed = False
         
         # Robust path resolution
         self.base_dir = Path(__file__).parent
@@ -44,6 +50,49 @@ class MultiMCP:
             "mcp_trace_context",
             default={},
         )
+
+    def get_mode(self) -> str:
+        """Return MCP operating mode."""
+        return get_mcp_mode()
+
+    def is_strict_mode(self) -> bool:
+        """Return whether strict MCP mode is enabled."""
+        return self.get_mode() == "strict"
+
+    def get_required_servers(self) -> list[str]:
+        """Return MCP servers required for strict mode readiness."""
+        return get_mcp_required_servers()
+
+    def should_use_cached_metadata(self) -> bool:
+        """Legacy mode prefers cache to preserve current startup behavior."""
+        return not self.is_strict_mode()
+
+    def _set_server_result(self, name: str, status: str, detail: str | None = None):
+        """Record MCP server startup result."""
+        result = {"status": status}
+        if detail:
+            result["detail"] = detail
+        self.start_results[name] = result
+
+    def get_health_status(self) -> dict:
+        """Return MCP readiness details for health endpoints."""
+        connected_servers = sorted(self.get_connected_servers())
+        required_servers = self.get_required_servers()
+        required_connected = all(
+            server in self.sessions for server in required_servers
+        )
+        if self.is_strict_mode():
+            mcp_ready = self.start_completed and required_connected
+        else:
+            mcp_ready = True
+        return {
+            "mode": self.get_mode(),
+            "mcp_ready": mcp_ready,
+            "start_completed": self.start_completed,
+            "connected_servers": connected_servers,
+            "required_servers": required_servers,
+            "start_results": dict(self.start_results),
+        }
 
     def set_trace_context(self, trace_context: dict | None):
         """Set request-scoped metadata and return reset token."""
@@ -132,6 +181,7 @@ class MultiMCP:
         # Skip if explicitly disabled
         if config.get("enabled", True) is False:
             print(f"  ⏭️ [dim]Server '{name}' is disabled in config. Skipping.[/dim]")
+            self._set_server_result(name, "disabled")
             return False
 
         try:
@@ -252,9 +302,9 @@ class MultiMCP:
                     cwd_path = self.base_dir.parent / cwd_path
                 cwd_param = str(cwd_path.resolve())
                 if not Path(cwd_param).exists():
-                    builtins.print(
-                        f"[MCP] {name} skipped: cwd does not exist: {cwd_param}"
-                    )
+                    detail = f"cwd does not exist: {cwd_param}"
+                    builtins.print(f"[MCP] {name} skipped: {detail}")
+                    self._set_server_result(name, "skipped", detail)
                     return False
 
             # Resolve Bun when not on PATH (typical on fresh Windows installs)
@@ -263,9 +313,9 @@ class MultiMCP:
                 if bun_exe.is_file():
                     cmd = str(bun_exe)
                 else:
-                    builtins.print(
-                        f"[MCP] {name} skipped: 'bun' not found on PATH."
-                    )
+                    detail = "'bun' not found on PATH."
+                    builtins.print(f"[MCP] {name} skipped: {detail}")
+                    self._set_server_result(name, "skipped", detail)
                     return False
 
             # Check if uv exists fallback
@@ -287,7 +337,9 @@ class MultiMCP:
             # Skip gracefully if command is unavailable in current runtime.
             cmd_path = Path(cmd)
             if not cmd_path.is_absolute() and not shutil.which(cmd):
-                builtins.print(f"[MCP] {name} skipped: command not found: {cmd}")
+                detail = f"command not found: {cmd}"
+                builtins.print(f"[MCP] {name} skipped: {detail}")
+                self._set_server_result(name, "skipped", detail)
                 return False
 
 
@@ -305,7 +357,7 @@ class MultiMCP:
                 await session.initialize()
                 
                 # List tools
-                if name in self._cached_metadata:
+                if self.should_use_cached_metadata() and name in self._cached_metadata:
                     # Use ASCII-only logging via standard print to avoid Windows console encoding issues
                     builtins.print(f"[MCP] {name} tools loaded from cache.")
                     cached_tools = []
@@ -316,32 +368,51 @@ class MultiMCP:
                             inputSchema=t_dict["inputSchema"]
                         ))
                     self.tools[name] = cached_tools
+                    self._set_server_result(name, "connected", "metadata_source=cache")
                 else:
                     result = await session.list_tools()
                     self.tools[name] = result.tools
                     self._save_to_cache(name, result.tools)
                     builtins.print(f"[MCP] {name} connected. Tools: {len(result.tools)}")
+                    self._set_server_result(name, "connected", "metadata_source=live")
                 
                 self.sessions[name] = session
 
         except TimeoutError:
              builtins.print(f"[MCP] {name} timed out during startup.")
+             self._set_server_result(name, "timeout")
         except Exception as e:
             import traceback
             builtins.print(f"[MCP] {name} failed to start: {e}")
+            self._set_server_result(name, "failed", str(e))
             traceback.print_exc()
         except BaseException as e:
             builtins.print(f"[MCP] {name} CRITICAL FAILURE: {e}")
+            self._set_server_result(name, "failed", str(e))
 
     async def start(self):
         """Start all configured servers"""
         # Use plain ASCII to avoid Windows console encoding issues with emojis
         builtins.print("[MCP] Starting MCP Servers...")
+        self.start_results = {}
+        self.start_completed = False
         for name, config in self.server_configs.items():
             if config.get("enabled", True):
                 await self._start_server(name, config)
             else:
                 builtins.print(f"[MCP] Skipping disabled server: {name}")
+                self._set_server_result(name, "disabled")
+        self.start_completed = True
+        if self.is_strict_mode():
+            missing_required = [
+                server for server in self.get_required_servers()
+                if server not in self.sessions
+            ]
+            if missing_required:
+                raise RuntimeError(
+                    "Strict MCP mode requires connected servers: "
+                    + ", ".join(sorted(missing_required))
+                )
 
     async def stop(self):
         """Stop all servers"""

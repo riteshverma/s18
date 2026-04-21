@@ -1,7 +1,13 @@
 import unittest
+from unittest.mock import patch
 
 from config.settings_loader import (
+    get_mcp_mode,
+    get_mcp_required_servers,
+    get_mcp_startup_timeout,
     normalize_runtime_ollama_base_url,
+    reload_settings,
+    reset_settings,
     validate_ollama_base_url,
 )
 
@@ -66,6 +72,32 @@ class NormalizeRuntimeOllamaBaseUrlTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "cannot include credentials"):
             normalize_runtime_ollama_base_url("http://user:pass@ollama:11434")
+
+
+class McpSettingsTests(unittest.TestCase):
+    def tearDown(self):
+        reload_settings()
+
+    def test_defaults_to_legacy_mode(self):
+        reload_settings()
+        self.assertEqual(get_mcp_mode(), "legacy")
+        self.assertEqual(get_mcp_required_servers(), [])
+        self.assertEqual(get_mcp_startup_timeout(), 5.0)
+
+    def test_env_overrides_mcp_mode_required_servers_and_timeout(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "MCP_MODE": "strict",
+                "MCP_REQUIRED_SERVERS": "rag,mockehr",
+                "MCP_STARTUP_TIMEOUT_SECONDS": "12.5",
+            },
+            clear=False,
+        ):
+            reload_settings()
+            self.assertEqual(get_mcp_mode(), "strict")
+            self.assertEqual(get_mcp_required_servers(), ["rag", "mockehr"])
+            self.assertEqual(get_mcp_startup_timeout(), 12.5)
 
 
 if __name__ == "__main__":
