@@ -251,12 +251,22 @@ class MultiMCP:
                 if not cwd_path.is_absolute():
                     cwd_path = self.base_dir.parent / cwd_path
                 cwd_param = str(cwd_path.resolve())
+                if not Path(cwd_param).exists():
+                    builtins.print(
+                        f"[MCP] {name} skipped: cwd does not exist: {cwd_param}"
+                    )
+                    return False
 
             # Resolve Bun when not on PATH (typical on fresh Windows installs)
             if cmd == "bun" and not shutil.which("bun"):
                 bun_exe = Path.home() / ".bun" / "bin" / ("bun.exe" if sys.platform == "win32" else "bun")
                 if bun_exe.is_file():
                     cmd = str(bun_exe)
+                else:
+                    builtins.print(
+                        f"[MCP] {name} skipped: 'bun' not found on PATH."
+                    )
+                    return False
 
             # Check if uv exists fallback
             if cmd == "uv" and not shutil.which("uv"):
@@ -273,6 +283,12 @@ class MultiMCP:
                      # Remove 'run', '--directory', etc.
                      # This is Getting Complicated. Let's assume UV exists for 'stdio-git'.
                      pass # Rely on uv being present
+
+            # Skip gracefully if command is unavailable in current runtime.
+            cmd_path = Path(cmd)
+            if not cmd_path.is_absolute() and not shutil.which(cmd):
+                builtins.print(f"[MCP] {name} skipped: command not found: {cmd}")
+                return False
 
 
             server_params = StdioServerParameters(

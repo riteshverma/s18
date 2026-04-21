@@ -1015,6 +1015,9 @@ class AgentLoop4:
         
         # 🔧 HELPER FUNCTION: Build agent input (consistent for both iterations)
         def build_agent_input(instruction=None, previous_output=None, iteration_context=None):
+            integration_meta = context.plan_graph.graph.get("globals_schema", {}).get("_integration_meta", {})
+            if not isinstance(integration_meta, dict):
+                integration_meta = {}
             # Base payload for all agents
             payload = {
                 "step_id": step_id,
@@ -1027,8 +1030,10 @@ class AgentLoop4:
                     "session_id": context.plan_graph.graph['session_id'],
                     "created_at": context.plan_graph.graph['created_at'],
                     "file_manifest": context.plan_graph.graph['file_manifest'],
-                    "memory_context": getattr(context, 'memory_context', None) # 🧠 Universal Injection
+                    "memory_context": getattr(context, 'memory_context', None), # 🧠 Universal Injection
+                    "integration_meta": integration_meta,
                 },
+                "integration_meta": integration_meta,
                 **({"previous_output": previous_output} if previous_output else {}),
                 **({"iteration_context": iteration_context} if iteration_context else {})
             }

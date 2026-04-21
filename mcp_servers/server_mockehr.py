@@ -24,7 +24,10 @@ def print(*args, **kwargs):
 
 mcp = FastMCP("mockehr")
 CONVERSATION_ROOT = PROJECT_ROOT / "data" / "conversation_history"
+EXTERNAL_MOCKEHR_BASE_URL = os.getenv("EXTERNAL_MOCKEHR_BASE_URL", "").rstrip("/")
 WISE_MOCKEHR_BASE_URL = os.getenv("WISE_MOCKEHR_BASE_URL", "").rstrip("/")
+PRIMARY_MOCKEHR_BASE_URL = EXTERNAL_MOCKEHR_BASE_URL or WISE_MOCKEHR_BASE_URL
+MOCKEHR_PRIMARY_SOURCE_LABEL = os.getenv("MOCKEHR_PRIMARY_SOURCE_LABEL", "external_mockehr").strip() or "external_mockehr"
 HTTP_TIMEOUT_SECONDS = float(os.getenv("MOCKEHR_HTTP_TIMEOUT_SECONDS", "6"))
 
 
@@ -276,17 +279,17 @@ def _lab_delta(new_labs: List[Dict[str, Any]], old_labs: List[Dict[str, Any]], l
     return changes
 
 
-# Header sent when calling wise-ai Mock EHR; wise-ai skips nested run_wise_agent when present
-_WISE_REQUEST_HEADERS = {"X-Request-Source": "s18"}
+# Header sent when calling upstream Mock EHR providers.
+_UPSTREAM_REQUEST_HEADERS = {"X-Request-Source": "s18"}
 
 
 async def _fetch_primary_patient(patient_id: str) -> Optional[Dict[str, Any]]:
-    if not WISE_MOCKEHR_BASE_URL:
+    if not PRIMARY_MOCKEHR_BASE_URL:
         return None
-    url = f"{WISE_MOCKEHR_BASE_URL}/patients/{patient_id}"
+    url = f"{PRIMARY_MOCKEHR_BASE_URL}/patients/{patient_id}"
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
-            response = await client.get(url, headers=_WISE_REQUEST_HEADERS)
+            response = await client.get(url, headers=_UPSTREAM_REQUEST_HEADERS)
         if response.status_code == 404:
             return None
         response.raise_for_status()
@@ -297,12 +300,12 @@ async def _fetch_primary_patient(patient_id: str) -> Optional[Dict[str, Any]]:
 
 
 async def _fetch_primary_labs(patient_id: str) -> Optional[List[Dict[str, Any]]]:
-    if not WISE_MOCKEHR_BASE_URL:
+    if not PRIMARY_MOCKEHR_BASE_URL:
         return None
-    url = f"{WISE_MOCKEHR_BASE_URL}/patients/{patient_id}/labs"
+    url = f"{PRIMARY_MOCKEHR_BASE_URL}/patients/{patient_id}/labs"
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
-            response = await client.get(url, headers=_WISE_REQUEST_HEADERS)
+            response = await client.get(url, headers=_UPSTREAM_REQUEST_HEADERS)
         if response.status_code == 404:
             return None
         response.raise_for_status()
@@ -343,7 +346,7 @@ async def get_patient_records(
             )
 
     primary = await _fetch_primary_patient(patient_id)
-    source = "wise_mock_api"
+    source = MOCKEHR_PRIMARY_SOURCE_LABEL
     if not primary:
         primary = _internal_patient_from_history(patient_id)
         source = "s18_internal_history"
@@ -389,7 +392,7 @@ async def search_labs(
     clinical_full_view = bool(state["clinical_full_view"])
 
     labs: Optional[List[Dict[str, Any]]] = None
-    source = "wise_mock_api"
+    source = MOCKEHR_PRIMARY_SOURCE_LABEL
     if not fresh_sync:
         cached = _cached_value(state, cache_key)
         if isinstance(cached, list):

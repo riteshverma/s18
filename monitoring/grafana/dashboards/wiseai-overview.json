@@ -1,5 +1,5 @@
 {
-  "title": "WISE AI Overview",
+  "title": "S18 Overview",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -9,31 +9,31 @@
       "type": "stat",
       "title": "API Availability (%)",
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
-      "targets": [{ "expr": "100 * wiseai:sli_api_availability:ratio_5m" }]
+      "targets": [{ "expr": "100 * s18:sli_api_availability:ratio_5m" }]
     },
     {
       "type": "stat",
       "title": "Orchestrator Success (%)",
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
-      "targets": [{ "expr": "100 * wiseai:sli_agent_run_success:ratio_5m" }]
+      "targets": [{ "expr": "100 * s18:sli_agent_run_success:ratio_5m" }]
     },
     {
       "type": "stat",
       "title": "Orchestrator p95 Latency (ms)",
       "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
-      "targets": [{ "expr": "wiseai:orchestrator_run_latency_p95_ms:5m" }]
+      "targets": [{ "expr": "s18:orchestrator_run_latency_p95_ms:5m" }]
     },
     {
       "type": "stat",
       "title": "Retrieval Coverage (%)",
       "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
-      "targets": [{ "expr": "100 * wiseai:sli_retrieval_coverage:ratio_5m" }]
+      "targets": [{ "expr": "100 * s18:sli_retrieval_coverage:ratio_5m" }]
     },
     {
       "type": "timeseries",
       "title": "API Request Rate by Route",
       "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
-      "targets": [{ "expr": "sum by (route) (rate(wiseai_api_requests_total[5m]))" }]
+      "targets": [{ "expr": "sum by (route) (rate(s18_api_requests_total[5m]))" }]
     },
     {
       "type": "timeseries",
@@ -41,7 +41,7 @@
       "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "topk(5, sum by (tool) (rate(wiseai_mcp_tool_calls_total{status!=\"success\"}[5m])))"
+          "expr": "topk(5, sum by (tool) (rate(s18_mcp_tool_calls_total{status!=\"success\"}[5m])))"
         }
       ]
     }

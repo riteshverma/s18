@@ -1,6 +1,9 @@
 import unittest
 
-from config.settings_loader import validate_ollama_base_url
+from config.settings_loader import (
+    normalize_runtime_ollama_base_url,
+    validate_ollama_base_url,
+)
 
 
 class ValidateOllamaBaseUrlTests(unittest.TestCase):
@@ -41,6 +44,28 @@ class ValidateOllamaBaseUrlTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "must use http or https"):
             validate_ollama_base_url("file://127.0.0.1:11434")
+
+
+class NormalizeRuntimeOllamaBaseUrlTests(unittest.TestCase):
+    def test_accepts_docker_hostnames_for_trusted_runtime(self):
+        self.assertEqual(
+            normalize_runtime_ollama_base_url("http://ollama:11434"),
+            "http://ollama:11434",
+        )
+        self.assertEqual(
+            normalize_runtime_ollama_base_url("http://s18share-ollama"),
+            "http://s18share-ollama:11434",
+        )
+
+    def test_runtime_path_still_rejects_malformed_urls(self):
+        with self.assertRaisesRegex(ValueError, "must not include a path"):
+            normalize_runtime_ollama_base_url("http://ollama:11434/api")
+
+        with self.assertRaisesRegex(ValueError, "cannot include query or fragment"):
+            normalize_runtime_ollama_base_url("http://ollama:11434?x=1")
+
+        with self.assertRaisesRegex(ValueError, "cannot include credentials"):
+            normalize_runtime_ollama_base_url("http://user:pass@ollama:11434")
 
 
 if __name__ == "__main__":

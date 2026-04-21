@@ -25,7 +25,7 @@ services:
       - ollama
     networks:
       - default
-      - shared_wise_net
+      - shared_integration_net
 
   ollama:
     image: ollama/ollama:latest
@@ -37,12 +37,12 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - default
-      - shared_wise_net
+      - shared_integration_net
 
 volumes:
   ollama_data:
 
 networks:
-  shared_wise_net:
+  shared_integration_net:
     external: true
     name: docker_default
