@@ -6,14 +6,7 @@ from typing import Optional
 from core.model_manager import ModelManager
 from core.json_parser import parse_llm_json, parse_llm_json_or_fallback
 from core.utils import log_step, log_error
-from integrations.adapters.wise_output import (
-    apply_cbc_evidence_to_wise_output,
-    ensure_wise_output_schema,
-    extract_wise_from_text,
-    merge_wise_flag_lists,
-    normalize_wise_flags,
-    sync_wise_response_footer,
-)
+from integrations.policies.output_hooks import apply_output_policy
 from PIL import Image
 from datetime import datetime
 import os
@@ -135,24 +128,6 @@ class AgentRunner:
         output["plan_graph"] = pg
         return output
 
-    def _extract_wise_from_text(self, text: str) -> dict:
-        return extract_wise_from_text(text)
-
-    def _normalize_wise_flags(self, value) -> list:
-        return normalize_wise_flags(value)
-
-    def _merge_wise_flag_lists(self, *lists) -> list:
-        return merge_wise_flag_lists(*lists)
-
-    def _ensure_wise_output_schema(self, output, raw_response: str) -> dict:
-        return ensure_wise_output_schema(output, raw_response)
-
-    def _apply_cbc_evidence_to_wise_output(self, output: dict, input_data: dict) -> dict:
-        return apply_cbc_evidence_to_wise_output(output, input_data)
-
-    def _sync_wise_response_footer(self, output: dict) -> dict:
-        return sync_wise_response_footer(output)
-
     async def run_agent(self, agent_type: str, input_data: dict, image_path: Optional[str] = None) -> dict:
         """Run a specific agent with input data and optional image"""
         # Resolve planner-invented aliases to actual configured agents
@@ -266,28 +241,15 @@ class AgentRunner:
                 except Exception:
                     output = parse_llm_json_or_fallback(response, fallback_key="response")
                 output = self._ensure_planner_plan_graph(output, response)
-            elif agent_type == "ThinkerAgent":
-                output = parse_llm_json_or_fallback(response, fallback_key="response")
-                output = self._ensure_wise_output_schema(output, response)
-                output = self._apply_cbc_evidence_to_wise_output(output, input_data)
-            elif agent_type == "SummarizerAgent":
-                output = parse_llm_json_or_fallback(response, fallback_key="response")
-                output = self._ensure_wise_output_schema(output, response)
-                output = self._apply_cbc_evidence_to_wise_output(output, input_data)
-                output = self._sync_wise_response_footer(output)
             else:
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
-                # FormatterAgent: carry WISE fields from input if not produced by the model.
-                # The orchestrator stashes them under _wise_* keys in globals_schema.
-                if agent_type == "FormatterAgent" and isinstance(output, dict):
-                    gs = input_data.get("all_globals_schema") or {}
-                    if "risk_level" not in output and gs.get("_wise_risk_level"):
-                        output["risk_level"] = gs["_wise_risk_level"]
-                    if "confidence" not in output and gs.get("_wise_confidence") is not None:
-                        output["confidence"] = gs["_wise_confidence"]
-                    if not isinstance(output.get("flags"), list) and isinstance(gs.get("_wise_flags"), list):
-                        output["flags"] = gs["_wise_flags"]
-                    output = self._sync_wise_response_footer(output)
+            if agent_type != "PlannerAgent":
+                output = apply_output_policy(
+                    agent_type=agent_type,
+                    output=output,
+                    raw_response=response,
+                    input_data=input_data,
+                )
             
             # Robustness: Some models (like gemma3) wrap JSON in a list
             if isinstance(output, list) and len(output) > 0 and isinstance(output[0], dict):

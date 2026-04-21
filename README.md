@@ -61,7 +61,7 @@ Primary files:
 Use this path if you are integrating S18 with wise-ai workflows/endpoints.
 
 1. Read [Wise-AI Integration Sync (Mar 2026)](#wise-ai-integration-sync-mar-2026).
-2. Set `WISE_MOCKEHR_BASE_URL` and verify endpoint reachability.
+2. Set `EXTERNAL_MOCKEHR_BASE_URL` (or legacy `WISE_MOCKEHR_BASE_URL`) and verify endpoint reachability.
 3. Send canonical `POST /runs` payloads with `integration_id=wiseai`, `workflow_id=cdss`.
 4. Run the cross-stack verification commands in the Wise-AI section.
 
@@ -178,7 +178,8 @@ Optional:
 
 - **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
-- **WISE_MOCKEHR_BASE_URL** – Base URL of the wise-ai Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from wise-ai for end-to-end integration. Examples: `http://localhost:8000` (wise-ai on host), `http://backend:8000` (typical Compose service name on the shared network). Match the URL to how you run wise-ai, not only to Docker.
+- **EXTERNAL_MOCKEHR_BASE_URL** – Preferred base URL of an upstream Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from that provider.
+- **WISE_MOCKEHR_BASE_URL** – Backward-compatible alias for existing wise-ai environments; used when `EXTERNAL_MOCKEHR_BASE_URL` is not set.
 
 ### Supabase integration contract (S18)
 
@@ -305,14 +306,14 @@ docker compose -f monitoring/docker-compose.monitoring.yml up -d
 
 Expected key metric families:
 
-- `wiseai_api_requests_total`
-- `wiseai_api_requests_success_total`
-- `wiseai_api_request_latency_ms`
-- `wiseai_orchestrator_runs_total`
-- `wiseai_orchestrator_run_latency_ms`
-- `wiseai_rag_requests_total`
-- `wiseai_mcp_tool_calls_total`
-- `wiseai_memory_operations_total`
+- `s18_api_requests_total`
+- `s18_api_requests_success_total`
+- `s18_api_request_latency_ms`
+- `s18_orchestrator_runs_total`
+- `s18_orchestrator_run_latency_ms`
+- `s18_rag_requests_total`
+- `s18_mcp_tool_calls_total`
+- `s18_memory_operations_total`
 
 ### Port Overrides
 
@@ -409,7 +410,7 @@ This section is a cross-repo integration reference. If you are onboarding to S18
 
 ### Full stack with wise-ai
 
-Set **`WISE_MOCKEHR_BASE_URL`** to the base URL of the wise-ai FastAPI app (Mock EHR). Use whatever host and port actually serve that API—for example `http://localhost:8000` when wise-ai runs on your machine, or a Compose service URL such as `http://backend:8000` when both stacks share a Docker network. The integration is the same whether wise-ai is started with `uvicorn`, Docker, or another wrapper, as long as S18 can reach the URL.
+Set **`EXTERNAL_MOCKEHR_BASE_URL`** to the base URL of the upstream FastAPI app (Mock EHR). Existing wise-ai setups can continue using `WISE_MOCKEHR_BASE_URL` as a fallback alias. Use whatever host and port actually serve that API—for example `http://localhost:8000` when the provider runs on your machine, or a Compose service URL such as `http://backend:8000` when both stacks share a Docker network.
 
 For **Docker Compose** flows that run wise-ai together with S18 (local builds, images from GHCR, or the full-stack compose file), see the wise-ai repo: **[`deployment/docker/README.md`](https://github.com/wiseaihub/TSAI-EAG-Capstone/tree/main/deployment/docker)** — use the **Build and run locally**, **Run from GitHub Container Registry**, and **Full stack (wise-ai + S18Share)** subsections as needed.
 

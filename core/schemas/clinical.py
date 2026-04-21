@@ -1,5 +1,5 @@
 """
-Pydantic schemas for clinical payloads (CBC) in the S18/wise-ai integration.
+Pydantic schemas for clinical payloads (CBC) in S18 integrations.
 Provides validation, physiological bounds, and unit normalization (e.g. g/L -> g/dL).
 """
 
@@ -40,7 +40,7 @@ PLATELETS_THROMBOCYTOSIS_PER_UL = 450_000.0
 
 class CBCPayload(BaseModel):
     """
-    Validated CBC payload from wise-ai. All lab fields are optional to support partial CBCs.
+    Validated CBC payload for integration workflows. All lab fields are optional to support partial CBCs.
     Hemoglobin can be supplied in g/dL or g/L; unit is normalized to g/dL.
     """
 
@@ -213,7 +213,7 @@ def try_parse_clinical_assessment(raw: Any) -> Optional["ClinicalAssessment"]:
 
 def extract_request_payload_from_query(query: str) -> Dict[str, Any]:
     """
-    Extract the JSON payload after 'Request:' from a wise-ai CBC query string.
+    Extract the JSON payload after 'Request:' from a CBC query string.
     E.g. '[Patient ID: x] Request: {"hemoglobin": 7.7, ...}' -> {"hemoglobin": 7.7, ...}
     """
     if not query:
@@ -298,7 +298,7 @@ def filter_llm_flags_against_cbc_evidence(llm_flags: List[str], cbc: CBCPayload)
     return out
 
 
-def merge_wise_flags_with_cbc_evidence(llm_flags: List[str], cbc: CBCPayload) -> List[str]:
+def merge_flags_with_cbc_evidence(llm_flags: List[str], cbc: CBCPayload) -> List[str]:
     """
     Union evidence-based flags with LLM flags that are not contradicted by labs.
     Evidence flags are listed first; order is otherwise stable and de-duplicated.
@@ -316,7 +316,7 @@ def merge_wise_flags_with_cbc_evidence(llm_flags: List[str], cbc: CBCPayload) ->
 
 def derive_risk_level_from_cbc_evidence(flags: List[str], cbc: CBCPayload) -> str:
     """
-    Map evidence flags + key lab severities to a single risk tier for WISE consumers.
+    Map evidence flags + key lab severities to a single risk tier for integration consumers.
     Conservative: avoid 'high' unless multiple abnormalities or critical hemoglobin.
     """
     if not flags:
@@ -342,3 +342,8 @@ def validate_cbc_payload(raw: dict) -> tuple[Optional[CBCPayload], Optional[str]
         return model, None
     except Exception as e:
         return None, str(e)
+
+
+# Backward-compatible alias used by older integration modules/tests.
+def merge_wise_flags_with_cbc_evidence(llm_flags: List[str], cbc: CBCPayload) -> List[str]:
+    return merge_flags_with_cbc_evidence(llm_flags, cbc)

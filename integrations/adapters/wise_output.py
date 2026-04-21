@@ -4,7 +4,7 @@ import re
 from core.schemas.clinical import (
     derive_risk_level_from_cbc_evidence,
     extract_request_payload_from_query,
-    merge_wise_flags_with_cbc_evidence,
+    merge_flags_with_cbc_evidence,
     validate_cbc_payload,
 )
 
@@ -147,7 +147,7 @@ def apply_cbc_evidence_to_wise_output(output: dict, input_data: dict) -> dict:
     if err or validated is None:
         return output
     llm_flags = normalize_wise_flags(output.get("flags"))
-    output["flags"] = merge_wise_flags_with_cbc_evidence(llm_flags, validated)
+    output["flags"] = merge_flags_with_cbc_evidence(llm_flags, validated)
     output["risk_level"] = derive_risk_level_from_cbc_evidence(output["flags"], validated)
     try:
         conf = float(output.get("confidence", 0.8))
