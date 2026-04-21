@@ -75,6 +75,7 @@ except ImportError:
     BM25_AVAILABLE = False
 
 from config.settings_loader import settings, get_ollama_url, get_model, get_timeout
+from core.embedding import get_normalized_embedding, try_get_normalized_embedding
 
 mcp = FastMCP("Local Storage RAG")
 
@@ -123,9 +124,7 @@ def get_rg_path():
 
 
 def get_embedding(text: str) -> np.ndarray:
-    result = requests.post(EMBED_URL, json={"model": EMBED_MODEL, "prompt": text}, timeout=OLLAMA_TIMEOUT)
-    result.raise_for_status()
-    return np.array(result.json()["embedding"], dtype=np.float32)
+    return get_normalized_embedding(text, task_type="search_document", timeout=OLLAMA_TIMEOUT)
 
 def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     words = text.split()
@@ -1475,11 +1474,20 @@ def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
                     "input": batch
                 }, timeout=OLLAMA_TIMEOUT)
                 res.raise_for_status()
-                embeddings_list = [np.array(e, dtype=np.float32) for e in res.json()["embeddings"]]
+                embeddings_list = []
+                for raw_vec in res.json()["embeddings"]:
+                    vec = np.array(raw_vec, dtype=np.float32)
+                    norm = np.linalg.norm(vec)
+                    embeddings_list.append((vec / norm) if norm > 0 else None)
             except Exception as e:
-                embeddings_list = [get_embedding(t) for t in batch]
+                embeddings_list = [
+                    try_get_normalized_embedding(text, task_type="search_document", timeout=OLLAMA_TIMEOUT)
+                    for text in batch
+                ]
 
             for j, embedding in enumerate(embeddings_list):
+                if embedding is None:
+                    continue
                 real_idx = i + j
                 chunk_text_val, page_num = final_safe_chunks_with_pages[real_idx]
                 embeddings_for_file.append(embedding)

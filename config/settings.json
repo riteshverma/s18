@@ -1,5 +1,5 @@
 {
-  "run_poll_timeout_seconds": 300,
+  "run_poll_timeout_seconds": 900,
   "ollama": {
     "base_url": "http://127.0.0.1:11434",
     "timeout": 360
@@ -28,6 +28,12 @@
     "rate_limit_interval": 4.5,
     "max_cost_per_run": 0.5,
     "warn_at_cost": 0.25
+  },
+  "mcp": {
+    "tool_timeout_seconds": 45
+  },
+  "scheduler": {
+    "timezone": "UTC"
   },
   "testing": {
     "feedback_mode": "with_permission",
