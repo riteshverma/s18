@@ -77,3 +77,7 @@ data/conversation_history/
 
 # Local GBrain checkout (install via: git clone https://github.com/garrytan/gbrain.git gbrain && cd gbrain && bun install)
 gbrain/
+
+# Local-only rehearsal/playbook notes
+docs/EAGV2_S18_FLOW_REHEARSAL.md
+docs/S18_POSITIONING_PLAYBOOK.md
