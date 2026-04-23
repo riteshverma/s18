@@ -2,6 +2,10 @@
 
 **Agentic AI** – A FastAPI backend for AI agents with memory, RAG, MCP servers, scheduled jobs, and a skills system.
 
+![Workflow Agnostic](https://img.shields.io/badge/Architecture-Workflow--Agnostic-2f855a)
+![MCP Hub](https://img.shields.io/badge/MCP-Orchestration_Hub-blue)
+![Docker CI](https://img.shields.io/badge/CI-Docker%20%2B%20Tests-success)
+
 - **Python:** 3.11+
 - **Version:** 0.2.0
 
@@ -129,10 +133,14 @@ Primary files:
 - [Platform/operator](#platformoperator)
 - [Integration partner (wise-ai)](#integration-partner-wise-ai)
 - [Workflow-agnostic integrations (Apr 2026)](#workflow-agnostic-integrations-apr-2026)
+- [Agnostic example workflows](#agnostic-example-workflows)
+- [MCP marketplace integration](#mcp-marketplace-integration)
+- [Local-first profiles](#local-first-profiles)
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Docker](#docker)
 - [Monitoring (Dev + Staging Baseline)](#monitoring-dev--staging-baseline)
+- [Engineering rigor signals](#engineering-rigor-signals)
 - [Project structure](#project-structure)
 - [Configuration](#configuration)
 - [Wise-AI Integration Sync (Mar 2026)](#wise-ai-integration-sync-mar-2026)
@@ -145,6 +153,7 @@ S18Share is designed to **decouple external product/workflow specifics from the 
 - **Canonical contract models:** `integrations/contracts.py`
 - **Adapter interface + implementations:** `integrations/base.py`, `integrations/adapters/*`
 - **Adapter registry + backward-compatible aliases:** `integrations/registry.py`
+- **Productized core import surface:** `s18_engine/`
 - **Config-driven integration profiles:** `config/integrations/*.json` (example: `wiseai_cdss_v1.json`)
 - **Architecture deep-dive:** `docs/architecture/S18_WORKFLOW_AGNOSTIC_TARGET.md`
 
@@ -173,6 +182,61 @@ curl -X POST "http://localhost:8000/runs" \
 - Implement an adapter in `integrations/adapters/<your_integration>.py` (map **raw → canonical**, and **canonical result → response envelope**).
 - Add a profile `config/integrations/<integration>_<workflow>_<version>.json` for risk/response profiles and field aliases.
 - Add contract/registry/adapter tests under `tests/integrations/`.
+
+## Agnostic example workflows
+
+These examples are intentionally non-medical to demonstrate reusable core orchestration:
+
+- `examples/personal_finance/` - expense triage and budget actions
+- `examples/travel_planner/` - itinerary and logistics planning
+
+Run either example by sending its `run_payload.json` to `POST /runs`.
+
+## MCP marketplace integration
+
+S18 can operate as a central MCP hub for built-in and external servers.
+
+- Integration guide: `docs/mcp/MCP_MARKETPLACE_INTEGRATION.md`
+- Dynamic server controls: `GET /mcp/servers`, `POST /mcp/servers`, `POST /mcp/refresh/{server}`
+- One-click server scaffold:
+
+```bash
+python scripts/scaffold_mcp_server.py --name weather
+```
+
+The scaffold creates a ready-to-run MCP server starter in `mcp_servers/custom/`.
+
+## Local-first profiles
+
+Use profile overlays to run S18 in laptop/privacy-focused modes without editing
+tracked settings files.
+
+Available profiles under `config/profiles/`:
+- `local-laptop-gemma`
+- `local-laptop-qwen`
+- `privacy-first`
+
+Set a profile at runtime:
+
+```bash
+S18_PROFILE=local-laptop-gemma uv run python api.py
+```
+
+PowerShell:
+
+```powershell
+$env:S18_PROFILE="local-laptop-gemma"; uv run python api.py
+```
+
+Benchmark local vs cloud latency using:
+
+```bash
+python benchmarks/local_vs_cloud/benchmark_runs.py \
+  --base-url http://localhost:8000 \
+  --profile local-laptop-gemma \
+  --scenario-file benchmarks/local_vs_cloud/scenarios.json \
+  --iterations 2
+```
 
 ### Tenancy baseline (Starter default, Growth-ready routing)
 
@@ -333,6 +397,7 @@ Monitoring assets are in `monitoring/` and run as an additive stack:
 - Prometheus config/rules: `monitoring/prometheus/`
 - Alertmanager config: `monitoring/alertmanager/`
 - Grafana provisioning/dashboard: `monitoring/grafana/`
+- Phoenix trace setup: `docs/monitoring/PHOENIX.md`
 
 ### Start API + Monitoring
 
@@ -353,6 +418,7 @@ docker compose -f monitoring/docker-compose.monitoring.yml up -d
 - Prometheus target page: [http://localhost:9090/targets](http://localhost:9090/targets)
 - Alertmanager: [http://localhost:9093](http://localhost:9093)
 - Grafana: [http://localhost:3000](http://localhost:3000) (`admin` / `admin`)
+- Phoenix (traces): [http://localhost:6006](http://localhost:6006)
 
 Expected key metric families:
 
@@ -364,6 +430,13 @@ Expected key metric families:
 - `s18_rag_requests_total`
 - `s18_mcp_tool_calls_total`
 - `s18_memory_operations_total`
+
+## Engineering rigor signals
+
+- CI now runs contract/settings test gates before Docker image build in `.github/workflows/docker-ci.yml`.
+- Integration contract coverage lives in `tests/integrations/`.
+- Runtime observability baseline includes Prometheus metrics, Grafana dashboards, and optional Phoenix trace UI under `monitoring/`.
+- MCP traces propagate `integration_id`, `workflow_id`, and `contract_version` for run segmentation.
 
 ### Port Overrides
 

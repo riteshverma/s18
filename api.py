@@ -24,7 +24,14 @@ from core.persistence import persistence_manager
 from core.graph_adapter import nx_to_reactflow
 from memory.context import ExecutionContextManager
 from remme.utils import get_embedding
-from config.settings_loader import settings, save_settings, reset_settings, reload_settings, get_run_poll_timeout
+from config.settings_loader import (
+    settings,
+    save_settings,
+    reset_settings,
+    reload_settings,
+    get_mcp_startup_timeout,
+    get_run_poll_timeout,
+)
 from core.supabase_auth import is_auth_enabled
 from core.supabase_logging import is_logging_enabled
 from core.supabase_config import get_supabase_config
@@ -58,16 +65,21 @@ remme_extractor = get_remme_extractor()
 _mcp_start_task: Optional[asyncio.Task] = None
 
 
-async def _start_mcp_with_timeout(timeout_seconds: float = 5.0) -> None:
+async def _start_mcp_with_timeout(timeout_seconds: Optional[float] = None) -> None:
     """
     Start MCP servers without blocking API readiness for long boot phases.
     If startup exceeds timeout, continue startup in background.
     """
     global _mcp_start_task
+    timeout_seconds = timeout_seconds or get_mcp_startup_timeout()
     _mcp_start_task = asyncio.create_task(multi_mcp.start())
     try:
         await asyncio.wait_for(asyncio.shield(_mcp_start_task), timeout=timeout_seconds)
     except asyncio.TimeoutError:
+        if multi_mcp.is_strict_mode():
+            raise RuntimeError(
+                f"MCP strict mode startup timed out after {timeout_seconds}s"
+            )
         print(f"⚠️ MCP startup exceeded {timeout_seconds}s; continuing in background.")
     except Exception:
         # Re-raise non-timeout failures so startup still surfaces real errors.
@@ -201,10 +213,15 @@ app.include_router(skills.router)
 
 @app.get("/health")
 async def health_check():
+    mcp_health = multi_mcp.get_health_status()
     return {
         "status": "ok",
         "version": "1.0.0",
-        "mcp_ready": True,  # Since lifespan finishes multi_mcp.start()
+        "mcp_ready": mcp_health["mcp_ready"],
+        "mcp_mode": mcp_health["mode"],
+        "mcp_start_completed": mcp_health["start_completed"],
+        "mcp_connected_servers": mcp_health["connected_servers"],
+        "mcp_required_servers": mcp_health["required_servers"],
         "run_poll_timeout_seconds": get_run_poll_timeout(),
     }
 

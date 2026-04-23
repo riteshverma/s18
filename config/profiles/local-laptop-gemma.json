@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "model_provider": "ollama",
+    "default_model": "gemma3:4b",
+    "planning_mode": "conservative",
+    "max_steps": 3
+  },
+  "models": {
+    "embedding": "nomic-embed-text",
+    "semantic_chunking": "gemma3:4b",
+    "image_captioning": "gemma3:4b",
+    "memory_extraction": "qwen3-vl:8b",
+    "insights_provider": "ollama"
+  },
+  "ollama": {
+    "base_url": "http://127.0.0.1:11434",
+    "timeout": 360
+  },
+  "mcp": {
+    "mode": "legacy"
+  }
+}

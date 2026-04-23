@@ -1,0 +1,20 @@
+{
+  "auth": {
+    "enabled": true
+  },
+  "supabase_logging": {
+    "enabled": false
+  },
+  "agent": {
+    "model_provider": "ollama",
+    "default_model": "gemma3:4b"
+  },
+  "models": {
+    "insights_provider": "ollama"
+  },
+  "mcp": {
+    "mode": "strict",
+    "required_servers": ["rag"],
+    "startup_timeout_seconds": 8
+  }
+}

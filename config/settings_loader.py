@@ -27,12 +27,16 @@ from urllib.parse import urlsplit
 CONFIG_DIR = Path(__file__).parent
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 DEFAULTS_FILE = CONFIG_DIR / "settings.defaults.json"
+PROFILES_DIR = CONFIG_DIR / "profiles"
 
 # --- Settings Cache ---
 _settings_cache = None
 
 _ALLOWED_OLLAMA_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _DEFAULT_OLLAMA_PORT = 11434
+_ALLOWED_MCP_MODES = {"legacy", "strict"}
+_DEFAULT_MCP_MODE = "legacy"
+_DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS = 5
 
 
 def _normalize_ollama_base_url(base_url: str, loopback_only: bool) -> str:
@@ -73,6 +77,39 @@ def normalize_runtime_ollama_base_url(base_url: str) -> str:
     return _normalize_ollama_base_url(base_url, loopback_only=False)
 
 
+def normalize_mcp_mode(mode: str | None) -> str:
+    """Normalize MCP operating mode."""
+    raw = (mode or "").strip().lower()
+    if not raw:
+        return _DEFAULT_MCP_MODE
+    if raw not in _ALLOWED_MCP_MODES:
+        raise ValueError(
+            f"mcp.mode must be one of: {', '.join(sorted(_ALLOWED_MCP_MODES))}"
+        )
+    return raw
+
+
+def _deep_merge_dict(base: dict, overlay: dict) -> dict:
+    """Recursively merge dict values from overlay into base."""
+    merged = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_profile_settings(profile_name: str) -> dict:
+    """Load a JSON profile from config/profiles."""
+    candidate = PROFILES_DIR / f"{profile_name}.json"
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"S18 profile '{profile_name}' not found. Expected: {candidate}"
+        )
+    return json.loads(candidate.read_text())
+
+
 def load_settings() -> dict:
     """Load settings from file. Uses cache if already loaded."""
     global _settings_cache
@@ -85,6 +122,10 @@ def load_settings() -> dict:
             save_settings()  # Create settings.json from defaults
         else:
             raise FileNotFoundError(f"No settings files found in {CONFIG_DIR}")
+        env_profile = os.getenv("S18_PROFILE")
+        if env_profile:
+            profile_settings = _load_profile_settings(env_profile.strip())
+            _settings_cache = _deep_merge_dict(_settings_cache, profile_settings)
         # Allow container/runtime override without editing tracked config files.
         env_ollama_base_url = os.getenv("OLLAMA_BASE_URL")
         if env_ollama_base_url:
@@ -101,6 +142,27 @@ def load_settings() -> dict:
         if env_mcp_tool_timeout and env_mcp_tool_timeout.isdigit():
             _settings_cache.setdefault("mcp", {})
             _settings_cache["mcp"]["tool_timeout_seconds"] = int(env_mcp_tool_timeout)
+        env_mcp_mode = os.getenv("MCP_MODE")
+        if env_mcp_mode:
+            _settings_cache.setdefault("mcp", {})
+            _settings_cache["mcp"]["mode"] = normalize_mcp_mode(env_mcp_mode)
+        env_mcp_startup_timeout = os.getenv("MCP_STARTUP_TIMEOUT_SECONDS")
+        if env_mcp_startup_timeout:
+            try:
+                startup_timeout = float(env_mcp_startup_timeout)
+            except ValueError:
+                startup_timeout = None
+            if startup_timeout is not None and startup_timeout > 0:
+                _settings_cache.setdefault("mcp", {})
+                _settings_cache["mcp"]["startup_timeout_seconds"] = startup_timeout
+        env_mcp_required_servers = os.getenv("MCP_REQUIRED_SERVERS")
+        if env_mcp_required_servers is not None:
+            _settings_cache.setdefault("mcp", {})
+            _settings_cache["mcp"]["required_servers"] = [
+                server.strip()
+                for server in env_mcp_required_servers.split(",")
+                if server.strip()
+            ]
         env_scheduler_tz = os.getenv("SCHEDULER_TIMEZONE")
         if env_scheduler_tz:
             _settings_cache.setdefault("scheduler", {})
@@ -201,6 +263,34 @@ def get_timeout() -> int:
 def get_run_poll_timeout() -> int:
     """Recommended timeout in seconds for clients polling GET /runs/{id}. Full runs often exceed 5 minutes."""
     return load_settings().get("run_poll_timeout_seconds", 900)
+
+
+def get_mcp_mode() -> str:
+    """Get MCP operating mode."""
+    mcp_settings = load_settings().get("mcp", {})
+    return normalize_mcp_mode(mcp_settings.get("mode"))
+
+
+def get_mcp_required_servers() -> list[str]:
+    """Get MCP servers required for strict readiness."""
+    mcp_settings = load_settings().get("mcp", {})
+    required = mcp_settings.get("required_servers", [])
+    if not isinstance(required, list):
+        return []
+    return [str(server).strip() for server in required if str(server).strip()]
+
+
+def get_mcp_startup_timeout() -> float:
+    """Get MCP startup timeout in seconds."""
+    mcp_settings = load_settings().get("mcp", {})
+    timeout = mcp_settings.get(
+        "startup_timeout_seconds", _DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS
+    )
+    try:
+        timeout_value = float(timeout)
+    except (TypeError, ValueError):
+        return float(_DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS)
+    return timeout_value if timeout_value > 0 else float(_DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS)
 
 # --- Initialize on import ---
 settings = load_settings()
