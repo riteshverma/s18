@@ -24,6 +24,8 @@ jobs:
           pip install pytest
 
       - name: Run fast contract + settings tests
+        env:
+          PYTHONPATH: .
         run: |
           pytest -q \
             tests/test_settings_loader.py \
