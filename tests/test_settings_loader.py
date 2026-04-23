@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from config.settings_loader import (
+    get_model,
     get_mcp_mode,
     get_mcp_required_servers,
     get_mcp_startup_timeout,
@@ -98,6 +99,22 @@ class McpSettingsTests(unittest.TestCase):
             self.assertEqual(get_mcp_mode(), "strict")
             self.assertEqual(get_mcp_required_servers(), ["rag", "mockehr"])
             self.assertEqual(get_mcp_startup_timeout(), 12.5)
+
+
+class ProfileSettingsTests(unittest.TestCase):
+    def tearDown(self):
+        reload_settings()
+
+    def test_profile_overrides_defaults(self):
+        with patch.dict("os.environ", {"S18_PROFILE": "local-laptop-gemma"}, clear=False):
+            reload_settings()
+            self.assertEqual(get_model("semantic_chunking"), "gemma3:4b")
+
+    def test_privacy_first_profile_enables_strict_mcp_mode(self):
+        with patch.dict("os.environ", {"S18_PROFILE": "privacy-first"}, clear=False):
+            reload_settings()
+            self.assertEqual(get_mcp_mode(), "strict")
+            self.assertIn("rag", get_mcp_required_servers())
 
 
 if __name__ == "__main__":

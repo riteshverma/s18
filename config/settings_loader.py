@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 CONFIG_DIR = Path(__file__).parent
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 DEFAULTS_FILE = CONFIG_DIR / "settings.defaults.json"
+PROFILES_DIR = CONFIG_DIR / "profiles"
 
 # --- Settings Cache ---
 _settings_cache = None
@@ -88,6 +89,27 @@ def normalize_mcp_mode(mode: str | None) -> str:
     return raw
 
 
+def _deep_merge_dict(base: dict, overlay: dict) -> dict:
+    """Recursively merge dict values from overlay into base."""
+    merged = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_profile_settings(profile_name: str) -> dict:
+    """Load a JSON profile from config/profiles."""
+    candidate = PROFILES_DIR / f"{profile_name}.json"
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"S18 profile '{profile_name}' not found. Expected: {candidate}"
+        )
+    return json.loads(candidate.read_text())
+
+
 def load_settings() -> dict:
     """Load settings from file. Uses cache if already loaded."""
     global _settings_cache
@@ -100,6 +122,10 @@ def load_settings() -> dict:
             save_settings()  # Create settings.json from defaults
         else:
             raise FileNotFoundError(f"No settings files found in {CONFIG_DIR}")
+        env_profile = os.getenv("S18_PROFILE")
+        if env_profile:
+            profile_settings = _load_profile_settings(env_profile.strip())
+            _settings_cache = _deep_merge_dict(_settings_cache, profile_settings)
         # Allow container/runtime override without editing tracked config files.
         env_ollama_base_url = os.getenv("OLLAMA_BASE_URL")
         if env_ollama_base_url:

@@ -1,0 +1,18 @@
+{
+  "query": "Plan a 3-day Tokyo itinerary for a first-time traveler with a moderate budget and public transit only.",
+  "integration_id": "default",
+  "workflow_id": "travel_itinerary",
+  "contract_version": "v1",
+  "source_system": "travel_assistant",
+  "external_event_id": "travel_evt_101",
+  "raw_payload": {
+    "destination": "Tokyo",
+    "duration_days": 3,
+    "budget_usd": 1200,
+    "interests": ["food", "culture", "architecture"],
+    "constraints": {
+      "transport": "public",
+      "pace": "balanced"
+    }
+  }
+}
