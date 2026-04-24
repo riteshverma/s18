@@ -21,7 +21,7 @@ def test_create_job_persists_state(tmp_path: Path):
     request = HarnessJobRequest(
         provider="claude",
         prompt="run task",
-        cwd=str(tmp_path / "workspace"),
+        cwd="workspace",
     )
     with patch("harness.runtime.load_settings", return_value={}):
         with patch("harness.drivers.shutil.which", return_value="/usr/bin/claude"):
