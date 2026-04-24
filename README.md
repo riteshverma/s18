@@ -130,6 +130,8 @@ Primary files:
 - [Integration partner (wise-ai)](#integration-partner-wise-ai)
 - [Workflow-agnostic integrations (Apr 2026)](#workflow-agnostic-integrations-apr-2026)
 - [Features](#features)
+- [Harness jobs (trusted CLI runner)](#harness-jobs-trusted-cli-runner)
+- [A2A and AG-UI direction](#a2a-and-ag-ui-direction)
 - [Quick start](#quick-start)
 - [Docker](#docker)
 - [Monitoring (Dev + Staging Baseline)](#monitoring-dev--staging-baseline)
@@ -191,7 +193,56 @@ curl -X POST "http://localhost:8000/runs" \
 - **Scheduler** – Cron-style jobs with skill routing (e.g. Market Analyst, System Monitor, Web Clipper) and inbox integration
 - **Skills** – Pluggable skills with intent matching and run/success hooks
 - **Streaming** – SSE endpoint for real-time events from the event bus
+- **Harness jobs** – Auth-protected background jobs that run trusted local CLIs (`codex`, `claude`, `gemini`) with persisted state and SSE output events
 - **Config** – Centralized settings in `config/` (Ollama, models, RAG, agent, REMME)
+
+---
+
+## Harness jobs (trusted CLI runner)
+
+The harness subsystem adds a BoringOS-style trusted runner to S18: the app can launch CLI jobs for `codex`, `claude`, and `gemini`, assuming those CLIs are already installed and authenticated on the host/deployed environment.
+
+### Endpoints
+
+All routes are under `/harness` and are protected by Supabase-backed auth (`require_supabase_user`).
+
+- `POST /harness/jobs` - create a new job and queue background execution
+- `GET /harness/jobs` - list jobs (supports `limit`)
+- `GET /harness/jobs/{job_id}` - fetch one persisted job state
+- `POST /harness/jobs/{job_id}/stop` - request termination for a running job
+- `POST /harness/jobs/{job_id}/resume` - publish a resume signal for a job
+- `GET /harness/jobs/{job_id}/events` - stream job events over SSE (with optional history replay)
+
+### Provider behavior and runtime model
+
+- Provider execution plans are built in `harness/drivers.py`.
+- `codex` defaults to stdin prompt mode; `claude` and `gemini` use `-p <prompt>` by default.
+- Runtime process lifecycle (accepted -> starting -> running -> completed/failed/cancelled/timeout), output tail retention, timeout handling, and event publishing are managed in `harness/runtime.py`.
+- Job state is persisted via JSON files and indexed listings in `harness/store.py`.
+
+### Notes and current limitations
+
+- Harness is a trusted local CLI runner, not a sandbox.
+- Storage is currently file-based and not user-scoped by job ownership.
+- The `resume` endpoint currently emits a resume event/state signal; it should not be interpreted as guaranteed process restart semantics.
+- Router wiring is included in `api.py`, with a shared lazy runtime in `shared/state.py`.
+
+### Verification coverage
+
+Current harness-focused tests:
+
+- `tests/harness/test_drivers.py`
+- `tests/harness/test_runtime.py`
+- `tests/harness/test_harness_router.py`
+
+## A2A and AG-UI direction
+
+Alongside harness, S18 is evolving toward protocol-level interoperability:
+
+- **A2A (agent-to-agent):** direction for standardized inter-agent delegation and integration across external agent systems.
+- **AG-UI (agent-to-user interface):** direction for streaming structured agent lifecycle/state/tool events to UI clients over SSE.
+
+This is an active architecture track that complements harness jobs. Treat this section as direction and in-progress integration intent unless corresponding route/module references are present in the current tree.
 
 ---
 
@@ -228,7 +279,10 @@ Optional:
 
 - **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
-- **WISE_MOCKEHR_BASE_URL** – Base URL of the wise-ai Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from wise-ai for end-to-end integration. Examples: `http://localhost:8000` (wise-ai on host), `http://backend:8000` (typical Compose service name on the shared network). Match the URL to how you run wise-ai, not only to Docker.
+- **S18_HARNESS_STATE_DIR** – Optional override for harness job storage location. If unset, harness state defaults to OS-local app data (for example `%LOCALAPPDATA%/S18Share/harness_jobs` on Windows).
+- **S18_CODEX_BIN / S18_CLAUDE_BIN / S18_GEMINI_BIN** – Optional explicit binary paths for provider CLIs; otherwise harness resolves providers from `PATH`.
+- **EXTERNAL_MOCKEHR_BASE_URL** – Preferred base URL of an upstream Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from that provider.
+- **WISE_MOCKEHR_BASE_URL** – Backward-compatible alias for existing wise-ai environments; used when `EXTERNAL_MOCKEHR_BASE_URL` is not set.
 
 ### Supabase integration contract (S18)
 
@@ -393,8 +447,9 @@ The CI target uses pinned dependencies from `requirements-ci.txt` (exported from
 | ---- | ----------- |
 | `api.py` | FastAPI app, lifespan, CORS, router includes |
 | `core/` | Agent loop, scheduler, event bus, circuit breaker, persistence, model manager, skills |
+| `harness/` | Trusted CLI harness drivers, runtime, models, and JSON-backed store for harness jobs |
 | `remme/` | Memory and preferences pipeline (extractor, store, hubs, normalizer) |
-| `routers/` | API routes: RAG, remme, agent, chat, runs, stream, cron, skills, inbox, etc. |
+| `routers/` | API routes: RAG, remme, agent, chat, runs, stream, harness, cron, skills, inbox, etc. |
 | `mcp_servers/` | MCP server implementations (RAG, browser, sandbox, multi_mcp) |
 | `config/` | Settings loader, `settings.json`, `settings.defaults.json`, agent config |
 | `data/` | Inbox DB, system jobs/snapshot, RAG documents |
