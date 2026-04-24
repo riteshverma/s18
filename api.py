@@ -206,6 +206,8 @@ from routers import stream
 app.include_router(stream.router)
 from routers import skills
 app.include_router(skills.router)
+from routers import harness as harness_router
+app.include_router(harness_router.router)
 
 
 
