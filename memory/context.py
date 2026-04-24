@@ -39,7 +39,16 @@ def sanitize_io_keys_list(keys):
 
 
 class ExecutionContextManager:
-    def __init__(self, plan_graph: dict, session_id: str = None, original_query: str = None, file_manifest: list = None, debug_mode: bool = False, api_mode: bool = True):
+    def __init__(
+        self,
+        plan_graph: dict,
+        session_id: str = None,
+        original_query: str = None,
+        file_manifest: list = None,
+        debug_mode: bool = False,
+        api_mode: bool = True,
+        storage_namespace: str = "shared",
+    ):
         # 🎯 Build NetworkX graph with ALL data
         self.plan_graph = nx.DiGraph()
         
@@ -59,6 +68,7 @@ class ExecutionContextManager:
         self.plan_graph.graph['globals_schema'] = {}
         self.plan_graph.graph['api_mode'] = api_mode
         self.plan_graph.graph['memory_context'] = None
+        self.plan_graph.graph['storage_namespace'] = storage_namespace or "shared"
         if original_query is not None:
             self.plan_graph.graph['globals_schema']['original_query'] = original_query
         self.failure_replan_requested = False
@@ -104,6 +114,7 @@ class ExecutionContextManager:
 
         self.debug_mode = debug_mode
         self._live_display = None
+        self._save_lock = asyncio.Lock()
 
     def stop(self):
         """Signal the execution loop to stop"""
@@ -341,7 +352,7 @@ class ExecutionContextManager:
             # but we can set a global flag or rely on the frontend seeing the "interaction_required" in output
             
             # We explicitly save here to ensure frontend sees the request
-            self._save_session()
+            await self.save_session_async()
             
             # Wait for input or stop
             while not self.stop_requested:
@@ -413,7 +424,7 @@ class ExecutionContextManager:
             try:
                 # Set status to waiting (visible to UI)
                 node_data['status'] = 'waiting_input'
-                self._save_session()
+                await self.save_session_async()
                 
                 user_response = await self._handle_user_interaction(output)
                 
@@ -421,7 +432,7 @@ class ExecutionContextManager:
                 if self.stop_requested:
                     node_data['status'] = 'failed'
                     node_data['error'] = 'Execution stopped by user during input.'
-                    self._save_session()
+                    await self.save_session_async()
                     return
 
                 writes_to = output.get("writes_to", "user_response")
@@ -676,8 +687,9 @@ class ExecutionContextManager:
     def _save_session(self):
         """Save the NetworkX graph as session"""
         base_dir = Path(__file__).parent.parent / "memory" / "session_summaries_index"
+        storage_namespace = self.plan_graph.graph.get("storage_namespace", "shared")
         today = datetime.now()
-        date_dir = base_dir / str(today.year) / f"{today.month:02d}" / f"{today.day:02d}"
+        date_dir = base_dir / storage_namespace / str(today.year) / f"{today.month:02d}" / f"{today.day:02d}"
         date_dir.mkdir(parents=True, exist_ok=True)
         
         session_id = self.plan_graph.graph['session_id']
@@ -688,6 +700,10 @@ class ExecutionContextManager:
         with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(graph_data, f, indent=2, default=str, ensure_ascii=False)
         temp_file.replace(session_file)
+
+    async def save_session_async(self):
+        async with self._save_lock:
+            await asyncio.to_thread(self._save_session)
 
     @classmethod
     def load_session(cls, session_file: Path, debug_mode: bool = False):
@@ -712,6 +728,7 @@ class ExecutionContextManager:
         context.user_input_value = None
         context.memory_context = plan_graph.graph.get("memory_context")
         context._live_display = None
+        context._save_lock = asyncio.Lock()
         context.failure_replan_requested = False
         context.failure_replan_attempts = 0
         context._failure_replan_payload = None

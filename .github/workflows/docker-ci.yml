@@ -6,7 +6,56 @@ on:
   pull_request:
 
 jobs:
+  fast:
+    name: Fast tests (unit + contract)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+          pip install pytest
+
+      - name: Run fast tests (exclude integration, slow)
+        env:
+          PYTHONPATH: .
+        run: pytest -m "not integration and not slow"
+
+  integration:
+    name: Integration tests (non-gating)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+          pip install pytest
+
+      - name: Run integration + slow tests (informational)
+        env:
+          PYTHONPATH: .
+        run: pytest -m "integration or slow" || echo "integration tests not yet gating"
+
   docker-ci:
+    name: Docker build targets
+    needs: fast
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

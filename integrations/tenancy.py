@@ -41,3 +41,9 @@ def can_route_to_growth(tenant_context: Dict[str, str], tenancy_settings: Dict[s
         return False
     return tenant_context.get("tenant_tier") in {GROWTH_TIER, ENTERPRISE_HEALTH_TIER}
 
+
+def storage_namespace_for_tenant(tenant_context: Dict[str, str], tenancy_settings: Dict[str, Any]) -> str:
+    if can_route_to_growth(tenant_context, tenancy_settings):
+        return f"{tenant_context.get('tenant_id', 'default')}__{tenant_context.get('data_region', 'in')}"
+    return "shared"
+

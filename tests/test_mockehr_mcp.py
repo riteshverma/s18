@@ -128,11 +128,11 @@ def test_get_patient_records_fresh_sync_bypasses_cache():
     raw = asyncio.run(get_patient_records("p-999", fresh_sync=True, session_state=session_state))
     payload = json.loads(raw)
     assert payload["status"] in ("ok", "No record found")
-    assert payload["source"] in ("wise_mock_api", "s18_internal_history")
+    assert payload["source"] in ("external_mockehr", "s18_internal_history")
 
 
 def test_search_labs_internal_fallback_from_conversation_history():
-    """When wise-ai is unavailable, labs can come from S18 conversation history."""
+    """When the upstream provider is unavailable, labs can come from S18 history."""
     patient_id = "54ce03ff-9186-445c-b8cd-96d3950c7bd1"
     raw = asyncio.run(
         search_labs(

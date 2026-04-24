@@ -45,5 +45,19 @@ def get_remme_extractor():
         _remme_extractor = RemmeExtractor()
     return _remme_extractor
 
+
+# Harness runtime instance
+_harness_runtime = None
+
+
+def get_harness_runtime():
+    """Get the HarnessRuntime instance, creating it if needed."""
+    global _harness_runtime
+    if _harness_runtime is None:
+        from harness.runtime import HarnessRuntime
+
+        _harness_runtime = HarnessRuntime(project_root=PROJECT_ROOT)
+    return _harness_runtime
+
 # Global settings state
 settings = {}

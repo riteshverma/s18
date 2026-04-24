@@ -25,7 +25,7 @@ def test_wise_adapter_normalizes_defaults():
 def test_wise_adapter_response_envelope_includes_contract_metadata():
     adapter = WiseAIIntegrationAdapter()
     canonical = adapter.to_canonical({"query": "hello"})
-    response = adapter.from_canonical({"status": "starting"}, canonical)
+    response = adapter.from_canonical({"id": "run-1", "status": "starting"}, canonical)
     assert response["integration_id"] == "wiseai"
     assert response["workflow_id"] == "cdss"
     assert response["contract_version"] == "v1"

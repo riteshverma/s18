@@ -7,7 +7,7 @@ class CanonicalRunRequest(BaseModel):
     contract_version: str = "v1"
     integration_id: str = "default"
     workflow_id: str = "generic"
-    query: str
+    query: str = Field(min_length=1)
     model: Optional[str] = None
     source_system: str = "s18"
     tenant_id: str = "default"
@@ -31,3 +31,19 @@ class CanonicalRunResult(BaseModel):
     contract_version: str = "v1"
     integration_id: str = "default"
     workflow_id: str = "generic"
+
+
+class CanonicalRunResponse(BaseModel):
+    id: str
+    status: str
+    created_at: Optional[str] = None
+    query: Optional[str] = None
+    request_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    poll_timeout_seconds: Optional[int] = None
+    integration_id: str = "default"
+    workflow_id: str = "generic"
+    contract_version: str = "v1"
+    tenant_id: str = "default"
+    tenant_tier: str = "starter"
+    data_region: Optional[str] = None

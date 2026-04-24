@@ -5,7 +5,13 @@ from typing import Optional, List, Dict, Any
 import requests
 
 # Import from config system
-from config.settings_loader import reload_settings, save_settings, reset_settings, get_ollama_url
+from config.settings_loader import (
+    reload_settings,
+    save_settings,
+    reset_settings,
+    get_ollama_url,
+    validate_ollama_base_url,
+)
 from shared.state import settings
 
 router = APIRouter()
@@ -36,6 +42,15 @@ async def update_settings(request: UpdateSettingsRequest):
     or server restart to take effect.
     """
     try:
+        ollama_settings = request.settings.get("ollama", {})
+        if isinstance(ollama_settings, dict) and "base_url" in ollama_settings:
+            try:
+                ollama_settings["base_url"] = validate_ollama_base_url(
+                    str(ollama_settings["base_url"])
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
         # Use shared global settings
         global settings 
         
@@ -71,6 +86,8 @@ async def update_settings(request: UpdateSettingsRequest):
             "message": "Settings saved successfully",
             "warnings": warnings if warnings else None
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save settings: {str(e)}")
 

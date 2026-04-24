@@ -1,6 +1,8 @@
 import sys
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -49,6 +51,29 @@ def test_runs_accepts_explicit_canonical_fields():
     assert body["tenant_tier"] == "starter"
 
 
+def test_runs_supports_default_non_wise_integration_path():
+    client = _make_client()
+    with patch("routers.runs.log_inbound_request", new=AsyncMock(return_value=None)):
+        with patch("routers.runs.process_run", new=AsyncMock(return_value=None)):
+            resp = client.post(
+                "/runs",
+                json={
+                    "query": "generic integration request",
+                    "integration_id": "default",
+                    "workflow_id": "generic",
+                    "contract_version": "v1",
+                    "source_system": "s18",
+                },
+                headers={"Authorization": "Bearer token"},
+            )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "starting"
+    assert body["integration_id"] == "default"
+    assert body["workflow_id"] == "generic"
+    assert body["contract_version"] == "v1"
+
+
 def test_runs_accepts_explicit_tenant_context():
     client = _make_client()
     with patch("routers.runs.log_inbound_request", new=AsyncMock(return_value=None)):
@@ -72,3 +97,11 @@ def test_runs_accepts_explicit_tenant_context():
     assert body["tenant_id"] == "acme-health"
     assert body["tenant_tier"] == "growth"
     assert body["data_region"] == "in"
+
+
+def test_build_memory_context_parses_rag_snippet_literals():
+    rag_payload = SimpleNamespace(content=[SimpleNamespace(text='["snippet one", "snippet two"]')])
+    with patch("routers.runs._retrieve_memories_sync", return_value=[]):
+        with patch("routers.runs.multi_mcp.call_tool", new=AsyncMock(return_value=rag_payload)):
+            memory_context, _ = asyncio.run(runs._build_memory_context("run-1", "hello"))
+    assert "snippet one" in memory_context

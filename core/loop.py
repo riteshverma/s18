@@ -10,6 +10,7 @@ from memory.context import ExecutionContextManager
 from agents.base_agent import AgentRunner
 from core.utils import log_step, log_error
 from core.event_bus import event_bus
+from core.graph_adapter import nx_to_reactflow
 from core.schemas.clinical import extract_request_payload_from_query, validate_cbc_payload
 from core.model_manager import ModelManager
 from config.settings_loader import get_timeout
@@ -183,14 +184,26 @@ class AgentLoop4:
                 session_id=self.context.plan_graph.graph.get("session_id"),
                 memory_context=self.context.memory_context,
                 existing_context=self.context,
+                storage_namespace=self.context.plan_graph.graph.get("storage_namespace", "shared"),
             )
 
         await self._track_task(self._execute_dag(self.context))
         return self.context
 
-    async def run(self, query, file_manifest, globals_schema, uploaded_files, session_id=None, memory_context=None, existing_context=None):
+    async def run(
+        self,
+        query,
+        file_manifest,
+        globals_schema,
+        uploaded_files,
+        session_id=None,
+        memory_context=None,
+        existing_context=None,
+        storage_namespace: str = "shared",
+    ):
         run_start_ms = now_ms()
         final_status = "failed"
+        final_error = None
         try:
             if existing_context is None:
                 # 🟢 PHASE 0: BOOTSTRAP CONTEXT (Immediate VS Code feedback)
@@ -216,13 +229,15 @@ class AgentLoop4:
                     bootstrap_graph,
                     session_id=session_id,
                     original_query=query,
-                    file_manifest=file_manifest
+                    file_manifest=file_manifest,
+                    storage_namespace=storage_namespace,
                 )
                 log_step("✅ Session initialized with Query processing", symbol="🌱")
             else:
                 self.context = existing_context
                 self.context.set_multi_mcp(self.multi_mcp)
                 self.context.plan_graph.graph["file_manifest"] = file_manifest
+                self.context.plan_graph.graph["storage_namespace"] = storage_namespace
                 query_node = self.context.plan_graph.nodes["Query"] if "Query" in self.context.plan_graph else None
                 if query_node and query_node.get("status") != "completed":
                     query_node["status"] = "running"
@@ -238,7 +253,15 @@ class AgentLoop4:
             merged_query = self.context.plan_graph.graph['globals_schema'].get("original_query")
             if (merged_query is None or merged_query == "") and seeded_query not in (None, ""):
                 self.context.plan_graph.graph['globals_schema']['original_query'] = seeded_query
-            self.context._save_session()
+            await self.context.save_session_async()
+            await event_bus.publish(
+                "run_started",
+                "AgentLoop4",
+                {
+                    "session_id": self.context.plan_graph.graph.get("session_id"),
+                    "query": query,
+                },
+            )
         except Exception as e:
             print(f"❌ ERROR initializing context: {e}")
             raise
@@ -471,6 +494,14 @@ class AgentLoop4:
                 # Merge the new plan into our existing context
                 new_plan_graph = plan_result["output"]["plan_graph"]
                 self._merge_plan_into_context(new_plan_graph)
+                await event_bus.publish(
+                    "plan_ready",
+                    "AgentLoop4",
+                    {
+                        "session_id": self.context.plan_graph.graph.get("session_id"),
+                        "plan_graph": nx_to_reactflow(self.context.plan_graph),
+                    },
+                )
 
                 try:
                     # Phase 4: Execute DAG
@@ -484,7 +515,7 @@ class AgentLoop4:
                         log_step("♻️ Adaptive Re-planning: Clarification resolved, formulating next steps...", symbol="🔄")
                         # Reactivate Query node for UI
                         self.context.plan_graph.nodes["Query"]["status"] = "running"
-                        self.context._save_session()
+                        await self.context.save_session_async()
                         continue
                     else:
                         # No more work or re-planning needed
@@ -503,6 +534,7 @@ class AgentLoop4:
             if self.context:
                 # Mark ANY running/pending node as stopped/failed to stop spinners
                 final_status = "stopped" if (self.context.stop_requested or isinstance(e, asyncio.CancelledError)) else "failed"
+                final_error = str(e)
                 for node_id in self.context.plan_graph.nodes:
                     if self.context.plan_graph.nodes[node_id].get("status") in ["running", "pending"]:
                         self.context.plan_graph.nodes[node_id]["status"] = final_status
@@ -512,12 +544,22 @@ class AgentLoop4:
                 self.context.plan_graph.graph['status'] = final_status
                 if final_status == "failed":
                     self.context.plan_graph.graph['error'] = str(e)
-                self.context._save_session()
+                await self.context.save_session_async()
             if not isinstance(e, asyncio.CancelledError) and not self.context.stop_requested:
                 raise e
             final_status = "stopped"
             return self.context
         finally:
+            if self.context:
+                await event_bus.publish(
+                    "run_finished",
+                    "AgentLoop4",
+                    {
+                        "session_id": self.context.plan_graph.graph.get("session_id"),
+                        "status": final_status,
+                        "error": final_error if final_status == "failed" else None,
+                    },
+                )
             integration_id = "default"
             workflow_id = "generic"
             contract_version = "v1"
@@ -834,7 +876,7 @@ class AgentLoop4:
                 for n_id in context.plan_graph.nodes:
                     if context.plan_graph.nodes[n_id].get("status") == "running":
                         context.plan_graph.nodes[n_id]["status"] = "stopped"
-                context._save_session()
+                await context.save_session_async()
                 break
             
             # Get ready nodes
@@ -905,7 +947,19 @@ class AgentLoop4:
                      # Preserve partial output
                      if "output" in result:
                          context.plan_graph.nodes[step_id]["output"] = result["output"]
-                     context._save_session()
+                     await context.save_session_async()
+                     await event_bus.publish(
+                         "step_update",
+                         "AgentLoop4",
+                         {
+                             "session_id": context.plan_graph.graph.get("session_id"),
+                             "step_id": step_id,
+                             "status": "waiting_input",
+                             "output": result.get("output"),
+                             "error": None,
+                             "cost": context.plan_graph.nodes[step_id].get("cost"),
+                         },
+                     )
                      log_step(f"⏳ {step_id}: Waiting for user input...", symbol="⏳")
                      continue
                 
@@ -918,10 +972,34 @@ class AgentLoop4:
                     else:
                         visualizer.mark_failed(step_id, result)
                         context.mark_failed(step_id, str(result))
+                        await event_bus.publish(
+                            "step_update",
+                            "AgentLoop4",
+                            {
+                                "session_id": context.plan_graph.graph.get("session_id"),
+                                "step_id": step_id,
+                                "status": "failed",
+                                "output": None,
+                                "error": str(result),
+                                "cost": context.plan_graph.nodes[step_id].get("cost"),
+                            },
+                        )
                         log_error(f"❌ Failed {step_id} after {MAX_STEP_RETRIES} retries: {str(result)}")
                 elif result["success"]:
                     visualizer.mark_completed(step_id)
                     await context.mark_done(step_id, result["output"])
+                    await event_bus.publish(
+                        "step_update",
+                        "AgentLoop4",
+                        {
+                            "session_id": context.plan_graph.graph.get("session_id"),
+                            "step_id": step_id,
+                            "status": "completed",
+                            "output": result.get("output"),
+                            "error": None,
+                            "cost": context.plan_graph.nodes[step_id].get("cost"),
+                        },
+                    )
                     log_step(f"✅ Completed {step_id} ({step_data['agent']})", symbol="✅")
                 else:
                     # Agent returned failure - also retry
@@ -932,6 +1010,18 @@ class AgentLoop4:
                     else:
                         visualizer.mark_failed(step_id, result["error"])
                         context.mark_failed(step_id, result["error"])
+                        await event_bus.publish(
+                            "step_update",
+                            "AgentLoop4",
+                            {
+                                "session_id": context.plan_graph.graph.get("session_id"),
+                                "step_id": step_id,
+                                "status": "failed",
+                                "output": result.get("output"),
+                                "error": result.get("error"),
+                                "cost": context.plan_graph.nodes[step_id].get("cost"),
+                            },
+                        )
                         log_error(f"❌ Failed {step_id} after {MAX_STEP_RETRIES} retries: {result['error']}")
 
             # ===== COST THRESHOLD CHECK =====
@@ -974,8 +1064,6 @@ class AgentLoop4:
 
     async def _execute_step(self, step_id, context):
         """Execute a single step with call_self support"""
-        # 📡 EMIT EVENT
-        await event_bus.publish("step_start", "AgentLoop4", {"step_id": step_id})
         step_data = context.get_step_data(step_id)
         # Sanitize reads/writes to string keys (handles planner dicts and session load; prevents unhashable type: 'dict')
         reads = sanitize_io_keys_list(step_data.get("reads", []))
@@ -984,6 +1072,18 @@ class AgentLoop4:
         context.plan_graph.nodes[step_id]["writes"] = writes
         step_data["reads"] = reads
         step_data["writes"] = writes
+        await event_bus.publish(
+            "step_start",
+            "AgentLoop4",
+            {
+                "session_id": context.plan_graph.graph.get("session_id"),
+                "step_id": step_id,
+                "agent": step_data.get("agent"),
+                "description": step_data.get("description"),
+                "reads": reads,
+                "writes": writes,
+            },
+        )
 
         agent_type = step_data["agent"]
         # Normalize common planner aliases to configured agent names
@@ -1002,6 +1102,9 @@ class AgentLoop4:
         
         # 🔧 HELPER FUNCTION: Build agent input (consistent for both iterations)
         def build_agent_input(instruction=None, previous_output=None, iteration_context=None):
+            integration_meta = context.plan_graph.graph.get("globals_schema", {}).get("_integration_meta", {})
+            if not isinstance(integration_meta, dict):
+                integration_meta = {}
             # Base payload for all agents
             payload = {
                 "step_id": step_id,
@@ -1014,8 +1117,10 @@ class AgentLoop4:
                     "session_id": context.plan_graph.graph['session_id'],
                     "created_at": context.plan_graph.graph['created_at'],
                     "file_manifest": context.plan_graph.graph['file_manifest'],
-                    "memory_context": getattr(context, 'memory_context', None) # 🧠 Universal Injection
+                    "memory_context": getattr(context, 'memory_context', None), # 🧠 Universal Injection
+                    "integration_meta": integration_meta,
                 },
+                "integration_meta": integration_meta,
                 **({"previous_output": previous_output} if previous_output else {}),
                 **({"iteration_context": iteration_context} if iteration_context else {})
             }
@@ -1124,6 +1229,17 @@ class AgentLoop4:
                 tool_args = tool_call.get("arguments", {})
                 
                 log_step(f"🛠️ Executing Tool: {tool_name}", payload=tool_args, symbol="⚙️")
+                await event_bus.publish(
+                    "tool_call",
+                    "AgentLoop4",
+                    {
+                        "session_id": context.plan_graph.graph.get("session_id"),
+                        "step_id": step_id,
+                        "phase": "start",
+                        "tool_name": tool_name,
+                        "arguments": tool_args,
+                    },
+                )
                 
                 try:
                     # Execute tool via MultiMCP
@@ -1137,6 +1253,18 @@ class AgentLoop4:
 
                     # ✅ SAVE RESULT TO HISTORY
                     iterations_data[-1]["tool_result"] = result_str
+                    await event_bus.publish(
+                        "tool_call",
+                        "AgentLoop4",
+                        {
+                            "session_id": context.plan_graph.graph.get("session_id"),
+                            "step_id": step_id,
+                            "phase": "end",
+                            "tool_name": tool_name,
+                            "arguments": tool_args,
+                            "result_preview": result_str[:500],
+                        },
+                    )
 
                     # Log result (truncated)
                     log_step(f"✅ Tool Result", payload={"result_preview": result_str[:200] + "..."}, symbol="🔌")
