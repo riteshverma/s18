@@ -23,7 +23,10 @@ def test_create_job_persists_state(tmp_path: Path):
         prompt="run task",
         cwd="workspace",
     )
-    with patch("harness.runtime.load_settings", return_value={}):
+    with patch(
+        "harness.runtime.load_settings",
+        return_value={"harness": {"workspace_aliases": {"workspace": "workspace"}}},
+    ):
         with patch("harness.drivers.shutil.which", return_value="/usr/bin/claude"):
             state = asyncio.run(runtime.create_job(request))
             loaded = asyncio.run(runtime.get_job(state.id))
@@ -33,28 +36,30 @@ def test_create_job_persists_state(tmp_path: Path):
     assert loaded.command == ["/usr/bin/claude", "-p", "run task"]
 
 
-def test_create_job_rejects_disallowed_cwd(tmp_path: Path):
+def test_create_job_rejects_unknown_workspace_alias(tmp_path: Path):
     runtime = HarnessRuntime(project_root=tmp_path)
-    outside = tmp_path.parent
     request = HarnessJobRequest(
         provider="codex",
         prompt="run task",
-        cwd=str(outside),
+        cwd="unknown-workspace",
     )
     with patch("harness.runtime.load_settings", return_value={}):
-        with pytest.raises(ValueError, match="relative path"):
+        with pytest.raises(ValueError, match="configured workspace alias"):
             asyncio.run(runtime.create_job(request))
 
 
-def test_create_job_rejects_path_traversal_segments(tmp_path: Path):
+def test_create_job_rejects_alias_with_traversal_target(tmp_path: Path):
     runtime = HarnessRuntime(project_root=tmp_path)
     (tmp_path / "workspace").mkdir(parents=True, exist_ok=True)
     request = HarnessJobRequest(
         provider="codex",
         prompt="run task",
-        cwd="../",
+        cwd="bad",
     )
-    with patch("harness.runtime.load_settings", return_value={}):
-        with pytest.raises(ValueError, match="path traversal"):
+    with patch(
+        "harness.runtime.load_settings",
+        return_value={"harness": {"workspace_aliases": {"bad": "../outside"}}},
+    ):
+        with pytest.raises(ValueError, match="configured workspace alias"):
             asyncio.run(runtime.create_job(request))
 

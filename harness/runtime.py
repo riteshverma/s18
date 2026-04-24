@@ -249,52 +249,35 @@ class HarnessRuntime:
         return ""
 
     def _resolve_cwd(self, requested: Optional[str]) -> Path:
-        if not requested:
-            candidate = self.project_root.resolve()
-        else:
-            requested_path = Path(requested)
-            if requested_path.is_absolute():
-                raise ValueError("cwd must be a relative path under an allowed harness root")
-
-            # Reject explicit traversal segments before resolution.
-            if any(part == ".." for part in requested_path.parts):
-                raise ValueError("cwd cannot include path traversal segments")
-
-            candidate = (self.project_root / requested_path).resolve()
-
-        allowed_roots = self._allowed_roots()
-        if not any(self._is_within_root(candidate, root) for root in allowed_roots):
-            raise ValueError("cwd must be under an allowed harness root")
+        aliases = self._workspace_aliases()
+        alias = (requested or ".").strip()
+        candidate = aliases.get(alias)
+        if candidate is None:
+            raise ValueError("cwd must be a configured workspace alias")
         if not candidate.exists() or not candidate.is_dir():
-            raise ValueError("cwd must point to an existing directory")
+            raise ValueError("Resolved workspace alias must point to an existing directory")
         return candidate
 
-    def _allowed_roots(self) -> list[Path]:
+    def _workspace_aliases(self) -> Dict[str, Path]:
         settings = load_settings().get("harness", {})
-        roots = settings.get("allowed_roots", []) if isinstance(settings, dict) else []
-        parsed = []
-        for raw in roots:
-            text = str(raw).strip()
-            if not text:
-                continue
-            root = Path(text)
-            if not root.is_absolute():
-                root = (self.project_root / root).resolve()
-            else:
-                root = root.resolve()
-            parsed.append(root)
-        if not parsed:
-            parsed.append(self.project_root.resolve())
-        return parsed
+        raw_aliases = (
+            settings.get("workspace_aliases", {}) if isinstance(settings, dict) else {}
+        )
+        aliases: Dict[str, Path] = {".": self.project_root.resolve()}
 
-    @staticmethod
-    def _is_within_root(candidate: Path, root: Path) -> bool:
-        try:
-            candidate_real = candidate.resolve()
-            root_real = root.resolve()
-            return os.path.commonpath([str(candidate_real), str(root_real)]) == str(root_real)
-        except (ValueError, OSError):
-            return False
+        if isinstance(raw_aliases, dict):
+            for alias, rel_path in raw_aliases.items():
+                alias_key = str(alias).strip()
+                rel_text = str(rel_path).strip()
+                if not alias_key or not rel_text:
+                    continue
+                rel_candidate = Path(rel_text)
+                # Alias targets are configuration-owned relative paths only.
+                if rel_candidate.is_absolute() or any(part == ".." for part in rel_candidate.parts):
+                    continue
+                aliases[alias_key] = (self.project_root / rel_candidate).resolve()
+
+        return aliases
 
     @staticmethod
     def _default_timeout() -> int:
