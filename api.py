@@ -204,6 +204,8 @@ from routers import cron
 app.include_router(cron.router)
 from routers import stream
 app.include_router(stream.router)
+from routers import agui as agui_router
+app.include_router(agui_router.router)
 from routers import skills
 app.include_router(skills.router)
 

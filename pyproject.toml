@@ -42,4 +42,5 @@ dependencies = [
     "apscheduler>=3.11.2",
     "prometheus-client>=0.21.1",
     "pyjwt[crypto]>=2.10.1",
+    "ag-ui-protocol>=0.1.18",
 ]
