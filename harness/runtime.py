@@ -249,14 +249,21 @@ class HarnessRuntime:
         return ""
 
     def _resolve_cwd(self, requested: Optional[str]) -> Path:
-        candidate = Path(requested) if requested else self.project_root
-        if not candidate.is_absolute():
-            candidate = (self.project_root / candidate).resolve()
+        if not requested:
+            candidate = self.project_root.resolve()
         else:
-            candidate = candidate.resolve()
+            requested_path = Path(requested)
+            if requested_path.is_absolute():
+                raise ValueError("cwd must be a relative path under an allowed harness root")
+
+            # Reject explicit traversal segments before resolution.
+            if any(part == ".." for part in requested_path.parts):
+                raise ValueError("cwd cannot include path traversal segments")
+
+            candidate = (self.project_root / requested_path).resolve()
 
         allowed_roots = self._allowed_roots()
-        if not any(candidate.is_relative_to(root) for root in allowed_roots):
+        if not any(self._is_within_root(candidate, root) for root in allowed_roots):
             raise ValueError("cwd must be under an allowed harness root")
         if not candidate.exists() or not candidate.is_dir():
             raise ValueError("cwd must point to an existing directory")
@@ -279,6 +286,15 @@ class HarnessRuntime:
         if not parsed:
             parsed.append(self.project_root.resolve())
         return parsed
+
+    @staticmethod
+    def _is_within_root(candidate: Path, root: Path) -> bool:
+        try:
+            candidate_real = candidate.resolve()
+            root_real = root.resolve()
+            return os.path.commonpath([str(candidate_real), str(root_real)]) == str(root_real)
+        except (ValueError, OSError):
+            return False
 
     @staticmethod
     def _default_timeout() -> int:

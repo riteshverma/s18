@@ -42,6 +42,19 @@ def test_create_job_rejects_disallowed_cwd(tmp_path: Path):
         cwd=str(outside),
     )
     with patch("harness.runtime.load_settings", return_value={}):
-        with pytest.raises(ValueError, match="allowed harness root"):
+        with pytest.raises(ValueError, match="relative path"):
+            asyncio.run(runtime.create_job(request))
+
+
+def test_create_job_rejects_path_traversal_segments(tmp_path: Path):
+    runtime = HarnessRuntime(project_root=tmp_path)
+    (tmp_path / "workspace").mkdir(parents=True, exist_ok=True)
+    request = HarnessJobRequest(
+        provider="codex",
+        prompt="run task",
+        cwd="../",
+    )
+    with patch("harness.runtime.load_settings", return_value={}):
+        with pytest.raises(ValueError, match="path traversal"):
             asyncio.run(runtime.create_job(request))
 
