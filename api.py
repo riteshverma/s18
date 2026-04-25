@@ -35,6 +35,7 @@ from config.settings_loader import (
 from core.supabase_auth import is_auth_enabled
 from core.supabase_logging import is_logging_enabled
 from core.supabase_config import get_supabase_config
+from core.run_store import get_run_store
 
 
 # Import shared state
@@ -63,6 +64,7 @@ multi_mcp = get_multi_mcp()
 remme_store = get_remme_store()
 remme_extractor = get_remme_extractor()
 _mcp_start_task: Optional[asyncio.Task] = None
+run_store = get_run_store()
 
 
 async def _start_mcp_with_timeout(timeout_seconds: Optional[float] = None) -> None:
@@ -91,6 +93,12 @@ async def lifespan(app: FastAPI):
     scheduler_service.initialize()
     scheduler_service.register_morning_briefing()
     persistence_manager.load_snapshot()
+    reconciled_runs = await asyncio.to_thread(
+        run_store.mark_orphaned_inflight_as_interrupted,
+        set(active_loops.keys()),
+    )
+    if reconciled_runs:
+        print(f"♻️ Reconciled {reconciled_runs} orphaned in-flight runs to interrupted.")
     await _start_mcp_with_timeout()
     
     # Check git

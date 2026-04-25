@@ -29,7 +29,7 @@ def _make_client():
 def test_runs_accepts_explicit_canonical_fields():
     client = _make_client()
     with patch("routers.runs.log_inbound_request", new=AsyncMock(return_value=None)):
-        with patch("routers.runs.process_run", new=AsyncMock(return_value=None)):
+        with patch("routers.runs.execute_run", new=AsyncMock(return_value=None)):
             resp = client.post(
                 "/runs",
                 json={
@@ -54,7 +54,7 @@ def test_runs_accepts_explicit_canonical_fields():
 def test_runs_supports_default_non_wise_integration_path():
     client = _make_client()
     with patch("routers.runs.log_inbound_request", new=AsyncMock(return_value=None)):
-        with patch("routers.runs.process_run", new=AsyncMock(return_value=None)):
+        with patch("routers.runs.execute_run", new=AsyncMock(return_value=None)):
             resp = client.post(
                 "/runs",
                 json={
@@ -77,7 +77,7 @@ def test_runs_supports_default_non_wise_integration_path():
 def test_runs_accepts_explicit_tenant_context():
     client = _make_client()
     with patch("routers.runs.log_inbound_request", new=AsyncMock(return_value=None)):
-        with patch("routers.runs.process_run", new=AsyncMock(return_value=None)):
+        with patch("routers.runs.execute_run", new=AsyncMock(return_value=None)):
             resp = client.post(
                 "/runs",
                 json={

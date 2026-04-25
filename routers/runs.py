@@ -25,6 +25,9 @@ from core.supabase_logging import (
     log_inbound_request,
     update_request_status,
 )
+from core.event_bus import event_bus
+from core.run_store import get_run_store
+from core.run_executor import execute_resume, execute_run
 from remme.utils import get_embedding
 from config.settings_loader import settings, get_run_poll_timeout
 from integrations.contracts import CanonicalRunRequest
@@ -42,6 +45,7 @@ RUNS_INDEX_FILE = PROJECT_ROOT / "memory" / "runs.index.json"
 multi_mcp = get_multi_mcp()
 remme_store = get_remme_store()
 remme_extractor = get_remme_extractor()
+run_store = get_run_store()
 
 
 # === Pydantic Models ===
@@ -203,6 +207,26 @@ async def _load_runs_index() -> list[Dict[str, Any]]:
     return await _refresh_runs_index()
 
 
+def _normalize_run_status(raw_status: Optional[str]) -> str:
+    status = (raw_status or "failed").strip().lower()
+    if status == "success":
+        return "completed"
+    if status == "paused":
+        return "stopped"
+    if status not in {
+        "accepted",
+        "starting",
+        "running",
+        "waiting_input",
+        "completed",
+        "failed",
+        "stopped",
+        "interrupted",
+    }:
+        return "failed"
+    return status
+
+
 def _retrieve_memories_sync(query: str):
     return remme_store.search_text(query, limit=3)
 
@@ -246,6 +270,36 @@ async def _build_memory_context(run_id: str, query: str):
     return memory_context, results
 
 
+async def _mirror_run_status_from_events(run_id: str, stop_signal: asyncio.Event):
+    queue = await event_bus.subscribe(max_queue_size=500)
+    try:
+        while not stop_signal.is_set():
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+
+            data = event.get("data", {})
+            if data.get("session_id") != run_id:
+                continue
+
+            event_type = event.get("type")
+            if event_type == "run_started":
+                await asyncio.to_thread(run_store.update_status, run_id, "running")
+            elif event_type == "step_update":
+                status = data.get("status")
+                if status == "waiting_input":
+                    await asyncio.to_thread(run_store.update_status, run_id, "waiting_input")
+                elif status == "running":
+                    await asyncio.to_thread(run_store.update_status, run_id, "running")
+            elif event_type == "run_finished":
+                status = _normalize_run_status(data.get("status"))
+                await asyncio.to_thread(run_store.update_status, run_id, status)
+                return
+    finally:
+        event_bus.unsubscribe(queue)
+
+
 async def process_run(
     run_id: str,
     canonical_request: CanonicalRunRequest,
@@ -264,6 +318,19 @@ async def process_run(
     results = []
     loop = AgentLoop4(multi_mcp=multi_mcp)
     active_loops[run_id] = loop
+    await asyncio.to_thread(
+        run_store.update_status,
+        run_id,
+        "starting",
+        query=canonical_request.query,
+        integration_id=canonical_request.integration_id,
+        workflow_id=canonical_request.workflow_id,
+        tenant_id=canonical_request.tenant_id,
+        tenant_tier=canonical_request.tenant_tier,
+        data_region=canonical_request.data_region,
+    )
+    mirror_stop = asyncio.Event()
+    mirror_task = asyncio.create_task(_mirror_run_status_from_events(run_id, mirror_stop))
     trace_token = multi_mcp.set_trace_context(
         {
             "integration_id": canonical_request.integration_id,
@@ -312,6 +379,13 @@ async def process_run(
     except Exception as e:
         print(f"Run {run_id} failed: {e}")
     finally:
+        mirror_stop.set()
+        if not mirror_task.done():
+            mirror_task.cancel()
+            try:
+                await mirror_task
+            except asyncio.CancelledError:
+                pass
         multi_mcp.reset_trace_context(trace_token)
         # Clean up
         if run_id in active_loops:
@@ -620,6 +694,14 @@ async def process_run(
         except Exception:
             pass
 
+        await asyncio.to_thread(
+            run_store.update_status,
+            run_id,
+            _normalize_run_status(final_result.get("status")),
+            summary=final_result.get("summary"),
+            error=final_result.get("error"),
+        )
+
         return final_result
 
 
@@ -631,6 +713,9 @@ async def process_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = 
     query = ""
     loop = AgentLoop4(multi_mcp=multi_mcp)
     active_loops[run_id] = loop
+    await asyncio.to_thread(run_store.update_status, run_id, "starting")
+    mirror_stop = asyncio.Event()
+    mirror_task = asyncio.create_task(_mirror_run_status_from_events(run_id, mirror_stop))
     try:
         summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
         found_file = _find_session_file(run_id, summaries_dir)
@@ -647,6 +732,13 @@ async def process_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = 
     except Exception as e:
         print(f"Resume {run_id} failed: {e}")
     finally:
+        mirror_stop.set()
+        if not mirror_task.done():
+            mirror_task.cancel()
+            try:
+                await mirror_task
+            except asyncio.CancelledError:
+                pass
         if run_id in active_loops:
             del active_loops[run_id]
 
@@ -691,6 +783,14 @@ async def process_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = 
             await _refresh_runs_index()
         except Exception:
             pass
+
+        await asyncio.to_thread(
+            run_store.update_status,
+            run_id,
+            _normalize_run_status(final_result.get("status")),
+            summary=final_result.get("summary"),
+            error=final_result.get("error"),
+        )
 
         return final_result
 
@@ -773,8 +873,27 @@ async def create_run(
     except Exception as e:
         print(f"⚠️ Supabase inbound logging failed for run {run_id}: {e}")
 
+    await asyncio.to_thread(
+        run_store.upsert_run,
+        run_id=run_id,
+        status="accepted",
+        query=canonical_request.query,
+        created_at=datetime.now().isoformat(),
+        request_id=request_id,
+        idempotency_key=idempotency_key,
+        integration_id=canonical_request.integration_id,
+        workflow_id=canonical_request.workflow_id,
+        tenant_id=canonical_request.tenant_id,
+        tenant_tier=canonical_request.tenant_tier,
+        data_region=canonical_request.data_region,
+        metadata={
+            "source_system": source_system,
+            "contract_version": canonical_request.contract_version,
+        },
+    )
+
     # Start background execution
-    background_tasks.add_task(process_run, run_id, canonical_request, audit_context, tenant_context)
+    background_tasks.add_task(execute_run, run_id, canonical_request, audit_context, tenant_context)
     
     return adapter.from_canonical(
         {
@@ -832,7 +951,13 @@ async def resume_run(
     except Exception as e:
         print(f"⚠️ Supabase inbound resume logging failed for run {run_id}: {e}")
 
-    background_tasks.add_task(process_resume, run_id, audit_context)
+    background_tasks.add_task(execute_resume, run_id, audit_context)
+    await asyncio.to_thread(
+        run_store.update_status,
+        run_id,
+        "starting",
+        metadata={"resume": True},
+    )
     return {
         "id": run_id,
         "status": "resuming",
@@ -843,7 +968,10 @@ async def resume_run(
 
 @router.get("/runs")
 async def list_runs(user: Dict[str, Any] = Depends(require_supabase_user)):
-    """List runs from disk"""
+    """List runs from durable registry, with disk fallback for legacy sessions."""
+    stored_runs = await asyncio.to_thread(run_store.list_runs, 300)
+    if stored_runs:
+        return stored_runs
     runs = await _load_runs_index()
     return [{k: v for k, v in row.items() if k != "path"} for row in runs]
 
@@ -851,6 +979,8 @@ async def list_runs(user: Dict[str, Any] = Depends(require_supabase_user)):
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_user)):
     """Get graph state for a run"""
+    stored = await asyncio.to_thread(run_store.get_run, run_id)
+
     # Check memory first (if running), then disk fallback.
     if run_id in active_loops:
         loop = active_loops[run_id]
@@ -874,6 +1004,7 @@ async def get_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_u
                 status = "completed"
             else:
                 status = plan_graph.graph.get("status", "running")
+            await asyncio.to_thread(run_store.update_status, run_id, _normalize_run_status(status))
 
             return {
                 "id": run_id,
@@ -912,6 +1043,13 @@ async def get_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_u
         
         # Determine status: Running if in memory, else use file status
         status = "running" if run_id in active_loops else data.get("graph", {}).get("status", "completed")
+        session_file = str(found_file)
+        await asyncio.to_thread(
+            run_store.update_status,
+            run_id,
+            _normalize_run_status(status),
+            session_file=session_file,
+        )
 
         return {
             "id": run_id,
@@ -935,6 +1073,18 @@ async def get_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_u
                 }
         except (OverflowError, ValueError):
             pass
+
+    if stored:
+        return {
+            "id": run_id,
+            "status": _normalize_run_status(stored.get("status")),
+            "graph": {"nodes": [], "edges": []},
+            "poll_timeout_seconds": get_run_poll_timeout(),
+            "summary": stored.get("summary"),
+            "error": stored.get("error"),
+            "created_at": stored.get("created_at"),
+            "updated_at": stored.get("updated_at"),
+        }
 
     raise HTTPException(status_code=404, detail="Run not found")
 
@@ -1000,6 +1150,7 @@ async def provide_input(
 
                 # Save the session
                 await asyncio.to_thread(loop.context._save_session)
+                await asyncio.to_thread(run_store.update_status, run_id, "running")
 
                 return {
                     "id": run_id,
@@ -1023,8 +1174,14 @@ async def stop_run(run_id: str, user: Dict[str, Any] = Depends(require_supabase_
     if run_id in active_loops:
         loop = active_loops[run_id]
         loop.stop()
+        await asyncio.to_thread(run_store.update_status, run_id, "stopped")
         return {"id": run_id, "status": "stopping"}
-    
+
+    stored = await asyncio.to_thread(run_store.get_run, run_id)
+    if stored:
+        await asyncio.to_thread(run_store.update_status, run_id, "stopped")
+        return {"id": run_id, "status": "stopped"}
+
     raise HTTPException(status_code=404, detail="Active run not found")
 
 

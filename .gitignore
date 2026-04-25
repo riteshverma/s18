@@ -56,6 +56,7 @@ config/mcp_cache.json
 # Runtime inbox DB and system snapshot (machine-local)
 data/inbox/*.db
 data/system/snapshot.json
+data/system/agent_runs.sqlite
 
 # RAG / FAISS / BM25 artifacts (rebuild via indexing; large binaries)
 mcp_servers/faiss_index/
