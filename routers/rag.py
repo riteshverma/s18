@@ -12,6 +12,7 @@ import requests
 import io
 
 from shared.state import get_multi_mcp, PROJECT_ROOT
+from config.settings_loader import settings
 from core.supabase_auth import require_supabase_user
 from core.prometheus_metrics import (
     RAG_EMPTY_RESULT_TOTAL,
@@ -21,11 +22,34 @@ from core.prometheus_metrics import (
     elapsed_ms,
     now_ms,
 )
+from integrations.tenancy import resolve_tenant_context
+from integrations.vectors import get_vector_store
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
 # Get shared instances
 multi_mcp = get_multi_mcp()
+
+
+def _resolve_vector_provider(user: Dict[str, Any]) -> tuple[str, Dict[str, str]]:
+    """Return (provider, tenant_context) for the calling user.
+
+    Falls back to legacy ``faiss`` MCP path when the tenant has not been
+    routed to a cloud-managed vector store.
+    """
+    tenant_context = resolve_tenant_context(
+        request_payload={},
+        user=user,
+        tenancy_settings=settings.get("tenancy", {}),
+    )
+    backend_cfg = (settings.get("ingest", {}) or {}).get("vector_store", {}) or {}
+    overrides = backend_cfg.get("tenant_overrides") or {}
+    provider = (
+        overrides.get(tenant_context["tenant_id"])
+        or backend_cfg.get("provider")
+        or "faiss"
+    )
+    return str(provider).lower(), tenant_context
 
 
 # === Document Management Endpoints ===
@@ -465,8 +489,50 @@ def find_page_for_chunk(doc_path: str, chunk_text: str) -> int:
 
 @router.get("/search")
 async def rag_search(query: str, user: Dict[str, Any] = Depends(require_supabase_user)):
-    """Semantic search against indexed RAG documents with page numbers"""
+    """Semantic search against indexed RAG documents with page numbers.
+
+    Delegates to the tenant-configured vector store when ``ingest.vector_store``
+    points at a cloud backend (Azure AI Search, AWS OpenSearch, Bedrock KB).
+    Falls back to the legacy MCP+FAISS hybrid pipeline for the default tenant
+    so the existing local dev path keeps working unchanged.
+    """
     start_ms = now_ms()
+    provider, tenant_context = _resolve_vector_provider(user)
+    if provider != "faiss":
+        try:
+            from core.embedding import get_normalized_embedding
+
+            embedding = get_normalized_embedding(query, task_type="search_query")
+            store = get_vector_store(tenant_context)
+            hits = store.query(
+                embedding=embedding.tolist(),
+                text=query,
+                k=int(settings.get("rag", {}).get("top_k") or 5),
+                filters={"tenant_id": tenant_context["tenant_id"]},
+            )
+            structured_results = [
+                {
+                    "content": h.text,
+                    "source": h.source_uri or h.doc_id,
+                    "page": int((h.metadata or {}).get("page") or 1),
+                    "score": h.score,
+                }
+                for h in hits
+            ]
+            RAG_REQUESTS_TOTAL.labels(endpoint="search", status="success").inc()
+            RAG_SEARCH_LATENCY_MS.labels(endpoint="search").observe(elapsed_ms(start_ms))
+            RAG_RESULTS_COUNT.labels(endpoint="search").observe(len(structured_results))
+            if not structured_results:
+                RAG_EMPTY_RESULT_TOTAL.labels(endpoint="search").inc()
+            return {
+                "status": "success",
+                "results": structured_results,
+                "vector_provider": provider,
+            }
+        except Exception as exc:
+            RAG_REQUESTS_TOTAL.labels(endpoint="search", status="error").inc()
+            RAG_SEARCH_LATENCY_MS.labels(endpoint="search").observe(elapsed_ms(start_ms))
+            raise HTTPException(status_code=500, detail=f"Cloud vector search failed: {exc}")
     try:
         args = {"query": query}
         result = await multi_mcp.call_tool("rag", "search_stored_documents_rag", args)

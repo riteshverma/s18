@@ -15,7 +15,7 @@ celery_app = Celery(
     "s18share",
     broker=_broker_url(),
     backend=_result_backend_url(),
-    include=["workers.agent_tasks"],
+    include=["workers.agent_tasks", "workers.ingest_tasks"],
 )
 
 celery_app.conf.update(

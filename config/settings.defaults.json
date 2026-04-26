@@ -83,5 +83,58 @@
     "service_role_key": "",
     "request_table": "ehr_request_log",
     "result_table": "ehr_clinical_result"
+    },
+  "bedrock": {
+    "region": "us-east-1",
+    "embedding_model_id": "amazon.titan-embed-text-v2:0",
+    "embedding_dimension": 1024
+  },
+  "ingest": {
+    "object_store": {
+      "provider": "local_fs",
+      "local_fs": {
+        "root": "data/ingest"
+      },
+      "azure_blob": {
+        "account_url": "",
+        "container": "",
+        "sas_token_env": "AZURE_STORAGE_SAS_TOKEN",
+        "connection_string_env": "AZURE_STORAGE_CONNECTION_STRING"
+      },
+      "aws_s3": {
+        "bucket": "",
+        "region": "us-east-1",
+        "kms_key_id": null,
+        "endpoint_url": null
+      },
+      "tenant_overrides": {}
+    },
+    "vector_store": {
+      "provider": "faiss",
+      "faiss": {
+        "index_dir": "mcp_servers/faiss_index"
+      },
+      "azure_ai_search": {
+        "endpoint": "",
+        "api_key_env": "AZURE_SEARCH_KEY",
+        "index_name": ""
+      },
+      "aws_opensearch": {
+        "endpoint": "",
+        "region": "us-east-1",
+        "index_name": "",
+        "service": "aoss"
+      },
+      "bedrock_kb": {
+        "knowledge_base_id": "",
+        "data_source_id": "",
+        "region": "us-east-1"
+      },
+      "tenant_overrides": {}
+    },
+    "powerapps": {
+      "max_files_per_request": 25,
+      "max_inline_file_bytes": 8388608
     }
+  }
 }
