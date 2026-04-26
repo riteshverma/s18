@@ -15,39 +15,6 @@ Usage:
     from remme.normalizer import run_normalizer
 """
 
-# Core stores
-from remme.store import RemmeStore
-from remme.extractor import RemmeExtractor
-from remme.staging import StagingStore, get_staging_store
-
-# Structured preference hubs
-from remme.hubs import (
-    get_preferences_hub,
-    get_operating_context_hub,
-    get_soft_identity_hub,
-    PreferencesHub,
-    OperatingContextHub,
-    SoftIdentityHub,
-)
-
-# Engines
-from remme.engines import (
-    get_evidence_log,
-    get_belief_engine,
-    EvidenceLog,
-    BeliefUpdateEngine,
-)
-
-# Bootstrap
-from remme.bootstrap import (
-    bootstrap_from_remme,
-    extract_from_memories,
-    apply_extraction_to_hubs,
-)
-
-# Normalizer
-from remme.normalizer import Normalizer, run_normalizer
-
 __all__ = [
     # Core
     "RemmeStore",
@@ -74,3 +41,42 @@ __all__ = [
     "Normalizer",
     "run_normalizer",
 ]
+
+
+def __getattr__(name):
+    if name == "RemmeStore":
+        from remme.store import RemmeStore
+
+        return RemmeStore
+    if name == "RemmeExtractor":
+        from remme.extractor import RemmeExtractor
+
+        return RemmeExtractor
+    if name in {"StagingStore", "get_staging_store"}:
+        from remme import staging
+
+        return getattr(staging, name)
+    if name in {
+        "get_preferences_hub",
+        "get_operating_context_hub",
+        "get_soft_identity_hub",
+        "PreferencesHub",
+        "OperatingContextHub",
+        "SoftIdentityHub",
+    }:
+        from remme import hubs
+
+        return getattr(hubs, name)
+    if name in {"get_evidence_log", "get_belief_engine", "EvidenceLog", "BeliefUpdateEngine"}:
+        from remme import engines
+
+        return getattr(engines, name)
+    if name in {"bootstrap_from_remme", "extract_from_memories", "apply_extraction_to_hubs"}:
+        from remme import bootstrap
+
+        return getattr(bootstrap, name)
+    if name in {"Normalizer", "run_normalizer"}:
+        from remme import normalizer
+
+        return getattr(normalizer, name)
+    raise AttributeError(name)

@@ -6,3 +6,7 @@ metadata:
 data:
   OLLAMA_BASE_URL: "http://ollama:11434"
   OLLAMA_TIMEOUT: "300"
+  S18_RUN_EXECUTOR: "in_process"
+  CELERY_BROKER_URL: "redis://s18share-redis:6379/0"
+  CELERY_RESULT_BACKEND: "redis://s18share-redis:6379/0"
+  S18_CELERY_PREFETCH_MULTIPLIER: "1"

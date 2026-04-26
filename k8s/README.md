@@ -23,6 +23,7 @@ This directory contains baseline manifests to run S18Share on Kubernetes.
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/configmap.yaml
 kubectl apply -f k8s/secret.yaml
+kubectl apply -f k8s/redis.yaml
 kubectl apply -f k8s/pvc-data.yaml
 kubectl apply -f k8s/pvc-memory.yaml
 kubectl apply -f k8s/pvc-faiss-index.yaml
@@ -43,3 +44,4 @@ kubectl -n s18share logs deploy/s18share-api --tail=200
 
 - Start with `replicas: 1` while using file-based state (SQLite/snapshots/index files).
 - Scale-out safely after migrating state to external/shared data stores.
+- Set `S18_RUN_EXECUTOR=celery` for the API once Redis and the worker deployment are ready to own run execution.

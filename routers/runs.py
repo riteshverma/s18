@@ -15,7 +15,6 @@ from shared.state import (
     get_remme_extractor,
     PROJECT_ROOT,
 )
-from core.loop import AgentLoop4
 from core.graph_adapter import nx_to_reactflow
 from core.supabase_auth import require_supabase_user
 from core.supabase_logging import (
@@ -27,11 +26,10 @@ from core.supabase_logging import (
 )
 from core.event_bus import event_bus
 from core.run_store import get_run_store
-from core.run_executor import execute_resume, execute_run
+from core.run_executor import execute_resume, execute_run, is_celery_enabled
 from remme.utils import get_embedding
 from config.settings_loader import settings, get_run_poll_timeout
 from integrations.contracts import CanonicalRunRequest
-from integrations.registry import get_integration_adapter
 from integrations.tenancy import (
     can_route_to_growth,
     resolve_tenant_context,
@@ -41,10 +39,24 @@ from integrations.tenancy import (
 router = APIRouter(tags=["Runs"])
 RUNS_INDEX_FILE = PROJECT_ROOT / "memory" / "runs.index.json"
 
-# Get shared instances
-multi_mcp = get_multi_mcp()
-remme_store = get_remme_store()
-remme_extractor = get_remme_extractor()
+class _LazyShared:
+    def __init__(self, factory):
+        self._factory = factory
+        self._value = None
+
+    def _get(self):
+        if self._value is None:
+            self._value = self._factory()
+        return self._value
+
+    def __getattr__(self, name):
+        return getattr(self._get(), name)
+
+
+# Keep router imports lightweight; heavy MCP/FAISS objects are created on first use.
+multi_mcp = _LazyShared(get_multi_mcp)
+remme_store = _LazyShared(get_remme_store)
+remme_extractor = _LazyShared(get_remme_extractor)
 run_store = get_run_store()
 
 
@@ -316,6 +328,8 @@ async def process_run(
     final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete", "run_id": run_id}
     context = None
     results = []
+    from core.loop import AgentLoop4
+
     loop = AgentLoop4(multi_mcp=multi_mcp)
     active_loops[run_id] = loop
     await asyncio.to_thread(
@@ -711,6 +725,8 @@ async def process_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = 
     context = None
     results = []
     query = ""
+    from core.loop import AgentLoop4
+
     loop = AgentLoop4(multi_mcp=multi_mcp)
     active_loops[run_id] = loop
     await asyncio.to_thread(run_store.update_status, run_id, "starting")
@@ -818,6 +834,8 @@ async def create_run(
             "data_region": tenant_context["data_region"],
         }
     )
+    from integrations.registry import get_integration_adapter
+
     adapter = get_integration_adapter(
         integration_id=request.integration_id,
         source_system=request.source_system,
@@ -892,8 +910,11 @@ async def create_run(
         },
     )
 
-    # Start background execution
-    background_tasks.add_task(execute_run, run_id, canonical_request, audit_context, tenant_context)
+    # Celery mode enqueues immediately; local mode keeps the existing in-process background path.
+    if is_celery_enabled():
+        await execute_run(run_id, canonical_request, audit_context, tenant_context)
+    else:
+        background_tasks.add_task(execute_run, run_id, canonical_request, audit_context, tenant_context)
     
     return adapter.from_canonical(
         {
@@ -951,13 +972,16 @@ async def resume_run(
     except Exception as e:
         print(f"⚠️ Supabase inbound resume logging failed for run {run_id}: {e}")
 
-    background_tasks.add_task(execute_resume, run_id, audit_context)
     await asyncio.to_thread(
         run_store.update_status,
         run_id,
         "starting",
         metadata={"resume": True},
     )
+    if is_celery_enabled():
+        await execute_resume(run_id, audit_context)
+    else:
+        background_tasks.add_task(execute_resume, run_id, audit_context)
     return {
         "id": run_id,
         "status": "resuming",

@@ -70,3 +70,68 @@ spec:
         - name: faiss-storage
           persistentVolumeClaim:
             claimName: s18share-faiss-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s18share-worker
+  namespace: s18share
+  labels:
+    app: s18share-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: s18share-worker
+  template:
+    metadata:
+      labels:
+        app: s18share-worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/s18share:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - core.celery_app.celery_app
+            - worker
+            - --loglevel=INFO
+            - --concurrency=1
+          env:
+            - name: S18_RUN_EXECUTOR
+              value: celery
+          envFrom:
+            - configMapRef:
+                name: s18share-config
+            - secretRef:
+                name: s18share-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: data-storage
+              mountPath: /app/data
+            - name: memory-storage
+              mountPath: /app/memory
+            - name: faiss-storage
+              mountPath: /app/mcp_servers/faiss_index
+      volumes:
+        - name: data-storage
+          persistentVolumeClaim:
+            claimName: s18share-data-pvc
+        - name: memory-storage
+          persistentVolumeClaim:
+            claimName: s18share-memory-pvc
+        - name: faiss-storage
+          persistentVolumeClaim:
+            claimName: s18share-faiss-pvc

@@ -4,8 +4,6 @@ import asyncio
 import json
 import yaml
 from pathlib import Path
-from google import genai
-from google.genai.errors import ServerError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,6 +11,23 @@ load_dotenv()
 ROOT = Path(__file__).parent.parent
 MODELS_JSON = ROOT / "config" / "models.json"
 PROFILE_YAML = ROOT / "config" / "profiles.yaml"
+_genai = None
+_server_error_type = None
+
+
+def _load_genai():
+    global _genai, _server_error_type
+    if _genai is None:
+        from google import genai
+        from google.genai.errors import ServerError
+
+        _genai = genai
+        _server_error_type = ServerError
+    return _genai
+
+
+def _is_server_error(exc: Exception) -> bool:
+    return _server_error_type is not None and isinstance(exc, _server_error_type)
 
 class ModelManager:
     def __init__(self, model_name: str = None, provider: str = None):
@@ -49,7 +64,7 @@ class ModelManager:
                     "api_key_env": "GEMINI_API_KEY"
                 }
                 api_key = os.getenv("GEMINI_API_KEY")
-                self.client = genai.Client(api_key=api_key)
+                self.client = _load_genai().Client(api_key=api_key)
             elif provider == "ollama":
                 # Ollama: model_name is the Ollama model like "phi4" or "llama3:8b"
                 self.model_info = {
@@ -81,7 +96,7 @@ class ModelManager:
             # Initialize client based on model type
             if self.model_type == "gemini":
                 api_key = os.getenv("GEMINI_API_KEY")
-                self.client = genai.Client(api_key=api_key)
+                self.client = _load_genai().Client(api_key=api_key)
             # Ollama doesn't need a persistent client
 
         # Ollama timeout from config (used for completion stage; must allow ~240s+ per step)
@@ -207,10 +222,10 @@ class ModelManager:
             )
             return response.text.strip()
 
-        except ServerError as e:
-            # ✅ FIXED: Raise the exception instead of returning it
-            raise e
         except Exception as e:
+            if _is_server_error(e):
+                # ✅ FIXED: Raise the exception instead of returning it
+                raise e
             # ✅ Handle other potential errors
             raise RuntimeError(f"Gemini generation failed: {str(e)}")
 
@@ -225,10 +240,10 @@ class ModelManager:
             )
             return response.text.strip()
 
-        except ServerError as e:
-            # ✅ FIXED: Raise the exception instead of returning it
-            raise e
         except Exception as e:
+            if _is_server_error(e):
+                # ✅ FIXED: Raise the exception instead of returning it
+                raise e
             # ✅ Handle other potential errors
             raise RuntimeError(f"Gemini content generation failed: {str(e)}")
 

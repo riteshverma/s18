@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s18share-redis
+  namespace: s18share
+  labels:
+    app: s18share-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: s18share-redis
+  template:
+    metadata:
+      labels:
+        app: s18share-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - redis-server
+            - --appendonly
+            - "yes"
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s18share-redis
+  namespace: s18share
+  labels:
+    app: s18share-redis
+spec:
+  selector:
+    app: s18share-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379

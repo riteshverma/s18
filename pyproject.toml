@@ -43,4 +43,5 @@ dependencies = [
     "prometheus-client>=0.21.1",
     "pyjwt[crypto]>=2.10.1",
     "ag-ui-protocol>=0.1.18",
+    "celery[redis]>=5.6.3",
 ]
