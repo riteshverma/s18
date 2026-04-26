@@ -8,17 +8,11 @@ groups:
           /
           sum(rate(s18_api_requests_total[5m]))
 
-      - record: wiseai:sli_api_availability:ratio_5m
-        expr: s18:sli_api_availability:ratio_5m
-
       - record: s18:sli_agent_run_success:ratio_5m
         expr: |
           sum(rate(s18_orchestrator_runs_total{status="success"}[5m]))
           /
           sum(rate(s18_orchestrator_runs_total[5m]))
-
-      - record: wiseai:sli_agent_run_success:ratio_5m
-        expr: s18:sli_agent_run_success:ratio_5m
 
       - record: s18:sli_retrieval_coverage:ratio_5m
         expr: |
@@ -28,26 +22,17 @@ groups:
             sum(rate(s18_rag_requests_total[5m]))
           )
 
-      - record: wiseai:sli_retrieval_coverage:ratio_5m
-        expr: s18:sli_retrieval_coverage:ratio_5m
-
       - record: s18:sli_mcp_reliability:ratio_5m
         expr: |
           sum(rate(s18_mcp_tool_calls_total{status="success"}[5m]))
           /
           sum(rate(s18_mcp_tool_calls_total[5m]))
 
-      - record: wiseai:sli_mcp_reliability:ratio_5m
-        expr: s18:sli_mcp_reliability:ratio_5m
-
       - record: s18:sli_memory_write_integrity:ratio_5m
         expr: |
           sum(rate(s18_memory_operations_total{status="success"}[5m]))
           /
           sum(rate(s18_memory_operations_total[5m]))
-
-      - record: wiseai:sli_memory_write_integrity:ratio_5m
-        expr: s18:sli_memory_write_integrity:ratio_5m
 
   - name: s18_latency_rules
     interval: 30s
@@ -59,15 +44,9 @@ groups:
             sum by (le) (rate(s18_api_request_latency_ms_bucket[5m]))
           )
 
-      - record: wiseai:api_latency_p95_ms:5m
-        expr: s18:api_latency_p95_ms:5m
-
       - record: s18:orchestrator_run_latency_p95_ms:5m
         expr: |
           histogram_quantile(
             0.95,
             sum by (le) (rate(s18_orchestrator_run_latency_ms_bucket[5m]))
           )
-
-      - record: wiseai:orchestrator_run_latency_p95_ms:5m
-        expr: s18:orchestrator_run_latency_p95_ms:5m
