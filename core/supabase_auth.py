@@ -1,4 +1,5 @@
 import os
+import asyncio
 from typing import Any, Dict, Optional
 
 from fastapi import Header, HTTPException
@@ -7,26 +8,21 @@ from jwt import InvalidTokenError
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWKClientError
 
-from config.settings_loader import settings
+from core.supabase_config import get_supabase_config
 
-
-def _auth_settings() -> Dict[str, Any]:
-    return settings.get("auth", {})
+# Keep one PyJWKClient per JWKS URL for the lifetime of the process. PyJWKClient
+# caches signing keys internally; recreating the client (as an earlier version
+# did every 5 minutes) defeated that cache and forced a JWKS network fetch on
+# the first request of every window.
+_JWKS_CLIENT_CACHE: Dict[str, "PyJWKClient"] = {}
 
 
 def is_auth_enabled() -> bool:
-    env_override = os.getenv("AUTH_ENABLED")
-    if env_override is not None:
-        return env_override.strip().lower() in {"1", "true", "yes", "on"}
-    return bool(_auth_settings().get("enabled", False))
+    return bool(get_supabase_config().get("auth_enabled", False))
 
 
 def _get_supabase_url() -> str:
-    return (
-        os.getenv("SUPABASE_URL")
-        or _auth_settings().get("supabase_url")
-        or ""
-    ).rstrip("/")
+    return get_supabase_config().get("url", "")
 
 
 def _get_expected_issuer(supabase_url: str) -> str:
@@ -34,7 +30,7 @@ def _get_expected_issuer(supabase_url: str) -> str:
 
 
 def _get_expected_audience() -> Optional[str]:
-    return os.getenv("SUPABASE_JWT_AUDIENCE") or _auth_settings().get("supabase_jwt_audience", "authenticated")
+    return get_supabase_config().get("jwt_audience")
 
 
 def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
@@ -54,7 +50,10 @@ def verify_supabase_jwt(token: str, supabase_url: str, audience: Optional[str]) 
     allowed_algs = {"RS256", "ES256"}
     if token_alg not in allowed_algs:
         raise InvalidTokenError("Unsupported JWT signing algorithm")
-    jwk_client = PyJWKClient(jwks_url)
+    jwk_client = _JWKS_CLIENT_CACHE.get(jwks_url)
+    if jwk_client is None:
+        jwk_client = PyJWKClient(jwks_url)
+        _JWKS_CLIENT_CACHE[jwks_url] = jwk_client
     signing_key = jwk_client.get_signing_key_from_jwt(token)
     decode_kwargs: Dict[str, Any] = {
         "algorithms": [token_alg],
@@ -90,7 +89,7 @@ async def require_supabase_user(
     audience = _get_expected_audience()
 
     try:
-        claims = verify_supabase_jwt(token, supabase_url, audience)
+        claims = await asyncio.to_thread(verify_supabase_jwt, token, supabase_url, audience)
     except (InvalidTokenError, PyJWKClientError):
         raise HTTPException(status_code=401, detail="Invalid or expired Supabase access token")
     except Exception:

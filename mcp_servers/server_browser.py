@@ -199,6 +199,31 @@ async def browser_use_action(string: str, headless: bool = True) -> str:
             except ImportError:
                 print("⚠️ langchain_ollama not installed, falling back to Gemini")
                 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
+        elif model_provider == "azure_openai":
+            try:
+                from langchain_openai import AzureChatOpenAI  # type: ignore[reportMissingImports]
+            except ImportError:
+                print("⚠️ langchain_openai not installed, falling back to Gemini")
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
+            else:
+                try:
+                    from config.settings_loader import load_settings
+                    azure_cfg = load_settings().get("azure_openai", {})
+                    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", azure_cfg.get("endpoint", ""))
+                    api_version = os.getenv("OPENAI_API_VERSION", azure_cfg.get("api_version", "2024-10-21"))
+                    api_key_env = azure_cfg.get("api_key_env", "AZURE_OPENAI_API_KEY")
+                    api_key = os.getenv(api_key_env) or os.getenv("AZURE_OPENAI_API_KEY", "")
+                    llm = AzureChatOpenAI(
+                        azure_endpoint=endpoint,
+                        api_key=api_key,
+                        api_version=api_version,
+                        azure_deployment=model_name,
+                        temperature=0.2,
+                    )
+                    print(f"☁️ Browser Use: Using Azure OpenAI deployment {model_name}")
+                except Exception as e:
+                    print(f"⚠️ Azure OpenAI init failed ({e}), falling back to Gemini")
+                    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
         else:
             llm = ChatGoogleGenerativeAI(model=model_name, google_api_key=os.getenv("GEMINI_API_KEY"))
             print(f"☁️ Browser Use: Using Gemini model {model_name}")

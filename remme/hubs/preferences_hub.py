@@ -113,6 +113,7 @@ class PreferencesHub(BaseHub):
             "DistillerAgent": "coding",
             "FormatterAgent": "formatting",
             "RetrieverAgent": "research",
+            "EHRDataMinerAgent": "research",
             "ThinkerAgent": "reasoning",
             "ClarificationAgent": "clarification",
         }

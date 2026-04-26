@@ -4,11 +4,44 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 import sys
+import json
 
 # MCP Protocol Safety: Redirect all rich output to stderr
 console = Console(stderr=True)
 def print(*args, **kwargs):
     console.print(*args, **kwargs)
+
+
+def sanitize_io_keys_list(keys):
+    """
+    Normalize reads/writes to a list of string keys (hashable).
+    Prevents 'unhashable type: dict' when planner or session data has dicts.
+    Single-key dicts like {"key": "cbc_results"} become the value for globals_schema lookup.
+    """
+    if keys is None:
+        return []
+    if not isinstance(keys, list):
+        keys = [keys]
+    out = []
+    for item in keys:
+        if isinstance(item, str):
+            key = item.strip()
+        elif isinstance(item, dict):
+            if len(item) == 1:
+                k, v = next(iter(item.items()))
+                if isinstance(v, str) and v.strip():
+                    key = v.strip()
+                else:
+                    key = json.dumps(item, sort_keys=True, default=str)
+            else:
+                key = json.dumps(item, sort_keys=True, default=str)
+        else:
+            key = str(item).strip()
+        if not key:
+            continue
+        if key not in out:
+            out.append(key)
+    return out
 
 
 def log_step(title: str, payload=None, symbol: str = "🟢"):

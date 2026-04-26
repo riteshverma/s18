@@ -1,0 +1,22 @@
+[
+  {
+    "name": "finance_budget_triage",
+    "payload": {
+      "query": "Analyze monthly expenses and suggest three budget optimizations.",
+      "integration_id": "default",
+      "workflow_id": "finance_budgeting",
+      "contract_version": "v1",
+      "source_system": "benchmark"
+    }
+  },
+  {
+    "name": "travel_itinerary",
+    "payload": {
+      "query": "Plan a 3-day Tokyo itinerary with a medium budget and public transport.",
+      "integration_id": "default",
+      "workflow_id": "travel_itinerary",
+      "contract_version": "v1",
+      "source_system": "benchmark"
+    }
+  }
+]

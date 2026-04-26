@@ -2,21 +2,312 @@
 
 **Agentic AI** – A FastAPI backend for AI agents with memory, RAG, MCP servers, scheduled jobs, and a skills system.
 
+![Workflow Agnostic](https://img.shields.io/badge/Architecture-Workflow--Agnostic-2f855a)
+![MCP Hub](https://img.shields.io/badge/MCP-Orchestration_Hub-blue)
+![Docker CI](https://img.shields.io/badge/CI-Docker%20%2B%20Tests-success)
+
 - **Python:** 3.11+
 - **Version:** 0.2.0
 
----
+## The magic moment (under 30 seconds)
+
+**One sentence:** Send a natural-language job to **`POST /runs`**, and S18 orchestrates an **agent loop** that can call **REMME memory**, **RAG**, and **MCP tools** (browser, sandbox, custom servers) behind one canonical contract—optionally **verified by Supabase JWT** and **audited to Supabase tables**.
+
+**Proof in three steps:** `uv sync` → put `GEMINI_API_KEY` in `.env` → `uv run python api.py` → open **`/docs`** and execute **`POST /runs`** with `{"query": "…"}`. You will see a run id and the pipeline come alive without wiring a separate orchestration framework.
+
+**Go deeper in five minutes:** [docs/QUICKSTART_5_MIN.md](docs/QUICKSTART_5_MIN.md) (git clone → running agent, Swagger UI as the built-in front end).
+
+## Architecture at a glance
+
+S18 is not “a single LLM route.” The **FastAPI routers** (`/runs`, `/mcp`, `/rag`, `/remme`, …) sit in front of an **agent loop** and a **MultiMCP** layer that spawns and talks to **stdio MCP servers**. **Supabase** is the trust boundary (JWT via JWKS) and optional persistence—not a stand-in for the orchestration core.
+
+```mermaid
+flowchart LR
+  subgraph clients [Clients]
+    WEB[Browser / partner UI]
+    APIc[curl / SDK / Wise-AI]
+  end
+
+  subgraph s18 [S18Share FastAPI]
+    RT[routers /runs /mcp /rag /remme ...]
+    LOOP[Agent loop + adapters]
+    MM[MultiMCP]
+  end
+
+  subgraph mcp [MCP layer]
+    P1[RAG / FAISS]
+    P2[Browser / web tools]
+    P3[Sandbox + custom servers]
+  end
+
+  subgraph supa [Supabase]
+    JWKS[JWT verify via JWKS]
+    TBL[(Optional tables: audit + clinical)]
+  end
+
+  WEB -->|Bearer when AUTH enabled| RT
+  APIc --> RT
+  RT --> LOOP
+  LOOP --> MM
+  MM --> P1
+  MM --> P2
+  MM --> P3
+  RT -.-> JWKS
+  RT -.->|SUPABASE_LOGGING_ENABLED| TBL
+```
+
+## Start Here
+
+If you are new to this repo, use this sequence:
+
+1. **Install deps:** `uv sync`
+2. **Set env:** copy `.env.example` to `.env`, then set `GEMINI_API_KEY`
+3. **Run API:** `uv run python api.py`
+4. **Verify:** open `http://localhost:8000/health` and `http://localhost:8000/docs`
+5. **Run a canonical workflow:** `POST /runs` with optional integration metadata (see [5-minute quickstart](docs/QUICKSTART_5_MIN.md) for the shortest path)
+
+Key docs for common tasks:
+
+- **Run contract and adapter architecture:** `integrations/contracts.py`, `integrations/adapters/*`
+- **Settings and runtime overrides:** `config/settings.json`, `config/settings_loader.py`
+- **Wise-AI integration details:** [Wise-AI Integration Sync](#wise-ai-integration-sync-mar-2026)
+- **Docker + monitoring:** [Docker](#docker), [Monitoring (Dev + Staging Baseline)](#monitoring-dev--staging-baseline)
+
+## Audience Paths
+
+### Developer quickstart
+
+Use this path if you want to run code and ship features quickly.
+
+1. Follow [Quick start](#quick-start) (deps, env, run API).
+2. Send a run request using [Workflow-agnostic integrations](#workflow-agnostic-integrations-apr-2026).
+3. Use [Project structure](#project-structure) to find where to change code.
+4. Validate with tests in `tests/` and scripts in `scripts/`.
+
+Primary files:
+
+- `integrations/contracts.py`
+- `integrations/adapters/*`
+- `routers/runs.py`
+- `config/settings_loader.py`
+
+### Platform/operator
+
+Use this path if you manage deployment, runtime reliability, and observability.
+
+1. Start with [Docker](#docker) for local/staging orchestration.
+2. Configure metrics/alerts via [Monitoring (Dev + Staging Baseline)](#monitoring-dev--staging-baseline).
+3. Review runtime behavior in [Configuration](#configuration) (`config/settings*.json`).
+4. Track auth/logging posture in [Quick start](#quick-start) -> Supabase integration contract.
+
+Primary files:
+
+- `docker-compose.yml`
+- `monitoring/docker-compose.monitoring.yml`
+- `monitoring/prometheus/`
+- `config/settings.json`
+
+### Integration partner (wise-ai)
+
+Use this path if you are integrating S18 with wise-ai workflows/endpoints.
+
+1. Read [Wise-AI Integration Sync (Mar 2026)](#wise-ai-integration-sync-mar-2026).
+2. Set `EXTERNAL_MOCKEHR_BASE_URL` (or legacy `WISE_MOCKEHR_BASE_URL`) and verify endpoint reachability.
+3. Send canonical `POST /runs` payloads with `integration_id=wiseai`, `workflow_id=cdss`.
+4. Run the cross-stack verification commands in the Wise-AI section.
+
+Primary files:
+
+- `integrations/adapters/wiseai.py`
+- `config/integrations/wiseai_cdss_v1.json`
+- `tests/integrations/`
+
+## Document Map
+
+- [The magic moment (under 30 seconds)](#the-magic-moment-under-30-seconds)
+- [Architecture at a glance](#architecture-at-a-glance)
+- [5-minute quickstart](docs/QUICKSTART_5_MIN.md)
+- [Start Here](#start-here)
+- [Audience Paths](#audience-paths)
+- [Developer quickstart](#developer-quickstart)
+- [Platform/operator](#platformoperator)
+- [Integration partner (wise-ai)](#integration-partner-wise-ai)
+- [Workflow-agnostic integrations (Apr 2026)](#workflow-agnostic-integrations-apr-2026)
+- [Agnostic example workflows](#agnostic-example-workflows)
+- [MCP marketplace integration](#mcp-marketplace-integration)
+- [Local-first profiles](#local-first-profiles)
+- [Features](#features)
+- [Harness jobs (trusted CLI runner)](#harness-jobs-trusted-cli-runner)
+- [A2A and AG-UI direction](#a2a-and-ag-ui-direction)
+- [Quick start](#quick-start)
+- [Docker](#docker)
+- [Monitoring (Dev + Staging Baseline)](#monitoring-dev--staging-baseline)
+- [Engineering rigor signals](#engineering-rigor-signals)
+- [Project structure](#project-structure)
+- [Configuration](#configuration)
+- [Wise-AI Integration Sync (Mar 2026)](#wise-ai-integration-sync-mar-2026)
+- [License](#license)
+
+## Workflow-agnostic integrations (Apr 2026)
+
+S18Share is designed to **decouple external product/workflow specifics from the orchestration core**. Ingress requests are normalized into a **canonical run contract**, then routed through an **integration adapter** selected by `integration_id` (or `source_system` fallback).
+
+- **Canonical contract models:** `integrations/contracts.py`
+- **Adapter interface + implementations:** `integrations/base.py`, `integrations/adapters/*`
+- **Adapter registry + backward-compatible aliases:** `integrations/registry.py`
+- **Productized core import surface:** `s18_engine/`
+- **Config-driven integration profiles:** `config/integrations/*.json` (example: `wiseai_cdss_v1.json`)
+- **Architecture deep-dive:** `docs/architecture/S18_WORKFLOW_AGNOSTIC_TARGET.md`
+
+### Quick start: run with canonical metadata
+
+`POST /runs` accepts optional integration metadata. If omitted, S18 falls back to the `default` adapter (`integration_id=default`, `workflow_id=generic`, `contract_version=v1`).
+
+```bash
+curl -X POST "http://localhost:8000/runs" \
+  -H "Authorization: Bearer <supabase_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "interpret CBC and suggest next steps",
+    "integration_id": "wiseai",
+    "workflow_id": "cdss",
+    "contract_version": "v1",
+    "source_system": "wiseai",
+    "external_event_id": "evt_123",
+    "consent_ref": "consent_abc",
+    "raw_payload": {"hemoglobin": 12.1, "wbc": 7.5, "platelets": 220}
+  }'
+```
+
+### Add a new integration (high level)
+
+- Implement an adapter in `integrations/adapters/<your_integration>.py` (map **raw → canonical**, and **canonical result → response envelope**).
+- Add a profile `config/integrations/<integration>_<workflow>_<version>.json` for risk/response profiles and field aliases.
+- Add contract/registry/adapter tests under `tests/integrations/`.
+
+## Agnostic example workflows
+
+These examples are intentionally non-medical to demonstrate reusable core orchestration:
+
+- `examples/personal_finance/` - expense triage and budget actions
+- `examples/travel_planner/` - itinerary and logistics planning
+
+Run either example by sending its `run_payload.json` to `POST /runs`.
+
+## MCP marketplace integration
+
+S18 can operate as a central MCP hub for built-in and external servers.
+
+- Integration guide: `docs/mcp/MCP_MARKETPLACE_INTEGRATION.md`
+- Dynamic server controls: `GET /mcp/servers`, `POST /mcp/servers`, `POST /mcp/refresh/{server}`
+- One-click server scaffold:
+
+```bash
+python scripts/scaffold_mcp_server.py --name weather
+```
+
+The scaffold creates a ready-to-run MCP server starter in `mcp_servers/custom/`.
+
+## Local-first profiles
+
+Use profile overlays to run S18 in laptop/privacy-focused modes without editing
+tracked settings files.
+
+Available profiles under `config/profiles/`:
+
+- `local-laptop-gemma`
+- `local-laptop-qwen`
+- `privacy-first`
+
+Set a profile at runtime:
+
+```bash
+S18_PROFILE=local-laptop-gemma uv run python api.py
+```
+
+PowerShell:
+
+```powershell
+$env:S18_PROFILE="local-laptop-gemma"; uv run python api.py
+```
+
+Benchmark local vs cloud latency using:
+
+```bash
+python benchmarks/local_vs_cloud/benchmark_runs.py \
+  --base-url http://localhost:8000 \
+  --profile local-laptop-gemma \
+  --scenario-file benchmarks/local_vs_cloud/scenarios.json \
+  --iterations 2
+```
+
+### Tenancy baseline (Starter default, Growth-ready routing)
+
+- Default tier is `starter` (shared-schema style) and is configured under `config/settings*.json` -> `tenancy`.
+- `POST /runs` accepts optional `tenant_id`, `tenant_tier`, and `data_region`.
+- If omitted, S18 applies defaults (`tenant_id=default`, `tenant_tier=starter`, `data_region=in`).
+- Growth migration hook is pre-wired via `tenancy.growth_routing_enabled` so selected healthcare tenants can be routed to isolated infrastructure later without changing request contracts.
 
 ## Features
 
 - **Agent loop** – Multi-step planning and execution with retries and circuit breakers
 - **REMME (Remember Me)** – User memory and preferences: extraction, staging, normalizer, belief updates, and hubs (Preferences, Operating Context, Soft Identity). See [remme/ARCHITECTURE.md](remme/ARCHITECTURE.md).
+- **GBrain memory bridge (optional)** – Interop layer that can mirror REMME memories/hubs into GBrain pages (dual-write) and optionally cut reads over to the bridge. See `docs/architecture/GBRAIN_COMPATIBILITY.md`.
 - **RAG** – Document indexing and search (FAISS + optional BM25), chunking, and ingestion
 - **MCP servers** – RAG, browser, sandbox, and configurable external servers
 - **Scheduler** – Cron-style jobs with skill routing (e.g. Market Analyst, System Monitor, Web Clipper) and inbox integration
 - **Skills** – Pluggable skills with intent matching and run/success hooks
 - **Streaming** – SSE endpoint for real-time events from the event bus
+- **Harness jobs** – Auth-protected background jobs that run trusted local CLIs (`codex`, `claude`, `gemini`) with persisted state and SSE output events
 - **Config** – Centralized settings in `config/` (Ollama, models, RAG, agent, REMME)
+
+---
+
+## Harness jobs (trusted CLI runner)
+
+The harness subsystem adds a BoringOS-style trusted runner to S18: the app can launch CLI jobs for `codex`, `claude`, and `gemini`, assuming those CLIs are already installed and authenticated on the host/deployed environment.
+
+### Endpoints
+
+All routes are under `/harness` and are protected by Supabase-backed auth (`require_supabase_user`).
+
+- `POST /harness/jobs` - create a new job and queue background execution
+- `GET /harness/jobs` - list jobs (supports `limit`)
+- `GET /harness/jobs/{job_id}` - fetch one persisted job state
+- `POST /harness/jobs/{job_id}/stop` - request termination for a running job
+- `POST /harness/jobs/{job_id}/resume` - publish a resume signal for a job
+- `GET /harness/jobs/{job_id}/events` - stream job events over SSE (with optional history replay)
+
+### Provider behavior and runtime model
+
+- Provider execution plans are built in `harness/drivers.py`.
+- `codex` defaults to stdin prompt mode; `claude` and `gemini` use `-p <prompt>` by default.
+- Runtime process lifecycle (accepted -> starting -> running -> completed/failed/cancelled/timeout), output tail retention, timeout handling, and event publishing are managed in `harness/runtime.py`.
+- Job state is persisted via JSON files and indexed listings in `harness/store.py`.
+
+### Notes and current limitations
+
+- Harness is a trusted local CLI runner, not a sandbox.
+- Storage is currently file-based and not user-scoped by job ownership.
+- The `resume` endpoint currently emits a resume event/state signal; it should not be interpreted as guaranteed process restart semantics.
+- Router wiring is included in `api.py`, with a shared lazy runtime in `shared/state.py`.
+
+### Verification coverage
+
+Current harness-focused tests:
+
+- `tests/harness/test_drivers.py`
+- `tests/harness/test_runtime.py`
+- `tests/harness/test_harness_router.py`
+
+## A2A and AG-UI direction
+
+Alongside harness, S18 is evolving toward protocol-level interoperability:
+
+- **A2A (agent-to-agent):** direction for standardized inter-agent delegation and integration across external agent systems.
+- **AG-UI (agent-to-user interface):** direction for streaming structured agent lifecycle/state/tool events to UI clients over SSE.
+
+This is an active architecture track that complements harness jobs. Treat this section as direction and in-progress integration intent unless corresponding route/module references are present in the current tree.
 
 ---
 
@@ -53,6 +344,10 @@ Optional:
 
 - **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
+- **S18_HARNESS_STATE_DIR** – Optional override for harness job storage location. If unset, harness state defaults to OS-local app data (for example `%LOCALAPPDATA%/S18Share/harness_jobs` on Windows).
+- **S18_CODEX_BIN / S18_CLAUDE_BIN / S18_GEMINI_BIN** – Optional explicit binary paths for provider CLIs; otherwise harness resolves providers from `PATH`.
+- **EXTERNAL_MOCKEHR_BASE_URL** – Preferred base URL of an upstream Mock EHR API. When set, the EHRDataMinerAgent's mockehr MCP fetches `/patients/{id}` and `/patients/{id}/labs` from that provider.
+- **WISE_MOCKEHR_BASE_URL** – Backward-compatible alias for existing wise-ai environments; used when `EXTERNAL_MOCKEHR_BASE_URL` is not set.
 
 ### Supabase integration contract (S18)
 
@@ -60,8 +355,9 @@ Optional:
 - Backend verifies the JWT on protected endpoints using Supabase JWKS (`/auth/v1/.well-known/jwks.json`) with issuer/audience checks (no backend-managed Supabase session).
 - If S18 is called through another backend/proxy, it also accepts `X-Forwarded-Authorization: Bearer <access_token>`.
 - Optional persistence can write to two Supabase tables:
-  - `agent_request_log` (inbound request/audit trail)
-  - `agent_result_log` (normalized run result payload)
+  - `ehr_request_log` (inbound request/audit trail)
+  - `ehr_clinical_result` (normalized RAC/CBC/ABDM/FHIR-aligned outcome)
+- Reference SQL schema: `docs/supabase_ehr_schema.sql`
 - Quick environment/table readiness check:
 
 ```bash
@@ -155,6 +451,7 @@ Monitoring assets are in `monitoring/` and run as an additive stack:
 - Prometheus config/rules: `monitoring/prometheus/`
 - Alertmanager config: `monitoring/alertmanager/`
 - Grafana provisioning/dashboard: `monitoring/grafana/`
+- Phoenix trace setup: `docs/monitoring/PHOENIX.md`
 
 ### Start API + Monitoring
 
@@ -175,6 +472,7 @@ docker compose -f monitoring/docker-compose.monitoring.yml up -d
 - Prometheus target page: [http://localhost:9090/targets](http://localhost:9090/targets)
 - Alertmanager: [http://localhost:9093](http://localhost:9093)
 - Grafana: [http://localhost:3000](http://localhost:3000) (`admin` / `admin`)
+- Phoenix (traces): [http://localhost:6006](http://localhost:6006)
 
 Expected key metric families:
 
@@ -186,6 +484,13 @@ Expected key metric families:
 - `s18_rag_requests_total`
 - `s18_mcp_tool_calls_total`
 - `s18_memory_operations_total`
+
+## Engineering rigor signals
+
+- CI now runs contract/settings test gates before Docker image build in `.github/workflows/docker-ci.yml`.
+- Integration contract coverage lives in `tests/integrations/`.
+- Runtime observability baseline includes Prometheus metrics, Grafana dashboards, and optional Phoenix trace UI under `monitoring/`.
+- MCP traces propagate `integration_id`, `workflow_id`, and `contract_version` for run segmentation.
 
 ### Port Overrides
 
@@ -216,8 +521,9 @@ The CI target uses pinned dependencies from `requirements-ci.txt` (exported from
 | ---- | ----------- |
 | `api.py` | FastAPI app, lifespan, CORS, router includes |
 | `core/` | Agent loop, scheduler, event bus, circuit breaker, persistence, model manager, skills |
+| `harness/` | Trusted CLI harness drivers, runtime, models, and JSON-backed store for harness jobs |
 | `remme/` | Memory and preferences pipeline (extractor, store, hubs, normalizer) |
-| `routers/` | API routes: RAG, remme, agent, chat, runs, stream, cron, skills, inbox, etc. |
+| `routers/` | API routes: RAG, remme, agent, chat, runs, stream, harness, cron, skills, inbox, etc. |
 | `mcp_servers/` | MCP server implementations (RAG, browser, sandbox, multi_mcp) |
 | `config/` | Settings loader, `settings.json`, `settings.defaults.json`, agent config |
 | `data/` | Inbox DB, system jobs/snapshot, RAG documents |
@@ -231,8 +537,80 @@ The CI target uses pinned dependencies from `requirements-ci.txt` (exported from
 ## Configuration
 
 - **Main settings:** `config/settings.json` (created from `config/settings.defaults.json` if missing).
+- **Override policy:** keep stable defaults in `config/settings.defaults.json`, keep environment-specific values in `config/settings.json`, and prefer env vars for runtime overrides (`AUTH_ENABLED`, `SUPABASE_*`, `TENANCY_*`, `RUN_POLL_TIMEOUT_SECONDS`).
 - **Agent prompts and MCP:** `config/agent_config.yaml`.
 - **REMME extraction prompt and options:** under `remme` in settings.
+- **GBrain bridge flags:** under `remme.gbrain` in `config/settings.defaults.json`:
+  - `enabled`, `dual_write`, `read_from_bridge`, `mirror_dir`, `server_id`
+
+### GBrain bridge setup (optional)
+
+GBrain runs Bun-first and can be wired as an MCP server (stdio). For the implemented mapping model and rollout plan, see `docs/architecture/GBRAIN_COMPATIBILITY.md`.
+
+One-time local setup (from repo root):
+
+```bash
+git clone https://github.com/garrytan/gbrain.git gbrain
+cd gbrain && bun install && bun run src/cli.ts init && cd ..
+```
+
+Verify MCP registration:
+
+```bash
+uv run python scripts/test_gbrain_mcp_registration.py
+uv run python scripts/test_gbrain_mcp_live.py
+```
+
+---
+
+## Wise-AI Integration Sync (Mar 2026)
+
+This section is a cross-repo integration reference. If you are onboarding to S18 itself, start with [Start Here](#start-here) and [Quick start](#quick-start).
+
+### Integration-focused technical changes completed
+
+- **MockEHR + Wise adapter path** - Wise-side MockEHR adapter and S18-compatible tool stubs were integrated for cross-repo interoperability, with S18 consuming MockEHR data through MCP flows.
+- **CBC schema hardening** - Added Pydantic clinical schema validation and follow-up fixes for CBC unit normalization and stable fast/full CDSS payload handling.
+- **MCP routing/tool-calling robustness** - Improved MCP routing, timeout handling, retry/error behavior, and agent alias support for more reliable tool execution.
+- **Supabase integration touchpoints** - Added/expanded Supabase-backed auth verification and optional request/result logging paths used by S18 integration flows.
+
+### Capstone issue-sync status (Wise-AI + S18 reconciliation)
+
+- **Closed as implemented** - `#69`, `#127`, `#128`
+- **Progress-updated and intentionally open** - `#67`, `#73`, `#129`, `#130`, `#156`, `#202`, `#205`, `#206`
+- **Kept open for future/compliance stage** - `#155`, `#210`, `#211`, and `#183+`
+- Detailed matrix and evidence links: `docs/governance/WISE_S18_issue_reconciliation_2026-03-17.md`
+
+### Fresh architecture reference (latest)
+
+- **Canonical (Mar 2026 sync)** - `docs/architecture/WISE_AI_CDSS_Architecture_2026-03.md`
+- **Previous conceptual baseline** - `docs/architecture/WISE_AI_CDSS_Architecture.md` in wise-ai/TSAI-EAG-Capstone
+
+### Full stack with wise-ai
+
+Set **`EXTERNAL_MOCKEHR_BASE_URL`** to the base URL of the upstream FastAPI app (Mock EHR). Existing wise-ai setups can continue using `WISE_MOCKEHR_BASE_URL` as a fallback alias. Use whatever host and port actually serve that API—for example `http://localhost:8000` when the provider runs on your machine, or a Compose service URL such as `http://backend:8000` when both stacks share a Docker network.
+
+For **Docker Compose** flows that run wise-ai together with S18 (local builds, images from GHCR, or the full-stack compose file), see the wise-ai repo: **[`deployment/docker/README.md`](https://github.com/wiseaihub/TSAI-EAG-Capstone/tree/main/deployment/docker)** — use the **Build and run locally**, **Run from GitHub Container Registry**, and **Full stack (wise-ai + S18Share)** subsections as needed.
+
+### Quick verification (local)
+
+Run API:
+
+```bash
+uv run python api.py
+```
+
+Run targeted integration tests:
+
+```bash
+uv run pytest tests/test_mockehr_mcp.py tests/test_clinical_schema.py test_e2e.py
+```
+
+Optional Supabase readiness check:
+
+```bash
+python scripts/check_supabase_integration.py
+```
 
 ---
 

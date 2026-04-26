@@ -14,8 +14,41 @@ from rich.prompt import Prompt
 from rich.panel import Panel
 from rich.text import Text
 
+
+def sanitize_io_keys_list(keys):
+    """Normalize reads/writes to string keys to avoid unhashable dict errors."""
+    if keys is None:
+        return []
+    if not isinstance(keys, list):
+        keys = [keys]
+    out = []
+    for item in keys:
+        if isinstance(item, str):
+            key = item.strip()
+        elif isinstance(item, dict):
+            if len(item) == 1:
+                _, v = next(iter(item.items()))
+                key = v.strip() if isinstance(v, str) and v.strip() else json.dumps(item, sort_keys=True, default=str)
+            else:
+                key = json.dumps(item, sort_keys=True, default=str)
+        else:
+            key = str(item).strip()
+        if key and key not in out:
+            out.append(key)
+    return out
+
+
 class ExecutionContextManager:
-    def __init__(self, plan_graph: dict, session_id: str = None, original_query: str = None, file_manifest: list = None, debug_mode: bool = False, api_mode: bool = True):
+    def __init__(
+        self,
+        plan_graph: dict,
+        session_id: str = None,
+        original_query: str = None,
+        file_manifest: list = None,
+        debug_mode: bool = False,
+        api_mode: bool = True,
+        storage_namespace: str = "shared",
+    ):
         # 🎯 Build NetworkX graph with ALL data
         self.plan_graph = nx.DiGraph()
         
@@ -33,6 +66,11 @@ class ExecutionContextManager:
         self.plan_graph.graph['created_at'] = datetime.utcnow().isoformat()
         self.plan_graph.graph['status'] = 'running'
         self.plan_graph.graph['globals_schema'] = {}
+        self.plan_graph.graph['api_mode'] = api_mode
+        self.plan_graph.graph['memory_context'] = None
+        self.plan_graph.graph['storage_namespace'] = storage_namespace or "shared"
+        if original_query is not None:
+            self.plan_graph.graph['globals_schema']['original_query'] = original_query
         self.failure_replan_requested = False
         self.failure_replan_attempts = 0
         self._failure_replan_payload = None
@@ -76,6 +114,7 @@ class ExecutionContextManager:
 
         self.debug_mode = debug_mode
         self._live_display = None
+        self._save_lock = asyncio.Lock()
 
     def stop(self):
         """Signal the execution loop to stop"""
@@ -191,8 +230,8 @@ class ExecutionContextManager:
         
         # Get node data for context
         node_data = self.plan_graph.nodes[step_id]
-        reads = node_data.get("reads", [])
-        
+        reads = sanitize_io_keys_list(node_data.get("reads", []))
+
         # Get globals_schema for injection
         globals_schema = self.plan_graph.graph['globals_schema'].copy()
         
@@ -313,7 +352,7 @@ class ExecutionContextManager:
             # but we can set a global flag or rely on the frontend seeing the "interaction_required" in output
             
             # We explicitly save here to ensure frontend sees the request
-            self._save_session()
+            await self.save_session_async()
             
             # Wait for input or stop
             while not self.stop_requested:
@@ -385,7 +424,7 @@ class ExecutionContextManager:
             try:
                 # Set status to waiting (visible to UI)
                 node_data['status'] = 'waiting_input'
-                self._save_session()
+                await self.save_session_async()
                 
                 user_response = await self._handle_user_interaction(output)
                 
@@ -393,7 +432,7 @@ class ExecutionContextManager:
                 if self.stop_requested:
                     node_data['status'] = 'failed'
                     node_data['error'] = 'Execution stopped by user during input.'
-                    self._save_session()
+                    await self.save_session_async()
                     return
 
                 writes_to = output.get("writes_to", "user_response")
@@ -427,7 +466,8 @@ class ExecutionContextManager:
         
         # EXTRACTION LOGIC - Handle both code execution results AND direct agent outputs
         globals_schema = self.plan_graph.graph['globals_schema']
-        
+        writes = sanitize_io_keys_list(node_data.get("writes", []))
+
         if writes:
             for write_key in writes:
                 extracted = False
@@ -466,12 +506,23 @@ class ExecutionContextManager:
                         print(f"✅ Extracted {write_key} = [Final Answer] (mapped from 'final_answer')")
                         extracted = True
                 
-                # Strategy 3: Emergency fallback - try to find any matching data
+                # Strategy 3: Fall back to response text or full output dict
                 if not extracted:
-                    print(f"⚠️  Could not extract {write_key}")
-                    # Set empty placeholder to prevent downstream errors
-                    globals_schema[write_key] = []
+                    if isinstance(output, dict) and isinstance(output.get("response"), str):
+                        globals_schema[write_key] = output["response"]
+                        print(f"⚠️  {write_key} not in output keys; stored output['response'] instead")
+                        extracted = True
+                    else:
+                        print(f"⚠️  Could not extract {write_key}")
+                        globals_schema[write_key] = []
         
+        # Propagate WISE fields (risk_level, confidence, flags) from reasoning agents
+        # so downstream nodes and the frontend can always find the latest assessment.
+        if isinstance(output, dict) and "risk_level" in output and isinstance(output.get("flags"), list):
+            globals_schema["_wise_risk_level"] = output["risk_level"]
+            globals_schema["_wise_confidence"] = output.get("confidence")
+            globals_schema["_wise_flags"] = output["flags"]
+
         # Store results
         node_data['status'] = 'completed'
         node_data['end_time'] = datetime.utcnow().isoformat()
@@ -511,11 +562,16 @@ class ExecutionContextManager:
     def get_inputs(self, reads):
         """Get input data from graph globals_schema"""
         inputs = {}
+        reads = sanitize_io_keys_list(reads)
         globals_schema = self.plan_graph.graph['globals_schema']
-        
+
         for read_key in reads:
             if read_key in globals_schema:
                 inputs[read_key] = globals_schema[read_key]
+            elif read_key == "original_query":
+                root_query = self.plan_graph.graph.get("original_query")
+                if root_query is not None:
+                    inputs[read_key] = root_query
             else:
                 print(f"⚠️  Missing dependency: '{read_key}' not found in globals_schema")
                 print(f"📋 Available keys: {list(globals_schema.keys())}")
@@ -584,11 +640,11 @@ class ExecutionContextManager:
         final_outputs = {}
         all_reads = set()
         all_writes = set()
-        
+
         for node_id in self.plan_graph.nodes:
             node_data = self.plan_graph.nodes[node_id]
-            all_reads.update(node_data.get("reads", []))
-            all_writes.update(node_data.get("writes", []))
+            all_reads.update(sanitize_io_keys_list(node_data.get("reads", [])))
+            all_writes.update(sanitize_io_keys_list(node_data.get("writes", [])))
         
         final_write_keys = all_writes - all_reads
         globals_schema = self.plan_graph.graph['globals_schema']
@@ -631,30 +687,48 @@ class ExecutionContextManager:
     def _save_session(self):
         """Save the NetworkX graph as session"""
         base_dir = Path(__file__).parent.parent / "memory" / "session_summaries_index"
+        storage_namespace = self.plan_graph.graph.get("storage_namespace", "shared")
         today = datetime.now()
-        date_dir = base_dir / str(today.year) / f"{today.month:02d}" / f"{today.day:02d}"
+        date_dir = base_dir / storage_namespace / str(today.year) / f"{today.month:02d}" / f"{today.day:02d}"
         date_dir.mkdir(parents=True, exist_ok=True)
         
         session_id = self.plan_graph.graph['session_id']
         session_file = date_dir / f"session_{session_id}.json"
         
         graph_data = nx.node_link_data(self.plan_graph)
-        
-        with open(session_file, 'w', encoding='utf-8') as f:
+        temp_file = session_file.with_suffix(".json.tmp")
+        with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(graph_data, f, indent=2, default=str, ensure_ascii=False)
+        temp_file.replace(session_file)
+
+    async def save_session_async(self):
+        async with self._save_lock:
+            await asyncio.to_thread(self._save_session)
 
     @classmethod
     def load_session(cls, session_file: Path, debug_mode: bool = False):
         """Load a NetworkX graph session from disk"""
         with open(session_file, 'r', encoding='utf-8') as f:
             graph_data = json.load(f)
-        
-        plan_graph = nx.node_link_graph(graph_data, edges="links")
-        
+
+        if "links" in graph_data:
+            plan_graph = nx.node_link_graph(graph_data, edges="links")
+        elif "edges" in graph_data:
+            plan_graph = nx.node_link_graph(graph_data, edges="edges")
+        else:
+            graph_data["edges"] = []
+            plan_graph = nx.node_link_graph(graph_data, edges="edges")
+
         context = cls.__new__(cls)
         context.plan_graph = plan_graph
         context.debug_mode = debug_mode
         context.stop_requested = False
+        context.api_mode = bool(plan_graph.graph.get("api_mode", True))
+        context.user_input_event = asyncio.Event()
+        context.user_input_value = None
+        context.memory_context = plan_graph.graph.get("memory_context")
+        context._live_display = None
+        context._save_lock = asyncio.Lock()
         context.failure_replan_requested = False
         context.failure_replan_attempts = 0
         context._failure_replan_payload = None

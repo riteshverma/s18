@@ -1,37 +1,40 @@
 import hashlib
 import json
-import os
+import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import httpx
+from core.supabase_config import get_supabase_config
 
-from config.settings_loader import settings
+logger = logging.getLogger("supabase_logging")
+_http_client: Optional[httpx.AsyncClient] = None
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _logging_settings() -> Dict[str, Any]:
-    return settings.get("supabase_logging", {})
-
-
 def is_logging_enabled() -> bool:
-    env_override = os.getenv("SUPABASE_LOGGING_ENABLED")
-    if env_override is not None:
-        return env_override.strip().lower() in {"1", "true", "yes", "on"}
-    return bool(_logging_settings().get("enabled", False))
+    return bool(get_supabase_config().get("logging_enabled", False))
 
 
 def _config() -> Dict[str, str]:
-    cfg = _logging_settings()
+    cfg = get_supabase_config()
     return {
-        "url": (os.getenv("SUPABASE_URL") or cfg.get("supabase_url") or "").rstrip("/"),
-        "service_key": os.getenv("SUPABASE_SERVICE_ROLE_KEY") or cfg.get("service_role_key", ""),
-        "request_table": cfg.get("request_table", "agent_request_log"),
-        "result_table": cfg.get("result_table", "agent_result_log"),
+        "url": cfg.get("url", ""),
+        "service_key": cfg.get("service_role_key", ""),
+        "request_table": cfg.get("request_table", "ehr_request_log"),
+        "result_table": cfg.get("result_table", "ehr_clinical_result"),
     }
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=12.0)
+    return _http_client
 
 
 def compute_payload_hash(query: str, raw_payload: Optional[Dict[str, Any]]) -> str:
@@ -63,19 +66,33 @@ async def _rest_upsert(table: str, row: Dict[str, Any], on_conflict: str) -> Opt
     }
     params = {"on_conflict": on_conflict}
 
-    try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
-            resp = await client.post(endpoint, headers=headers, params=params, json=[row])
-        if resp.status_code >= 300:
-            print(f"⚠️ Supabase upsert failed [{table}]: {resp.status_code} {resp.text[:250]}")
+    retries = 2
+    for attempt in range(retries + 1):
+        try:
+            resp = await _get_http_client().post(endpoint, headers=headers, params=params, json=[row])
+            if resp.status_code >= 500 and attempt < retries:
+                await asyncio.sleep(0.25 * (attempt + 1))
+                continue
+            if resp.status_code >= 300:
+                logger.warning(
+                    "Supabase upsert failed table=%s status=%s run_id=%s body=%s",
+                    table,
+                    resp.status_code,
+                    row.get("run_id"),
+                    resp.text[:250],
+                )
+                return None
+            data = resp.json()
+            if isinstance(data, list) and data:
+                logger.debug("Supabase upsert ok table=%s status=%s run_id=%s", table, resp.status_code, row.get("run_id"))
+                return data[0]
             return None
-        data = resp.json()
-        if isinstance(data, list) and data:
-            return data[0]
-        return None
-    except Exception as exc:
-        print(f"⚠️ Supabase upsert error [{table}]: {exc}")
-        return None
+        except Exception as exc:
+            if attempt < retries:
+                await asyncio.sleep(0.25 * (attempt + 1))
+                continue
+            logger.warning("Supabase upsert error table=%s run_id=%s error=%s", table, row.get("run_id"), exc)
+            return None
 
 
 async def log_inbound_request(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -120,7 +137,7 @@ async def update_request_status(
     return await _rest_upsert(_config()["request_table"], payload, on_conflict="idempotency_key")
 
 
-async def log_run_result(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def log_clinical_result(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not is_logging_enabled():
         return None
     payload = {
@@ -130,7 +147,7 @@ async def log_run_result(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "query_type": row.get("query_type", "generic"),
         "normalized_result": row.get("normalized_result"),
         "summary": row.get("summary"),
-        "priority_flag": row.get("priority_flag"),
+        "triage_flag": row.get("triage_flag"),
         "status": row.get("status", "completed"),
         "error_code": row.get("error_code"),
         "generated_at": row.get("generated_at") or _now_iso(),

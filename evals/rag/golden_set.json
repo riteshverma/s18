@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "description": "Seed golden set for S18 RAG retrieval evaluation. Expected sources are normalized paths from the indexed corpus.",
+  "queries": [
+    {
+      "id": "rag-architecture-cdss",
+      "question": "How does S18 connect the orchestrator to the RAG or FAISS layer for CDSS recommendations?",
+      "expected_sources": [
+        "docs/architecture/WISE_AI_CDSS_Architecture_2026-03.md"
+      ],
+      "required_terms": [
+        "orchestrator",
+        "rag",
+        "faiss",
+        "recommendation"
+      ]
+    },
+    {
+      "id": "rag-workflow-agnostic-mcp",
+      "question": "What is the workflow-agnostic target for passing integration metadata into MCP tool calls?",
+      "expected_sources": [
+        "docs/architecture/S18_WORKFLOW_AGNOSTIC_TARGET.md"
+      ],
+      "required_terms": [
+        "integration_id",
+        "workflow_id",
+        "contract_version",
+        "tracing"
+      ]
+    },
+    {
+      "id": "rag-phoenix-monitoring",
+      "question": "What is the current Phoenix trace posture in S18 monitoring?",
+      "expected_sources": [
+        "docs/monitoring/PHOENIX.md"
+      ],
+      "required_terms": [
+        "phoenix",
+        "trace",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "rag-governance-issue-129",
+      "question": "What remains before closing the RAG Pipeline Implementation governance issue?",
+      "expected_sources": [
+        "docs/governance/WISE_S18_issue_reconciliation_2026-03-17.md"
+      ],
+      "required_terms": [
+        "benchmark",
+        "rag",
+        "acceptance"
+      ]
+    },
+    {
+      "id": "rag-quickstart-ollama",
+      "question": "What does the quickstart say about Ollama and RAG-heavy paths?",
+      "expected_sources": [
+        "docs/QUICKSTART_5_MIN.md"
+      ],
+      "required_terms": [
+        "ollama",
+        "rag",
+        "embeddings"
+      ]
+    }
+  ]
+}

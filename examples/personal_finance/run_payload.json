@@ -1,0 +1,21 @@
+{
+  "query": "Analyze this month's expenses, highlight unusual costs, and suggest 3 budget actions.",
+  "integration_id": "default",
+  "workflow_id": "finance_budgeting",
+  "contract_version": "v1",
+  "source_system": "finance_app",
+  "external_event_id": "fin_evt_001",
+  "raw_payload": {
+    "currency": "USD",
+    "month": "2026-04",
+    "income": 7200,
+    "expenses": [
+      {"category": "rent", "amount": 2100},
+      {"category": "groceries", "amount": 640},
+      {"category": "transport", "amount": 220},
+      {"category": "subscriptions", "amount": 180},
+      {"category": "dining", "amount": 560},
+      {"category": "shopping", "amount": 890}
+    ]
+  }
+}

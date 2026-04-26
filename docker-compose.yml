@@ -10,9 +10,17 @@ services:
       - "8001:8000"
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      OPENAI_API_VERSION: ${OPENAI_API_VERSION:-2024-10-21}
+      AZURE_OPENAI_CHAT_DEPLOYMENT: ${AZURE_OPENAI_CHAT_DEPLOYMENT:-}
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:-}
       AUTH_ENABLED: ${S18_AUTH_ENABLED:-false}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
+      S18_RUN_EXECUTOR: ${S18_RUN_EXECUTOR:-in_process}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
       DEBUG_LOG_PATH: ${DEBUG_LOG_PATH:-/app/data/debug-f905fa.log}
     volumes:
       - ./data:/app/data
@@ -23,9 +31,41 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - ollama
+      - redis
     networks:
       - default
-      - s18_shared_net
+      - shared_integration_net
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: s18share-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "core.celery_app.celery_app", "worker", "--loglevel=INFO", "--concurrency=1"]
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AUTH_ENABLED: ${S18_AUTH_ENABLED:-false}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
+      S18_RUN_EXECUTOR: celery
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      DEBUG_LOG_PATH: ${DEBUG_LOG_PATH:-/app/data/debug-f905fa.log}
+    volumes:
+      - ./data:/app/data
+      - ./memory:/app/memory
+      - ./config:/app/config
+      - ./mcp_servers/faiss_index:/app/mcp_servers/faiss_index
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+      - ollama
+    networks:
+      - default
+      - shared_integration_net
 
   ollama:
     image: ollama/ollama:latest
@@ -37,12 +77,25 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - default
-      - s18_shared_net
+      - shared_integration_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: s18share-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - default
 
 volumes:
   ollama_data:
+  redis_data:
 
 networks:
-  s18_shared_net:
+  shared_integration_net:
     external: true
     name: docker_default

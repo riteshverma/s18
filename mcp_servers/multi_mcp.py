@@ -5,6 +5,8 @@ import shutil
 import json
 import os
 import subprocess
+import builtins
+import contextvars
 from pathlib import Path
 
 # Windows: ProactorEventLoop required for asyncio subprocess (uv run MCP server)
@@ -14,13 +16,21 @@ from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import Tool
-from rich import print
+from rich import print as rich_print
+from core.prometheus_metrics import MCP_TOOL_CALLS_TOTAL, MCP_TOOL_LATENCY_MS, elapsed_ms, now_ms
+from config.settings_loader import (
+    get_mcp_mode,
+    get_mcp_required_servers,
+    settings,
+)
 
 class MultiMCP:
     def __init__(self):
         self.exit_stack = AsyncExitStack()
         self.sessions = {}  # server_name -> session
         self.tools = {}     # server_name -> [Tool]
+        self.start_results = {}
+        self.start_completed = False
         
         # Robust path resolution
         self.base_dir = Path(__file__).parent
@@ -36,6 +46,62 @@ class MultiMCP:
         self.disabled_tools = set() # { "server:tool" }
         self.disabled_tools_path = self.base_dir.parent / "config" / "disabled_tools.json"
         self._load_disabled_tools()
+        self._trace_context: contextvars.ContextVar[dict] = contextvars.ContextVar(
+            "mcp_trace_context",
+            default={},
+        )
+
+    def get_mode(self) -> str:
+        """Return MCP operating mode."""
+        return get_mcp_mode()
+
+    def is_strict_mode(self) -> bool:
+        """Return whether strict MCP mode is enabled."""
+        return self.get_mode() == "strict"
+
+    def get_required_servers(self) -> list[str]:
+        """Return MCP servers required for strict mode readiness."""
+        return get_mcp_required_servers()
+
+    def should_use_cached_metadata(self) -> bool:
+        """Legacy mode prefers cache to preserve current startup behavior."""
+        return not self.is_strict_mode()
+
+    def _set_server_result(self, name: str, status: str, detail: str | None = None):
+        """Record MCP server startup result."""
+        result = {"status": status}
+        if detail:
+            result["detail"] = detail
+        self.start_results[name] = result
+
+    def get_health_status(self) -> dict:
+        """Return MCP readiness details for health endpoints."""
+        connected_servers = sorted(self.get_connected_servers())
+        required_servers = self.get_required_servers()
+        required_connected = all(
+            server in self.sessions for server in required_servers
+        )
+        if self.is_strict_mode():
+            mcp_ready = self.start_completed and required_connected
+        else:
+            mcp_ready = True
+        return {
+            "mode": self.get_mode(),
+            "mcp_ready": mcp_ready,
+            "start_completed": self.start_completed,
+            "connected_servers": connected_servers,
+            "required_servers": required_servers,
+            "start_results": dict(self.start_results),
+        }
+
+    def set_trace_context(self, trace_context: dict | None):
+        """Set request-scoped metadata and return reset token."""
+        return self._trace_context.set(trace_context or {})
+
+    def reset_trace_context(self, token):
+        """Reset request-scoped metadata with the provided token."""
+        if token is not None:
+            self._trace_context.reset(token)
 
     def _load_config(self) -> dict:
         """Load server configuration from JSON"""
@@ -115,6 +181,7 @@ class MultiMCP:
         # Skip if explicitly disabled
         if config.get("enabled", True) is False:
             print(f"  ⏭️ [dim]Server '{name}' is disabled in config. Skipping.[/dim]")
+            self._set_server_result(name, "disabled")
             return False
 
         try:
@@ -226,6 +293,31 @@ class MultiMCP:
             if env:
                 final_env.update(env)
 
+            # Optional working directory (e.g. GBrain needs repo root for TS imports)
+            cwd_param = None
+            cwd_cfg = config.get("cwd")
+            if cwd_cfg:
+                cwd_path = Path(cwd_cfg)
+                if not cwd_path.is_absolute():
+                    cwd_path = self.base_dir.parent / cwd_path
+                cwd_param = str(cwd_path.resolve())
+                if not Path(cwd_param).exists():
+                    detail = f"cwd does not exist: {cwd_param}"
+                    builtins.print(f"[MCP] {name} skipped: {detail}")
+                    self._set_server_result(name, "skipped", detail)
+                    return False
+
+            # Resolve Bun when not on PATH (typical on fresh Windows installs)
+            if cmd == "bun" and not shutil.which("bun"):
+                bun_exe = Path.home() / ".bun" / "bin" / ("bun.exe" if sys.platform == "win32" else "bun")
+                if bun_exe.is_file():
+                    cmd = str(bun_exe)
+                else:
+                    detail = "'bun' not found on PATH."
+                    builtins.print(f"[MCP] {name} skipped: {detail}")
+                    self._set_server_result(name, "skipped", detail)
+                    return False
+
             # Check if uv exists fallback
             if cmd == "uv" and not shutil.which("uv"):
                 cmd = sys.executable
@@ -242,11 +334,20 @@ class MultiMCP:
                      # This is Getting Complicated. Let's assume UV exists for 'stdio-git'.
                      pass # Rely on uv being present
 
+            # Skip gracefully if command is unavailable in current runtime.
+            cmd_path = Path(cmd)
+            if not cmd_path.is_absolute() and not shutil.which(cmd):
+                detail = f"command not found: {cmd}"
+                builtins.print(f"[MCP] {name} skipped: {detail}")
+                self._set_server_result(name, "skipped", detail)
+                return False
+
 
             server_params = StdioServerParameters(
                 command=cmd,
                 args=args,
-                env=final_env
+                env=final_env,
+                cwd=cwd_param,
             )
             
             # Connect with timeout
@@ -256,8 +357,9 @@ class MultiMCP:
                 await session.initialize()
                 
                 # List tools
-                if name in self._cached_metadata:
-                    print(f"  📦 [cyan]{name}[/cyan] tools loaded from cache.")
+                if self.should_use_cached_metadata() and name in self._cached_metadata:
+                    # Use ASCII-only logging via standard print to avoid Windows console encoding issues
+                    builtins.print(f"[MCP] {name} tools loaded from cache.")
                     cached_tools = []
                     for t_dict in self._cached_metadata[name]:
                         cached_tools.append(Tool(
@@ -266,35 +368,55 @@ class MultiMCP:
                             inputSchema=t_dict["inputSchema"]
                         ))
                     self.tools[name] = cached_tools
+                    self._set_server_result(name, "connected", "metadata_source=cache")
                 else:
                     result = await session.list_tools()
                     self.tools[name] = result.tools
                     self._save_to_cache(name, result.tools)
-                    print(f"  ✅ [cyan]{name}[/cyan] connected. Tools: {len(result.tools)}")
+                    builtins.print(f"[MCP] {name} connected. Tools: {len(result.tools)}")
+                    self._set_server_result(name, "connected", "metadata_source=live")
                 
                 self.sessions[name] = session
 
         except TimeoutError:
-             print(f"  ⏳ [yellow]{name}[/yellow] timed out during startup.")
+             builtins.print(f"[MCP] {name} timed out during startup.")
+             self._set_server_result(name, "timeout")
         except Exception as e:
             import traceback
-            print(f"  ❌ [red]{name}[/red] failed to start: {e}")
+            builtins.print(f"[MCP] {name} failed to start: {e}")
+            self._set_server_result(name, "failed", str(e))
             traceback.print_exc()
         except BaseException as e:
-            print(f"  ❌ [red]{name}[/red] CRITICAL FAILURE: {e}")
+            builtins.print(f"[MCP] {name} CRITICAL FAILURE: {e}")
+            self._set_server_result(name, "failed", str(e))
 
     async def start(self):
         """Start all configured servers"""
-        print("[bold green]🚀 Starting MCP Servers...[/bold green]")
+        # Use plain ASCII to avoid Windows console encoding issues with emojis
+        builtins.print("[MCP] Starting MCP Servers...")
+        self.start_results = {}
+        self.start_completed = False
         for name, config in self.server_configs.items():
             if config.get("enabled", True):
                 await self._start_server(name, config)
             else:
-                print(f"  ⏭️ [dim]Skipping disabled server: {name}[/dim]")
+                builtins.print(f"[MCP] Skipping disabled server: {name}")
+                self._set_server_result(name, "disabled")
+        self.start_completed = True
+        if self.is_strict_mode():
+            missing_required = [
+                server for server in self.get_required_servers()
+                if server not in self.sessions
+            ]
+            if missing_required:
+                raise RuntimeError(
+                    "Strict MCP mode requires connected servers: "
+                    + ", ".join(sorted(missing_required))
+                )
 
     async def stop(self):
         """Stop all servers"""
-        print("[bold yellow]🛑 Stopping MCP Servers...[/bold yellow]")
+        builtins.print("[MCP] Stopping MCP Servers...")
         await self.exit_stack.aclose()
 
     def get_all_tools(self) -> list:
@@ -356,12 +478,24 @@ class MultiMCP:
         """Call a tool on a specific server"""
         if server_name not in self.sessions:
             raise ValueError(f"Server '{server_name}' not connected")
-        
+        trace_context = self._trace_context.get()
+        if trace_context:
+            print(
+                f"[MCP trace] server={server_name} tool={tool_name} "
+                f"integration_id={trace_context.get('integration_id', 'default')} "
+                f"workflow_id={trace_context.get('workflow_id', 'generic')} "
+                f"contract_version={trace_context.get('contract_version', 'v1')}"
+            )
         return await self.sessions[server_name].call_tool(tool_name, arguments)
 
     # Helper to route tool call by finding which server has it
     async def route_tool_call(self, tool_name: str, arguments: dict):
         from core.circuit_breaker import get_breaker, CircuitOpenError
+        start_ms = now_ms()
+        trace_context = self._trace_context.get()
+        integration_id = trace_context.get("integration_id", "default")
+        workflow_id = trace_context.get("workflow_id", "generic")
+        contract_version = trace_context.get("contract_version", "v1")
         
         # Get or create circuit breaker for this tool
         breaker = get_breaker(tool_name, failure_threshold=5, recovery_timeout=60.0)
@@ -375,18 +509,75 @@ class MultiMCP:
             )
         
         try:
+            matching_servers = []
             for name, tools in self.tools.items():
                 for tool in tools:
-                    if tool.name == tool_name:
-                        result = await self.call_tool(name, tool_name, arguments)
-                        breaker.record_success()
-                        return result
-            raise ValueError(f"Tool '{tool_name}' not found in any server")
+                    if tool.name != tool_name:
+                        continue
+                    key = f"{name}:{tool_name}"
+                    if key in self.disabled_tools:
+                        continue
+                    matching_servers.append(name)
+
+            if not matching_servers:
+                raise ValueError(f"Tool '{tool_name}' not found in any enabled server")
+
+            # Deterministic conflict resolution for EHR retrieval tools.
+            if tool_name in {"get_patient_records", "search_labs"} and "mockehr" in matching_servers:
+                selected_server = "mockehr"
+            else:
+                selected_server = sorted(matching_servers)[0]
+                if len(matching_servers) > 1:
+                    print(
+                        f"  ⚠️ Tool collision for '{tool_name}', "
+                        f"choosing '{selected_server}' from {matching_servers}"
+                    )
+
+            timeout_seconds = float(settings.get("mcp", {}).get("tool_timeout_seconds", 45))
+            try:
+                result = await asyncio.wait_for(
+                    self.call_tool(selected_server, tool_name, arguments),
+                    timeout=timeout_seconds,
+                )
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(
+                    f"MCP tool timeout tool={tool_name} server={selected_server} timeout_seconds={timeout_seconds}"
+                ) from exc
+            breaker.record_success()
+            MCP_TOOL_CALLS_TOTAL.labels(
+                tool=tool_name,
+                status="success",
+                integration_id=integration_id,
+                workflow_id=workflow_id,
+                contract_version=contract_version,
+            ).inc()
+            return result
         except CircuitOpenError:
+            MCP_TOOL_CALLS_TOTAL.labels(
+                tool=tool_name,
+                status="circuit_open",
+                integration_id=integration_id,
+                workflow_id=workflow_id,
+                contract_version=contract_version,
+            ).inc()
             raise  # Re-raise circuit errors without recording failure
         except Exception as e:
             breaker.record_failure()
+            MCP_TOOL_CALLS_TOTAL.labels(
+                tool=tool_name,
+                status="error",
+                integration_id=integration_id,
+                workflow_id=workflow_id,
+                contract_version=contract_version,
+            ).inc()
             raise
+        finally:
+            MCP_TOOL_LATENCY_MS.labels(
+                tool=tool_name,
+                integration_id=integration_id,
+                workflow_id=workflow_id,
+                contract_version=contract_version,
+            ).observe(elapsed_ms(start_ms))
 
     def _load_cache(self) -> dict:
         """Load metadata cache from file"""
@@ -395,7 +586,7 @@ class MultiMCP:
                 import json
                 return json.loads(self.cache_path.read_text())
             except Exception as e:
-                print(f"  ⚠️ Failed to load MCP cache: {e}")
+                builtins.print(f"[MCP] Failed to load MCP cache: {e}")
         return {}
 
     def _save_to_cache(self, server_name: str, tools: list):
@@ -420,14 +611,14 @@ class MultiMCP:
             
             # Write back
             self.cache_path.write_text(json.dumps(cache, indent=2))
-            print(f"  💾 Cached metadata for [cyan]{server_name}[/cyan]")
+            builtins.print(f"[MCP] Cached metadata for {server_name}")
         except Exception as e:
-            print(f"  ⚠️ Failed to save MCP cache for {server_name}: {e}")
+            builtins.print(f"[MCP] Failed to save MCP cache for {server_name}: {e}")
 
     async def refresh_server(self, server_name: str):
         """Force refresh tool metadata for a server"""
         if server_name in self.sessions:
-            print(f"  🔄 Refreshing tools for [cyan]{server_name}[/cyan]...")
+            builtins.print(f"[MCP] Refreshing tools for {server_name}...")
             result = await self.sessions[server_name].list_tools()
             self.tools[server_name] = result.tools
             self._save_to_cache(server_name, result.tools)

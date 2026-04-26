@@ -1,3 +1,4 @@
+import re
 import yaml
 import json
 from pathlib import Path
@@ -5,9 +6,39 @@ from typing import Optional
 from core.model_manager import ModelManager
 from core.json_parser import parse_llm_json, parse_llm_json_or_fallback
 from core.utils import log_step, log_error
+from integrations.policies.output_hooks import apply_output_policy
 from PIL import Image
 from datetime import datetime
 import os
+
+# Alias map: planner-invented agent names -> actual agents in agent_config.yaml
+# Includes WISE CDSS architecture names so plans can use doc terminology (no refactor needed).
+AGENT_ALIASES = {
+    # General / planner-invented
+    "SearchLabsAgent": "RetrieverAgent",
+    "SummarizationAgent": "SummarizerAgent",
+    "NoteWriterAgent": "FormatterAgent",
+    "NoteWriter": "FormatterAgent",
+    "RAG": "RetrieverAgent",
+    "QA": "QAAgent",
+    "ParserAgent": "DistillerAgent",
+    "ReportGeneratorAgent": "FormatterAgent",
+    "NameExtractorAgent": "RetrieverAgent",
+    "InterpretationAgent": "ThinkerAgent",
+    "System": "ThinkerAgent",
+    # WISE CDSS architecture names -> existing S18 agents
+    "ClinicalReasoningAgent": "ThinkerAgent",
+    "ContextSynthesisAgent": "DistillerAgent",
+    "ResearchAgent": "RetrieverAgent",
+    "SafetyExplainabilityAgent": "ThinkerAgent",
+    "ConfidenceScoringAgent": "ThinkerAgent",
+    "SymptomAgent": "ThinkerAgent",
+    "CBCAgent": "EHRDataMinerAgent",
+    "TrendAgent": "EHRDataMinerAgent",
+    "ActionAgent": "FormatterAgent",
+    "ResponseAgent": "FormatterAgent",
+}
+
 
 class AgentRunner:
     def __init__(self, multi_mcp):
@@ -17,6 +48,8 @@ class AgentRunner:
         config_path = Path(__file__).parent.parent / "config/agent_config.yaml"
         with open(config_path, "r") as f:
             self.agent_configs = yaml.safe_load(f)["agents"]
+
+        self._agent_aliases = AGENT_ALIASES
     
     def calculate_cost(self, input_text: str, output_text: str) -> dict:
         """Calculate cost and token usage"""
@@ -95,34 +128,19 @@ class AgentRunner:
         output["plan_graph"] = pg
         return output
 
-    def _ensure_thinker_output_schema(self, output, raw_response: str) -> dict:
-        """
-        Ensure ThinkerAgent output includes the normalized fields expected downstream.
-        """
-        if isinstance(output, list) and output and isinstance(output[0], dict):
-            output = output[0]
-        if not isinstance(output, dict):
-            output = {"response": str(output) if output is not None else raw_response}
-        if "risk_level" not in output or output["risk_level"] not in ("low", "moderate", "high"):
-            output["risk_level"] = output.get("risk_level", "moderate")
-            if output["risk_level"] not in ("low", "moderate", "high"):
-                output["risk_level"] = "moderate"
-        if output.get("confidence") is None:
-            output["confidence"] = 0.5
-        else:
-            try:
-                output["confidence"] = float(output["confidence"])
-            except (TypeError, ValueError):
-                output["confidence"] = 0.5
-        if not isinstance(output.get("flags"), list):
-            output["flags"] = []
-        return output
-
     async def run_agent(self, agent_type: str, input_data: dict, image_path: Optional[str] = None) -> dict:
         """Run a specific agent with input data and optional image"""
-        
+        # Resolve planner-invented aliases to actual configured agents
+        agent_type = self._agent_aliases.get(agent_type, agent_type)
+
         if agent_type not in self.agent_configs:
-            raise ValueError(f"Unknown agent type: {agent_type}")
+            import sys
+            fallback = "ThinkerAgent"
+            print(
+                f"[WARN] Unknown agent type '{agent_type}'; falling back to {fallback}",
+                file=sys.stderr,
+            )
+            agent_type = fallback
             
         config = self.agent_configs[agent_type]
         
@@ -223,11 +241,15 @@ class AgentRunner:
                 except Exception:
                     output = parse_llm_json_or_fallback(response, fallback_key="response")
                 output = self._ensure_planner_plan_graph(output, response)
-            elif agent_type == "ThinkerAgent":
-                output = parse_llm_json_or_fallback(response, fallback_key="response")
-                output = self._ensure_thinker_output_schema(output, response)
             else:
                 output = parse_llm_json_or_fallback(response, fallback_key="response")
+            if agent_type != "PlannerAgent":
+                output = apply_output_policy(
+                    agent_type=agent_type,
+                    output=output,
+                    raw_response=response,
+                    input_data=input_data,
+                )
             
             # Robustness: Some models (like gemma3) wrap JSON in a list
             if isinstance(output, list) and len(output) > 0 and isinstance(output[0], dict):

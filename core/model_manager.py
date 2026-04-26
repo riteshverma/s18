@@ -4,8 +4,7 @@ import asyncio
 import json
 import yaml
 from pathlib import Path
-from google import genai
-from google.genai.errors import ServerError
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,6 +12,23 @@ load_dotenv()
 ROOT = Path(__file__).parent.parent
 MODELS_JSON = ROOT / "config" / "models.json"
 PROFILE_YAML = ROOT / "config" / "profiles.yaml"
+_genai = None
+_server_error_type = None
+
+
+def _load_genai():
+    global _genai, _server_error_type
+    if _genai is None:
+        from google import genai
+        from google.genai.errors import ServerError
+
+        _genai = genai
+        _server_error_type = ServerError
+    return _genai
+
+
+def _is_server_error(exc: Exception) -> bool:
+    return _server_error_type is not None and isinstance(exc, _server_error_type)
 
 class ModelManager:
     def __init__(self, model_name: str = None, provider: str = None):
@@ -23,17 +39,21 @@ class ModelManager:
             model_name: The model to use. Can be:
                 - A key from models.json (e.g., "gemini", "phi4")
                 - An actual model name (e.g., "gemini-2.5-flash", "llama3:8b")
-            provider: Optional explicit provider ("gemini" or "ollama").
+            provider: Optional explicit provider ("gemini", "ollama", or "azure_openai").
                       If provided, bypasses models.json lookup.
         """
         self.config = json.loads(MODELS_JSON.read_text())
         self.profile = yaml.safe_load(PROFILE_YAML.read_text())
+        self._azure_fallback_provider: Optional[str] = None
+        self._azure_fallback_model: Optional[str] = None
 
         # Load settings for Ollama URL
         try:
             from config.settings_loader import settings
+            self._settings = settings
             self.ollama_base_url = settings.get("ollama", {}).get("base_url", "http://127.0.0.1:11434")
         except:
+            self._settings = {}
             self.ollama_base_url = "http://127.0.0.1:11434"
 
         # 🎯 NEW: Support explicit provider specification (from settings)
@@ -49,7 +69,7 @@ class ModelManager:
                     "api_key_env": "GEMINI_API_KEY"
                 }
                 api_key = os.getenv("GEMINI_API_KEY")
-                self.client = genai.Client(api_key=api_key)
+                self.client = _load_genai().Client(api_key=api_key)
             elif provider == "ollama":
                 # Ollama: model_name is the Ollama model like "phi4" or "llama3:8b"
                 self.model_info = {
@@ -61,6 +81,29 @@ class ModelManager:
                     }
                 }
                 self.client = None  # Ollama uses HTTP, no client needed
+            elif provider == "azure_openai":
+                # Azure OpenAI: model_name is deployment name (chat deployment)
+                azure_cfg = self._settings.get("azure_openai", {})
+                endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", azure_cfg.get("endpoint", "")).rstrip("/")
+                api_version = os.getenv("OPENAI_API_VERSION", azure_cfg.get("api_version", "2024-10-21"))
+                key_env_name = azure_cfg.get("api_key_env", "AZURE_OPENAI_API_KEY")
+                api_key = os.getenv(key_env_name) or os.getenv("AZURE_OPENAI_API_KEY", "")
+                deployment = model_name or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or azure_cfg.get("chat_deployment", "")
+                if not endpoint or not api_key or not deployment:
+                    raise ValueError(
+                        "Azure OpenAI provider requires endpoint, API key, and chat deployment "
+                        "(configure AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT)."
+                    )
+                self.model_info = {
+                    "type": "azure_openai",
+                    "model": deployment,
+                    "endpoint": endpoint,
+                    "api_version": api_version,
+                    "api_key_env": key_env_name,
+                }
+                self.client = None
+                self._azure_fallback_provider = azure_cfg.get("fallback_provider")
+                self._azure_fallback_model = azure_cfg.get("fallback_model")
             else:
                 raise ValueError(f"Unknown provider: {provider}")
         else:
@@ -81,8 +124,36 @@ class ModelManager:
             # Initialize client based on model type
             if self.model_type == "gemini":
                 api_key = os.getenv("GEMINI_API_KEY")
-                self.client = genai.Client(api_key=api_key)
+                self.client = _load_genai().Client(api_key=api_key)
+            elif self.model_type == "azure_openai":
+                azure_cfg = self._settings.get("azure_openai", {})
+                endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", azure_cfg.get("endpoint", "")).rstrip("/")
+                api_version = os.getenv("OPENAI_API_VERSION", azure_cfg.get("api_version", "2024-10-21"))
+                key_env_name = azure_cfg.get("api_key_env", "AZURE_OPENAI_API_KEY")
+                deployment = (
+                    os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
+                    or azure_cfg.get("chat_deployment")
+                    or self.model_info.get("model", "")
+                )
+                self.model_info = {
+                    "type": "azure_openai",
+                    "model": deployment,
+                    "endpoint": endpoint,
+                    "api_version": api_version,
+                    "api_key_env": key_env_name,
+                }
+                self.client = None
+                self._azure_fallback_provider = azure_cfg.get("fallback_provider")
+                self._azure_fallback_model = azure_cfg.get("fallback_model")
             # Ollama doesn't need a persistent client
+
+        # Ollama timeout from config (used for completion stage; must allow ~240s+ per step)
+        if self.model_type == "ollama":
+            try:
+                from config.settings_loader import get_timeout
+                self._ollama_timeout_seconds = get_timeout()
+            except Exception:
+                self._ollama_timeout_seconds = 300
 
     async def generate_text(self, prompt: str) -> str:
         if self.model_type == "gemini":
@@ -90,6 +161,15 @@ class ModelManager:
 
         elif self.model_type == "ollama":
             return await self._ollama_generate(prompt)
+        elif self.model_type == "azure_openai":
+            try:
+                return await self._azure_generate(prompt)
+            except Exception as e:
+                fallback_manager = self._build_azure_fallback_manager()
+                if fallback_manager is None:
+                    raise RuntimeError(f"Azure OpenAI generation failed: {str(e)}")
+                print(f"[ModelManager] Azure generation failed; falling back to {fallback_manager.model_type}. Error: {e}")
+                return await fallback_manager.generate_text(prompt)
 
         raise NotImplementedError(f"Unsupported model type: {self.model_type}")
 
@@ -106,8 +186,77 @@ class ModelManager:
         elif self.model_type == "ollama":
             # Ollama multimodal: extract text and images separately
             return await self._ollama_generate_content(contents)
+        elif self.model_type == "azure_openai":
+            # Phase 1 migration: text content is supported directly; multimodal content
+            # temporarily uses fallback provider if configured.
+            has_non_text = any(not isinstance(c, str) for c in contents)
+            if has_non_text:
+                fallback_manager = self._build_azure_fallback_manager()
+                if fallback_manager is None:
+                    raise RuntimeError(
+                        "Azure OpenAI multimodal generation is not enabled yet. "
+                        "Configure azure_openai.fallback_provider for image content."
+                    )
+                return await fallback_manager.generate_content(contents)
+            prompt = "\n".join(c for c in contents if isinstance(c, str))
+            return await self.generate_text(prompt)
         
         raise NotImplementedError(f"Unsupported model type: {self.model_type}")
+
+    def _build_azure_fallback_manager(self) -> Optional["ModelManager"]:
+        provider = (self._azure_fallback_provider or "").strip().lower()
+        if provider not in {"gemini", "ollama"}:
+            return None
+        model_name = self._azure_fallback_model
+        if not model_name:
+            agent_settings = self._settings.get("agent", {})
+            if provider == "gemini":
+                model_name = agent_settings.get("default_model", "gemini-2.5-flash")
+            else:
+                model_name = self._settings.get("models", {}).get("semantic_chunking", "gemma3:4b")
+        try:
+            return ModelManager(model_name, provider=provider)
+        except Exception as e:
+            print(f"[ModelManager] Failed to initialize fallback provider {provider}: {e}")
+            return None
+
+    async def _azure_generate(self, prompt: str) -> str:
+        import aiohttp
+
+        endpoint = self.model_info["endpoint"]
+        deployment = self.model_info["model"]
+        api_version = self.model_info.get("api_version", "2024-10-21")
+        api_key_env = self.model_info.get("api_key_env", "AZURE_OPENAI_API_KEY")
+        api_key = os.getenv(api_key_env) or os.getenv("AZURE_OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("Azure OpenAI API key is missing.")
+
+        url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+        payload = {
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+        }
+
+        timeout = aiohttp.ClientTimeout(total=getattr(self, "_ollama_timeout_seconds", 300))
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                url,
+                headers={"api-key": api_key, "Content-Type": "application/json"},
+                json=payload,
+            ) as response:
+                body = await response.text()
+                if response.status >= 400:
+                    raise RuntimeError(f"Azure OpenAI HTTP {response.status}: {body[:500]}")
+                data = json.loads(body)
+                choices = data.get("choices", [])
+                if not choices:
+                    raise RuntimeError("Azure OpenAI returned no choices.")
+                message = choices[0].get("message", {})
+                content = message.get("content")
+                if isinstance(content, list):
+                    text_parts = [part.get("text", "") for part in content if isinstance(part, dict)]
+                    return "\n".join(p for p in text_parts if p).strip()
+                return (content or "").strip()
 
     async def _ollama_generate_content(self, contents: list) -> str:
         """Generate content with Ollama, supporting multimodal models like gemma3, llava, etc."""
@@ -155,7 +304,8 @@ class ModelManager:
         """Generate with Ollama using images (for multimodal models)."""
         try:
             import aiohttp
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=getattr(self, "_ollama_timeout_seconds", 300))
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     self.model_info["url"]["generate"],
                     json={
@@ -198,10 +348,10 @@ class ModelManager:
             )
             return response.text.strip()
 
-        except ServerError as e:
-            # ✅ FIXED: Raise the exception instead of returning it
-            raise e
         except Exception as e:
+            if _is_server_error(e):
+                # ✅ FIXED: Raise the exception instead of returning it
+                raise e
             # ✅ Handle other potential errors
             raise RuntimeError(f"Gemini generation failed: {str(e)}")
 
@@ -216,18 +366,19 @@ class ModelManager:
             )
             return response.text.strip()
 
-        except ServerError as e:
-            # ✅ FIXED: Raise the exception instead of returning it
-            raise e
         except Exception as e:
+            if _is_server_error(e):
+                # ✅ FIXED: Raise the exception instead of returning it
+                raise e
             # ✅ Handle other potential errors
             raise RuntimeError(f"Gemini content generation failed: {str(e)}")
 
     async def _ollama_generate(self, prompt: str) -> str:
         try:
-            # ✅ Use aiohttp for truly async requests
+            # ✅ Use aiohttp for truly async requests (timeout from config for run completion)
             import aiohttp
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=getattr(self, "_ollama_timeout_seconds", 300))
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     self.model_info["url"]["generate"],
                     json = {"model": self.model_info["model"], "prompt": prompt, "stream": False}
