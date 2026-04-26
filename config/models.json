@@ -1,9 +1,20 @@
 {
   "defaults": {
-    "text_generation": "gemini",
+    "text_generation": "azure-openai",
     "embedding": "nomic"
   },
   "models": {
+    "azure-openai": {
+      "type": "azure_openai",
+      "model": "AZURE_OPENAI_CHAT_DEPLOYMENT",
+      "api_key_env": "AZURE_OPENAI_API_KEY"
+    },
+    "azure-openai-embedding": {
+      "type": "azure_openai",
+      "model": "AZURE_OPENAI_EMBEDDING_DEPLOYMENT",
+      "api_key_env": "AZURE_OPENAI_API_KEY",
+      "embedding_dimension": 1536
+    },
     "gemini": {
       "type": "gemini",
       "model": "gemini-2.5-flash",

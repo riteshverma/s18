@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import requests
+import os
 
 # Import from config system
 from config.settings_loader import (
@@ -11,6 +12,7 @@ from config.settings_loader import (
     reset_settings,
     get_ollama_url,
     validate_ollama_base_url,
+    load_settings,
 )
 from shared.state import settings
 
@@ -208,6 +210,39 @@ async def get_gemini_status():
             "status": "success",
             "configured": bool(api_key),
             "key_preview": f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/azure_openai/status")
+async def get_azure_openai_status():
+    """Check Azure OpenAI runtime configuration."""
+    try:
+        cfg = load_settings().get("azure_openai", {})
+        endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", cfg.get("endpoint", ""))
+        api_version = os.environ.get("OPENAI_API_VERSION", cfg.get("api_version", "2024-10-21"))
+        key_env = cfg.get("api_key_env", "AZURE_OPENAI_API_KEY")
+        api_key = os.environ.get(key_env) or os.environ.get("AZURE_OPENAI_API_KEY", "")
+        chat_deployment = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT", cfg.get("chat_deployment", ""))
+        embedding_deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", cfg.get("embedding_deployment", ""))
+        configured = bool(endpoint and api_key and chat_deployment and embedding_deployment)
+        return {
+            "status": "success",
+            "configured": configured,
+            "endpoint": endpoint,
+            "api_version": api_version,
+            "chat_deployment": chat_deployment,
+            "embedding_deployment": embedding_deployment,
+            "key_preview": f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else None,
+            "missing": [
+                item for item, present in {
+                    "AZURE_OPENAI_ENDPOINT": bool(endpoint),
+                    key_env: bool(api_key),
+                    "AZURE_OPENAI_CHAT_DEPLOYMENT": bool(chat_deployment),
+                    "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": bool(embedding_deployment),
+                }.items() if not present
+            ],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

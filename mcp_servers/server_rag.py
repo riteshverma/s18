@@ -74,8 +74,12 @@ try:
 except ImportError:
     BM25_AVAILABLE = False
 
-from config.settings_loader import settings, get_ollama_url, get_model, get_timeout
-from core.embedding import get_normalized_embedding, try_get_normalized_embedding
+from config.settings_loader import settings, get_ollama_url, get_model, get_timeout, load_settings
+from core.embedding import (
+    get_normalized_embedding,
+    try_get_normalized_embedding,
+    get_batch_normalized_embeddings,
+)
 
 mcp = FastMCP("Local Storage RAG")
 
@@ -487,37 +491,62 @@ CONTEXT FROM DOCUMENT:
     messages.append(user_msg)
     
     try:
-        # Using a direct requests post with stream=True for SSE-like delivery
-        # Note: MCP tool return will be captured as a string initially, 
-        # but we'll optimize the API layer to handle the generator if possible.
-        # For now, let's make it yield chunks.
-        
+        runtime_settings = load_settings()
+        provider = runtime_settings.get("agent", {}).get("model_provider", "ollama")
+        model_name = runtime_settings.get("agent", {}).get("default_model", VISION_MODEL)
+        if provider == "azure_openai":
+            azure_cfg = runtime_settings.get("azure_openai", {})
+            endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", azure_cfg.get("endpoint", "")).rstrip("/")
+            api_version = os.getenv("OPENAI_API_VERSION", azure_cfg.get("api_version", "2024-10-21"))
+            deployment = model_name or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or azure_cfg.get("chat_deployment", "")
+            key_env = azure_cfg.get("api_key_env", "AZURE_OPENAI_API_KEY")
+            api_key = os.getenv(key_env) or os.getenv("AZURE_OPENAI_API_KEY", "")
+            if not endpoint or not deployment or not api_key:
+                raise RuntimeError("Azure OpenAI chat is not fully configured.")
+            payload_messages = messages
+            if image:
+                payload_messages = messages[:-1] + [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": query},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}},
+                    ],
+                }]
+            response = requests.post(
+                f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}",
+                headers={"api-key": api_key, "Content-Type": "application/json"},
+                json={"messages": payload_messages, "temperature": 0.2},
+                timeout=OLLAMA_TIMEOUT,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+
         response = requests.post(OLLAMA_CHAT_URL, json={
             "model": VISION_MODEL,
             "messages": messages,
-            "stream": True # Enable streaming
+            "stream": True
         }, timeout=OLLAMA_TIMEOUT, stream=True)
         response.raise_for_status()
-        
+
         full_response = ""
         for line in response.iter_lines():
-            if not line: continue
+            if not line:
+                continue
             try:
                 data = json.loads(line)
                 chunk = data.get("message", {}).get("content", "")
                 if chunk:
                     full_response += chunk
-                    # In a real MCP streaming setup, we might need a different pattern,
-                    # but for this tight integration, we'll return the full text for now
-                    # while building the SSE bridge in api.py.
-                if data.get("done"): break
+                if data.get("done"):
+                    break
             except json.JSONDecodeError:
                 continue
-        
+
         return full_response
-        
+
     except Exception as e:
-        mcp_log("ERROR", f"Ollama ask failed: {e}")
+        mcp_log("ERROR", f"ask_document failed: {e}")
         return f"Error: Could not reach the AI model for this document query. ({str(e)})"
 
 @mcp.tool()
@@ -1047,13 +1076,45 @@ def caption_image(img_url_or_path: str) -> str:
 
 Keep your response concise (2-3 sentences max)."""
         
-        # Set stream=True to get the full generator-style output
+        runtime_settings = load_settings()
+        provider = runtime_settings.get("agent", {}).get("model_provider", "ollama")
+        model_name = runtime_settings.get("agent", {}).get("default_model", VISION_MODEL)
+
+        if provider == "azure_openai":
+            azure_cfg = runtime_settings.get("azure_openai", {})
+            endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", azure_cfg.get("endpoint", "")).rstrip("/")
+            api_version = os.getenv("OPENAI_API_VERSION", azure_cfg.get("api_version", "2024-10-21"))
+            deployment = model_name or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT") or azure_cfg.get("chat_deployment", "")
+            key_env = azure_cfg.get("api_key_env", "AZURE_OPENAI_API_KEY")
+            api_key = os.getenv(key_env) or os.getenv("AZURE_OPENAI_API_KEY", "")
+            if not endpoint or not deployment or not api_key:
+                raise RuntimeError("Azure OpenAI captioning is selected but not configured.")
+
+            response = requests.post(
+                f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}",
+                headers={"api-key": api_key, "Content-Type": "application/json"},
+                json={
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": caption_prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
+                        ],
+                    }],
+                    "temperature": 0.2,
+                },
+                timeout=OLLAMA_TIMEOUT,
+            )
+            response.raise_for_status()
+            caption = response.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            return caption if caption else "[No caption returned]"
+
         with requests.post(OLLAMA_URL, json={
-                "model": VISION_MODEL,
-                "prompt": caption_prompt,
-                "images": [encoded_image],
-                "stream": True
-            }, stream=True, timeout=OLLAMA_TIMEOUT) as result:
+            "model": VISION_MODEL,
+            "prompt": caption_prompt,
+            "images": [encoded_image],
+            "stream": True
+        }, stream=True, timeout=OLLAMA_TIMEOUT) as result:
 
             caption_parts = []
             for line in result.iter_lines():
@@ -1061,11 +1122,11 @@ Keep your response concise (2-3 sentences max)."""
                     continue
                 try:
                     data = json.loads(line)
-                    caption_parts.append(data.get("response", ""))  # ✅ fixed key
+                    caption_parts.append(data.get("response", ""))
                     if data.get("done", False):
                         break
                 except json.JSONDecodeError:
-                    continue  # skip malformed lines
+                    continue
 
             caption = "".join(caption_parts).strip()
             mcp_log("CAPTION", f"Caption generated: {caption}")
@@ -1192,13 +1253,10 @@ SENTENCES:
 ANSWER (number or NONE):"""
 
         try:
-            result = requests.post(OLLAMA_CHAT_URL, json={
-                "model": RAG_LLM_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "options": {"temperature": 0, "num_predict": 20}  # V2: Very short output expected
-            }, timeout=OLLAMA_TIMEOUT)
-            reply = result.json().get("message", {}).get("content", "").strip()
+            runtime_settings = load_settings()
+            provider = runtime_settings.get("agent", {}).get("model_provider", "ollama")
+            manager = ModelManager(RAG_LLM_MODEL, provider=provider)
+            reply = asyncio.run(manager.generate_text(prompt)).strip()
 
             # V2: Parse sentence number response
             # Clean the reply (remove any non-numeric prefix like "Answer: ")
@@ -1468,17 +1526,9 @@ def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
             batch = batch_texts[i : i + BATCH_SIZE]
             
             try:
-                batch_url = EMBED_URL.replace("/api/embeddings", "/api/embed")
-                res = requests.post(batch_url, json={
-                    "model": EMBED_MODEL,
-                    "input": batch
-                }, timeout=OLLAMA_TIMEOUT)
-                res.raise_for_status()
-                embeddings_list = []
-                for raw_vec in res.json()["embeddings"]:
-                    vec = np.array(raw_vec, dtype=np.float32)
-                    norm = np.linalg.norm(vec)
-                    embeddings_list.append((vec / norm) if norm > 0 else None)
+                embeddings_list = get_batch_normalized_embeddings(
+                    batch, task_type="search_document", timeout=OLLAMA_TIMEOUT
+                )
             except Exception as e:
                 embeddings_list = [
                     try_get_normalized_embedding(text, task_type="search_document", timeout=OLLAMA_TIMEOUT)
@@ -1634,7 +1684,6 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
                         if index is None:
                             dim = len(new_embs[0])
                             index = faiss.IndexFlatL2(dim)
-                        
                         index.add(np.stack(new_embs))
                         metadata.extend(new_meta)
                         CACHE_META[rel_path] = fhash # Update cache
@@ -1818,7 +1867,7 @@ async def index_images() -> str:
     # Save Updates
     if new_embeddings:
         if index is None:
-             index = faiss.IndexFlatL2(len(new_embeddings[0]))
+            index = faiss.IndexFlatL2(len(new_embeddings[0]))
         index.add(np.stack(new_embeddings))
         metadata.extend(new_meta)
         
@@ -1948,7 +1997,6 @@ def start_background_services():
                     if index is None:
                         dim = len(new_embs[0])
                         index = faiss.IndexFlatL2(dim)
-                    
                     index.add(np.stack(new_embs))
                     metadata.extend(new_meta)
                     

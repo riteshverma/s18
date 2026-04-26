@@ -167,6 +167,22 @@ def load_settings() -> dict:
         if env_scheduler_tz:
             _settings_cache.setdefault("scheduler", {})
             _settings_cache["scheduler"]["timezone"] = env_scheduler_tz
+        # Azure OpenAI runtime overrides
+        _settings_cache.setdefault("azure_openai", {})
+        env_azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        if env_azure_endpoint:
+            _settings_cache["azure_openai"]["endpoint"] = env_azure_endpoint.rstrip("/")
+        env_openai_api_version = os.getenv("OPENAI_API_VERSION")
+        if env_openai_api_version:
+            _settings_cache["azure_openai"]["api_version"] = env_openai_api_version
+        env_azure_chat_deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
+        if env_azure_chat_deployment:
+            _settings_cache["azure_openai"]["chat_deployment"] = env_azure_chat_deployment
+        env_azure_embedding_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+        if env_azure_embedding_deployment:
+            _settings_cache["azure_openai"]["embedding_deployment"] = env_azure_embedding_deployment
+        if os.getenv("AZURE_OPENAI_API_KEY", "").strip():
+            _settings_cache["azure_openai"]["api_key_env"] = "AZURE_OPENAI_API_KEY"
         # Supabase/Auth runtime overrides
         env_auth_enabled = os.getenv("AUTH_ENABLED")
         if env_auth_enabled is not None:
@@ -214,6 +230,35 @@ def load_settings() -> dict:
             _settings_cache["tenancy"]["growth_routing_enabled"] = (
                 env_growth_routing.strip().lower() in {"1", "true", "yes", "on"}
             )
+        # Hosted deploys: prefer Azure OpenAI when configured and provider is not explicitly pinned.
+        # Only apply if user has not explicitly pinned a non-Azure provider in settings.json.
+        _explicit_provider = _settings_cache.get("agent", {}).get("model_provider", "")
+        azure_cfg = _settings_cache.get("azure_openai", {})
+        azure_endpoint = (azure_cfg.get("endpoint") or "").strip()
+        azure_chat_deployment = (
+            os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
+            or azure_cfg.get("chat_deployment")
+            or _settings_cache.get("agent", {}).get("default_model", "")
+        )
+        azure_key_present = bool(os.getenv("AZURE_OPENAI_API_KEY", "").strip())
+        if azure_endpoint and azure_key_present and _explicit_provider not in {"ollama", "gemini"}:
+            _settings_cache.setdefault("agent", {})
+            _settings_cache["agent"]["model_provider"] = "azure_openai"
+            if azure_chat_deployment:
+                _settings_cache["agent"]["default_model"] = azure_chat_deployment
+            _settings_cache.setdefault("models", {})
+            _settings_cache["models"]["insights_provider"] = "azure_openai"
+            if azure_cfg.get("embedding_deployment"):
+                _settings_cache["models"]["embedding"] = azure_cfg["embedding_deployment"]
+                _settings_cache["models"]["embedding_provider"] = "azure_openai"
+        elif os.getenv("GEMINI_API_KEY", "").strip() and _explicit_provider not in {"ollama", "azure_openai"}:
+            _settings_cache.setdefault("agent", {})
+            _settings_cache["agent"]["model_provider"] = "gemini"
+            dm = str(_settings_cache["agent"].get("default_model") or "")
+            if not dm.lower().startswith("gemini"):
+                _settings_cache["agent"]["default_model"] = "gemini-2.5-flash"
+            _settings_cache.setdefault("models", {})
+            _settings_cache["models"]["insights_provider"] = "gemini"
     return _settings_cache
 
 def save_settings() -> None:
