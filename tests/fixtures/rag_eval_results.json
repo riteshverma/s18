@@ -1,0 +1,22 @@
+{
+  "retrieved": {
+    "rag-architecture-cdss": [
+      "The Orchestrator retrieves context from the RAG / FAISS Layer before returning structured recommendations.\n[Source: docs/architecture/WISE_AI_CDSS_Architecture_2026-03.md p1]"
+    ],
+    "rag-workflow-agnostic-mcp": [
+      "MCP calls should pass integration_id, workflow_id, and contract_version metadata for tracing.\n[Source: docs/architecture/S18_WORKFLOW_AGNOSTIC_TARGET.md p1]"
+    ],
+    "rag-phoenix-monitoring": [
+      "Phoenix is available as the open-source trace dashboard endpoint in the monitoring stack.\n[Source: docs/monitoring/PHOENIX.md p1]"
+    ],
+    "rag-governance-issue-129": [
+      "The RAG Pipeline Implementation issue remains open until benchmarked RAG evidence is linked and reviewed.\n[Source: docs/governance/WISE_S18_issue_reconciliation_2026-03-17.md p1]"
+    ],
+    "rag-quickstart-ollama": [
+      "Default configs expect Ollama for embeddings and RAG tooling; without it, some RAG-heavy paths may warn.\n[Source: docs/QUICKSTART_5_MIN.md p1]"
+    ]
+  },
+  "answers": {
+    "rag-phoenix-monitoring": "S18 currently makes Phoenix available as an optional open-source trace dashboard endpoint in the monitoring stack. [Source: docs/monitoring/PHOENIX.md p1]"
+  }
+}

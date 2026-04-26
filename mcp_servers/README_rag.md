@@ -8,6 +8,18 @@ This MCP server manages a local Retrieval-Augmented Generation (RAG) system, all
 - **Image Captioning**: Automatically captions images within documents using vision models.
 - **Semantic Chunking**: Smartly splits text based on topic shifts.
 
+## Evaluation
+
+S18 includes a seed RAG golden set at `evals/rag/golden_set.json` plus deterministic
+metrics in `core/rag_eval.py`. Captured retrieval results can be checked in CI with:
+
+```bash
+python scripts/evaluate_rag.py --results tests/fixtures/rag_eval_results.json
+```
+
+The evaluator reports source Recall@k and lightweight groundedness checks for cited
+answers. It does not require Ollama or FAISS, so it can run as a regression gate.
+
 ## Tools
 
 ### `preview_document(path: str) -> MarkdownOutput`
