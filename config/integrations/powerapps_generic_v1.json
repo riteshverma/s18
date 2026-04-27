@@ -17,5 +17,5 @@
     "event_id": "external_event_id",
     "payload": "raw_payload"
   },
-  "notes": "Per-tenant overrides should clone this file as `powerapps_<workflow>_v1.json` and pin object_store_provider / vector_store_provider / embedding_provider to azure_blob+azure_ai_search+azure_openai or aws_s3+aws_opensearch+bedrock as required."
+  "notes": "Per-tenant overrides should clone this file as `powerapps_<workflow>_v1.json` and pin object_store_provider / vector_store_provider / embedding_provider to one of: azure_blob+azure_ai_search+azure_openai, aws_s3+aws_opensearch+bedrock, or gcs+vertex_ai_vector_search+vertex_ai."
 }

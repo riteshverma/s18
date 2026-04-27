@@ -61,7 +61,12 @@ def get_vector_store(tenant_context: Optional[Dict[str, str]] = None) -> VectorS
         )
         index_name = cfg.get("index_name") or f"s18-rag-{namespace}".replace("_", "-")
         return AzureAiSearchVectorStore(
-            endpoint=endpoint, api_key=api_key, index_name=index_name
+            endpoint=endpoint,
+            api_key=api_key,
+            index_name=index_name,
+            retry_attempts=int(cfg.get("retry_attempts") or 3),
+            retry_backoff_seconds=float(cfg.get("retry_backoff_seconds") or 0.6),
+            upsert_batch_size=int(cfg.get("upsert_batch_size") or 500),
         )
 
     if provider == "aws_opensearch":
@@ -72,8 +77,13 @@ def get_vector_store(tenant_context: Optional[Dict[str, str]] = None) -> VectorS
         region = cfg.get("region", "us-east-1")
         index_name = cfg.get("index_name") or f"s18-rag-{namespace}"
         return AwsOpenSearchVectorStore(
-            endpoint=endpoint, region=region, index_name=index_name,
+            endpoint=endpoint,
+            region=region,
+            index_name=index_name,
             service=cfg.get("service", "aoss"),
+            retry_attempts=int(cfg.get("retry_attempts") or 3),
+            retry_backoff_seconds=float(cfg.get("retry_backoff_seconds") or 0.6),
+            bulk_batch_size=int(cfg.get("bulk_batch_size") or 300),
         )
 
     if provider == "bedrock_kb":
@@ -84,6 +94,29 @@ def get_vector_store(tenant_context: Optional[Dict[str, str]] = None) -> VectorS
             kb_id=cfg.get("knowledge_base_id", ""),
             region=cfg.get("region", "us-east-1"),
             data_source_id=cfg.get("data_source_id"),
+        )
+
+    if provider == "vertex_ai_vector_search":
+        from integrations.vectors.vertex_ai_vector_search import VertexAiVectorSearchStore
+
+        cfg = backend_cfg.get("vertex_ai_vector_search", {}) or {}
+        project = os.getenv("GOOGLE_CLOUD_PROJECT") or cfg.get("project", "")
+        location = os.getenv("VERTEX_AI_LOCATION") or cfg.get("location", "us-central1")
+        endpoint_id = (
+            os.getenv("VERTEX_AI_INDEX_ENDPOINT_ID")
+            or cfg.get("index_endpoint_id", "")
+        )
+        deployed_index_id = (
+            os.getenv("VERTEX_AI_DEPLOYED_INDEX_ID")
+            or cfg.get("deployed_index_id", "")
+        )
+        index_id = os.getenv("VERTEX_AI_INDEX_ID") or cfg.get("index_id")
+        return VertexAiVectorSearchStore(
+            project=project,
+            location=location,
+            index_endpoint_id=endpoint_id,
+            deployed_index_id=deployed_index_id,
+            index_id=index_id,
         )
 
     raise ValueError(f"Unknown ingest.vector_store.provider: {provider!r}")

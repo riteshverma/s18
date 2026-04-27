@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -57,12 +58,18 @@ def get_object_store(tenant_context: Optional[Dict[str, str]] = None) -> ObjectS
         from integrations.storage.azure_blob import AzureBlobObjectStore
 
         cfg = backend_cfg.get("azure_blob", {}) or {}
+        account = os.getenv("AZURE_STORAGE_ACCOUNT", "").strip()
+        account_url = cfg.get("account_url", "")
+        if not account_url and account:
+            account_url = f"https://{account}.blob.core.windows.net"
         return AzureBlobObjectStore(
-            account_url=cfg.get("account_url", ""),
-            container=cfg.get("container", ""),
+            account_url=account_url,
+            container=os.getenv("AZURE_STORAGE_CONTAINER") or cfg.get("container", ""),
             namespace=namespace,
             sas_token_env=cfg.get("sas_token_env"),
             connection_string_env=cfg.get("connection_string_env"),
+            retry_attempts=int(cfg.get("retry_attempts") or 3),
+            retry_backoff_seconds=float(cfg.get("retry_backoff_seconds") or 0.6),
         )
 
     if provider == "aws_s3":
@@ -70,11 +77,25 @@ def get_object_store(tenant_context: Optional[Dict[str, str]] = None) -> ObjectS
 
         cfg = backend_cfg.get("aws_s3", {}) or {}
         return AwsS3ObjectStore(
-            bucket=cfg.get("bucket", ""),
-            region=cfg.get("region", "us-east-1"),
+            bucket=os.getenv("S3_BUCKET") or cfg.get("bucket", ""),
+            region=os.getenv("AWS_REGION") or cfg.get("region", "us-east-1"),
             namespace=namespace,
-            kms_key_id=cfg.get("kms_key_id"),
+            kms_key_id=os.getenv("S3_KMS_KEY_ID") or cfg.get("kms_key_id"),
             endpoint_url=cfg.get("endpoint_url"),
+            retry_attempts=int(cfg.get("retry_attempts") or 3),
+            retry_backoff_seconds=float(cfg.get("retry_backoff_seconds") or 0.6),
+        )
+
+    if provider == "gcs":
+        from integrations.storage.gcs import GcsObjectStore
+
+        cfg = backend_cfg.get("gcs", {}) or {}
+        return GcsObjectStore(
+            bucket=os.getenv("GCS_BUCKET") or cfg.get("bucket", ""),
+            namespace=namespace,
+            project=os.getenv("GOOGLE_CLOUD_PROJECT") or cfg.get("project"),
+            retry_attempts=int(cfg.get("retry_attempts") or 3),
+            retry_backoff_seconds=float(cfg.get("retry_backoff_seconds") or 0.6),
         )
 
     raise ValueError(f"Unknown ingest.object_store.provider: {provider!r}")
