@@ -7,6 +7,8 @@
     "models": {
         "embedding": "nomic-embed-text",
         "embedding_provider": "ollama",
+        "embedding_retry_attempts": 3,
+        "embedding_retry_backoff_seconds": 0.6,
         "semantic_chunking": "gemma3:4b",
         "image_captioning": "gemma3:4b",
         "memory_extraction": "qwen3-vl:8b",
@@ -87,7 +89,15 @@
   "bedrock": {
     "region": "us-east-1",
     "embedding_model_id": "amazon.titan-embed-text-v2:0",
-    "embedding_dimension": 1024
+    "embedding_dimension": 1024,
+    "batch_size": 16
+  },
+  "vertex_ai": {
+    "project": "",
+    "location": "us-central1",
+    "embedding_model": "text-embedding-005",
+    "embedding_dimension": 768,
+    "batch_size": 32
   },
   "ingest": {
     "object_store": {
@@ -99,13 +109,23 @@
         "account_url": "",
         "container": "",
         "sas_token_env": "AZURE_STORAGE_SAS_TOKEN",
-        "connection_string_env": "AZURE_STORAGE_CONNECTION_STRING"
+        "connection_string_env": "AZURE_STORAGE_CONNECTION_STRING",
+        "retry_attempts": 3,
+        "retry_backoff_seconds": 0.6
       },
       "aws_s3": {
         "bucket": "",
         "region": "us-east-1",
         "kms_key_id": null,
-        "endpoint_url": null
+        "endpoint_url": null,
+        "retry_attempts": 3,
+        "retry_backoff_seconds": 0.6
+      },
+      "gcs": {
+        "bucket": "",
+        "project": "",
+        "retry_attempts": 3,
+        "retry_backoff_seconds": 0.6
       },
       "tenant_overrides": {}
     },
@@ -117,18 +137,31 @@
       "azure_ai_search": {
         "endpoint": "",
         "api_key_env": "AZURE_SEARCH_KEY",
-        "index_name": ""
+        "index_name": "",
+        "retry_attempts": 3,
+        "retry_backoff_seconds": 0.6,
+        "upsert_batch_size": 500
       },
       "aws_opensearch": {
         "endpoint": "",
         "region": "us-east-1",
         "index_name": "",
-        "service": "aoss"
+        "service": "aoss",
+        "retry_attempts": 3,
+        "retry_backoff_seconds": 0.6,
+        "bulk_batch_size": 300
       },
       "bedrock_kb": {
         "knowledge_base_id": "",
         "data_source_id": "",
         "region": "us-east-1"
+      },
+      "vertex_ai_vector_search": {
+        "project": "",
+        "location": "us-central1",
+        "index_endpoint_id": "",
+        "deployed_index_id": "",
+        "index_id": ""
       },
       "tenant_overrides": {}
     },

@@ -14,6 +14,8 @@ Mapping created on ``ensure_index``::
 
 from __future__ import annotations
 
+import random
+import time
 from typing import Any, Dict, List, Optional
 
 from integrations.vectors.base import Chunk, SearchHit, VectorStore
@@ -29,6 +31,9 @@ class AwsOpenSearchVectorStore(VectorStore):
         region: str = "us-east-1",
         index_name: str,
         service: str = "aoss",
+        retry_attempts: int = 3,
+        retry_backoff_seconds: float = 0.6,
+        bulk_batch_size: int = 300,
     ) -> None:
         if not endpoint:
             raise ValueError("AwsOpenSearchVectorStore requires endpoint")
@@ -38,6 +43,27 @@ class AwsOpenSearchVectorStore(VectorStore):
         # `aoss` for serverless, `es` for managed OpenSearch.
         self.service = service
         self._client = None
+        self._retry_attempts = max(1, int(retry_attempts))
+        self._retry_backoff_seconds = max(0.05, float(retry_backoff_seconds))
+        self._bulk_batch_size = max(1, int(bulk_batch_size))
+
+    def _call_with_retry(self, fn):
+        last_error: Optional[Exception] = None
+        for idx in range(self._retry_attempts):
+            try:
+                return fn()
+            except Exception as exc:  # pragma: no cover
+                last_error = exc
+                text = str(exc).lower()
+                retryable = any(
+                    token in text
+                    for token in ["timeout", "tempor", "throttl", "503", "502", "429", "connection", "unavailable"]
+                )
+                if idx >= self._retry_attempts - 1 or not retryable:
+                    raise
+                sleep_for = self._retry_backoff_seconds * (2 ** idx) + random.uniform(0, 0.1)
+                time.sleep(min(sleep_for, 4.0))
+        raise RuntimeError(f"OpenSearch operation failed: {last_error}") from last_error
 
     def _client_lazy(self):
         if self._client is not None:
@@ -52,7 +78,12 @@ class AwsOpenSearchVectorStore(VectorStore):
                 "the aws_opensearch backend."
             ) from exc
 
+        if self.service not in {"aoss", "es"}:
+            raise ValueError("aws_opensearch service must be 'aoss' or 'es'")
+
         creds = boto3.Session().get_credentials()
+        if creds is None:
+            raise RuntimeError("No AWS credentials were found for aws_opensearch backend.")
         auth = AWS4Auth(
             creds.access_key,
             creds.secret_key,
@@ -67,12 +98,15 @@ class AwsOpenSearchVectorStore(VectorStore):
             use_ssl=True,
             verify_certs=True,
             connection_class=RequestsHttpConnection,
+            timeout=30,
+            max_retries=self._retry_attempts,
+            retry_on_timeout=True,
         )
         return self._client
 
     def ensure_index(self, *, dimension: int, metric: str = "cosine") -> None:
         client = self._client_lazy()
-        if client.indices.exists(index=self.index_name):
+        if self._call_with_retry(lambda: client.indices.exists(index=self.index_name)):
             return
         space_type = {"cosine": "cosinesimil", "l2": "l2", "ip": "innerproduct"}.get(metric, "cosinesimil")
         body = {
@@ -98,7 +132,7 @@ class AwsOpenSearchVectorStore(VectorStore):
                 }
             },
         }
-        client.indices.create(index=self.index_name, body=body)
+        self._call_with_retry(lambda: client.indices.create(index=self.index_name, body=body))
 
     def upsert(self, chunks: List[Chunk]) -> int:
         if not chunks:
@@ -119,7 +153,11 @@ class AwsOpenSearchVectorStore(VectorStore):
                     "metadata": chunk.metadata or {},
                 }
             )
-        client.bulk(body=actions, refresh=False)
+        for i in range(0, len(actions), self._bulk_batch_size * 2):
+            batch = actions[i : i + self._bulk_batch_size * 2]
+            resp = self._call_with_retry(lambda b=batch: client.bulk(body=b, refresh=False))
+            if resp.get("errors"):
+                raise RuntimeError(f"OpenSearch bulk upsert reported errors: {resp}")
         return len(chunks)
 
     def query(
@@ -148,7 +186,7 @@ class AwsOpenSearchVectorStore(VectorStore):
             "size": k,
             "query": {"bool": {"must": must, "filter": filter_clauses}},
         }
-        resp = client.search(index=self.index_name, body=body)
+        resp = self._call_with_retry(lambda: client.search(index=self.index_name, body=body))
         hits: List[SearchHit] = []
         for h in resp.get("hits", {}).get("hits", []):
             src = h.get("_source", {})
@@ -170,13 +208,17 @@ class AwsOpenSearchVectorStore(VectorStore):
         if tenant_id:
             filters.append({"term": {"tenant_id": tenant_id}})
         body = {"query": {"bool": {"filter": filters}}}
-        resp = client.delete_by_query(index=self.index_name, body=body)
+        resp = self._call_with_retry(
+            lambda: client.delete_by_query(index=self.index_name, body=body)
+        )
         return int(resp.get("deleted") or 0)
 
     def stats(self) -> Dict[str, Any]:
         client = self._client_lazy()
         try:
-            count = client.count(index=self.index_name).get("count")
+            count = self._call_with_retry(
+                lambda: client.count(index=self.index_name).get("count")
+            )
         except Exception:
             count = None
         return {

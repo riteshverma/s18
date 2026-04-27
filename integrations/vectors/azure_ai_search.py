@@ -15,6 +15,8 @@ Schema (created on `ensure_index`)::
 from __future__ import annotations
 
 import json
+import random
+import time
 from typing import Any, Dict, List, Optional
 
 from integrations.vectors.base import Chunk, SearchHit, VectorStore
@@ -23,7 +25,16 @@ from integrations.vectors.base import Chunk, SearchHit, VectorStore
 class AzureAiSearchVectorStore(VectorStore):
     provider = "azure_ai_search"
 
-    def __init__(self, *, endpoint: str, api_key: str, index_name: str) -> None:
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        api_key: str,
+        index_name: str,
+        retry_attempts: int = 3,
+        retry_backoff_seconds: float = 0.6,
+        upsert_batch_size: int = 500,
+    ) -> None:
         if not endpoint:
             raise ValueError("AzureAiSearchVectorStore requires endpoint")
         self.endpoint = endpoint.rstrip("/")
@@ -31,6 +42,27 @@ class AzureAiSearchVectorStore(VectorStore):
         self.index_name = index_name
         self._search = None
         self._mgmt = None
+        self._retry_attempts = max(1, int(retry_attempts))
+        self._retry_backoff_seconds = max(0.05, float(retry_backoff_seconds))
+        self._upsert_batch_size = max(1, int(upsert_batch_size))
+
+    def _call_with_retry(self, fn):
+        last_error: Optional[Exception] = None
+        for idx in range(self._retry_attempts):
+            try:
+                return fn()
+            except Exception as exc:  # pragma: no cover
+                last_error = exc
+                text = str(exc).lower()
+                retryable = any(
+                    token in text
+                    for token in ["timeout", "tempor", "throttl", "503", "502", "429", "connection"]
+                )
+                if idx >= self._retry_attempts - 1 or not retryable:
+                    raise
+                sleep_for = self._retry_backoff_seconds * (2 ** idx) + random.uniform(0, 0.1)
+                time.sleep(min(sleep_for, 4.0))
+        raise RuntimeError(f"Azure AI Search operation failed: {last_error}") from last_error
 
     def _credential(self):
         try:
@@ -115,7 +147,7 @@ class AzureAiSearchVectorStore(VectorStore):
                 algorithms=[HnswAlgorithmConfiguration(name=algo_name, parameters={"metric": metric})],
             ),
         )
-        client.create_index(index)
+        self._call_with_retry(lambda: client.create_index(index))
 
     def upsert(self, chunks: List[Chunk]) -> int:
         if not chunks:
@@ -135,7 +167,9 @@ class AzureAiSearchVectorStore(VectorStore):
                     "metadata": json.dumps(chunk.metadata or {}),
                 }
             )
-        client.upload_documents(documents=docs)
+        for i in range(0, len(docs), self._upsert_batch_size):
+            batch = docs[i : i + self._upsert_batch_size]
+            self._call_with_retry(lambda b=batch: client.upload_documents(documents=b))
         return len(docs)
 
     def query(
@@ -158,7 +192,9 @@ class AzureAiSearchVectorStore(VectorStore):
             kwargs["vector_queries"] = [
                 VectorizedQuery(vector=list(embedding), k_nearest_neighbors=k, fields="embedding")
             ]
-        results = client.search(**{key: val for key, val in kwargs.items() if val is not None})
+        results = self._call_with_retry(
+            lambda: client.search(**{key: val for key, val in kwargs.items() if val is not None})
+        )
 
         hits: List[SearchHit] = []
         for r in results:
@@ -184,16 +220,22 @@ class AzureAiSearchVectorStore(VectorStore):
         flt = f"doc_id eq '{_odata_escape(doc_id)}'"
         if tenant_id:
             flt += f" and tenant_id eq '{_odata_escape(tenant_id)}'"
-        rows = list(client.search(search_text="*", filter=flt, select=["chunk_id"]))
+        rows = list(
+            self._call_with_retry(
+                lambda: client.search(search_text="*", filter=flt, select=["chunk_id"])
+            )
+        )
         if not rows:
             return 0
-        client.delete_documents(documents=[{"chunk_id": r["chunk_id"]} for r in rows])
+        self._call_with_retry(
+            lambda: client.delete_documents(documents=[{"chunk_id": r["chunk_id"]} for r in rows])
+        )
         return len(rows)
 
     def stats(self) -> Dict[str, Any]:
         client = self._mgmt_client()
         try:
-            stats = client.get_index_statistics(self.index_name)
+            stats = self._call_with_retry(lambda: client.get_index_statistics(self.index_name))
         except Exception:
             stats = {}
         return {
