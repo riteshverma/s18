@@ -1,0 +1,208 @@
+swagger: "2.0"
+info:
+  title: S18 RAG Ingest
+  version: "1.0.0"
+  description: |
+    Power Apps custom connector that pushes Dataverse rows, SharePoint list
+    items, and file attachments into the S18 ingest pipeline. Bytes land in
+    Azure Blob or AWS S3 (per tenant); chunks are embedded and indexed into
+    the matching cloud vector store.
+host: api.example.com
+basePath: /
+schemes:
+  - https
+consumes:
+  - application/json
+  - multipart/form-data
+produces:
+  - application/json
+securityDefinitions:
+  oauth2_aad:
+    type: oauth2
+    flow: accessCode
+    authorizationUrl: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+    tokenUrl: https://login.microsoftonline.com/common/oauth2/v2.0/token
+    scopes:
+      api://s18-rag/Ingest.Write: Push records and files to the S18 RAG ingest pipeline
+  bearer:
+    type: apiKey
+    in: header
+    name: Authorization
+security:
+  - oauth2_aad: [api://s18-rag/Ingest.Write]
+  - bearer: []
+paths:
+  /ingest/powerapps:
+    post:
+      operationId: IngestPowerApps
+      summary: Push Dataverse / SharePoint records and inline files into S18 RAG.
+      x-ms-visibility: important
+      consumes:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: "#/definitions/IngestEnvelope"
+      responses:
+        "200":
+          description: Job accepted.
+          schema:
+            $ref: "#/definitions/IngestAccepted"
+        "401":
+          description: Unauthorized.
+        "422":
+          description: Validation error.
+  /ingest/powerapps/files:
+    post:
+      operationId: IngestPowerAppsFiles
+      summary: Push large attachments via multipart form to S18 RAG.
+      x-ms-visibility: advanced
+      consumes:
+        - multipart/form-data
+      parameters:
+        - in: formData
+          name: envelope
+          required: true
+          type: string
+          description: JSON-encoded envelope (records, trigger, tenant_id, ...).
+        - in: formData
+          name: files
+          required: true
+          type: file
+          description: One or more file uploads.
+      responses:
+        "200":
+          description: Job accepted.
+          schema:
+            $ref: "#/definitions/IngestAccepted"
+  /ingest/jobs/{jobId}:
+    get:
+      operationId: GetIngestJob
+      summary: Look up status of an ingest job.
+      x-ms-visibility: important
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          type: string
+      responses:
+        "200":
+          description: Job state.
+          schema:
+            $ref: "#/definitions/IngestJob"
+        "404":
+          description: Job not found.
+  /ingest/health:
+    get:
+      operationId: IngestHealth
+      summary: Resolve which cloud backends will be used for the caller's tenant.
+      x-ms-visibility: advanced
+      responses:
+        "200":
+          description: Backend config for the current tenant.
+definitions:
+  IngestEnvelope:
+    type: object
+    required:
+      - tenant_id
+    properties:
+      tenant_id:
+        type: string
+        description: Logical tenant for routing + isolation.
+      tenant_tier:
+        type: string
+        enum: [starter, growth, enterprise-health]
+      data_region:
+        type: string
+        example: in
+      integration_id:
+        type: string
+        default: powerapps
+      workflow_id:
+        type: string
+        example: claims
+      consent_ref:
+        type: string
+      idempotency_key:
+        type: string
+      trigger:
+        type: object
+        description: Verbatim Power Automate trigger context.
+      record:
+        $ref: "#/definitions/Record"
+      records:
+        type: array
+        items:
+          $ref: "#/definitions/Record"
+      files:
+        type: array
+        items:
+          $ref: "#/definitions/InlineFile"
+  Record:
+    type: object
+    properties:
+      recordId:
+        type: string
+      tableLogicalName:
+        type: string
+      kind:
+        type: string
+        enum: [dataverse, sharepoint, custom]
+      title:
+        type: string
+      fields:
+        type: object
+  InlineFile:
+    type: object
+    required: [name, contentBytes]
+    properties:
+      name:
+        type: string
+      contentType:
+        type: string
+      contentBytes:
+        type: string
+        description: Base64-encoded content. Use the multipart endpoint for >8 MB.
+  IngestAccepted:
+    type: object
+    properties:
+      job_id:
+        type: string
+      status:
+        type: string
+        enum: [accepted]
+      task_id:
+        type: string
+      execution_backend:
+        type: string
+  IngestJob:
+    type: object
+    properties:
+      job_id:
+        type: string
+      tenant_id:
+        type: string
+      integration_id:
+        type: string
+      workflow_id:
+        type: string
+      status:
+        type: string
+      record_count:
+        type: integer
+      file_count:
+        type: integer
+      chunk_count:
+        type: integer
+      indexed_count:
+        type: integer
+      object_uris:
+        type: array
+        items:
+          type: string
+      errors:
+        type: array
+        items:
+          type: object

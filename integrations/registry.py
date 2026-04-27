@@ -1,12 +1,14 @@
 from typing import Dict, Optional
 
 from integrations.adapters.default import DefaultIntegrationAdapter
+from integrations.adapters.powerapps import PowerAppsIntegrationAdapter
 from integrations.adapters.wiseai import WiseAIIntegrationAdapter
 from integrations.base import IntegrationAdapter
 
 _ADAPTERS = {
     "default": DefaultIntegrationAdapter(),
     "wiseai": WiseAIIntegrationAdapter(),
+    "powerapps": PowerAppsIntegrationAdapter(),
 }
 
 # Registry of adapter overrides per tenant_tier. Empty today; kept here so the
@@ -27,6 +29,8 @@ def _resolve_adapter_key(
     # Source-system aliases for backward compatibility.
     if key in {"wise", "wise-ai"}:
         key = "wiseai"
+    if key in {"power-apps", "power_apps", "powerapp", "power-platform"}:
+        key = "powerapps"
     if not key:
         key = "default"
 

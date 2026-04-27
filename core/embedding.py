@@ -27,6 +27,59 @@ def _embedding_provider() -> str:
     return provider or "ollama"
 
 
+def _bedrock_embed_request(inputs: list[str], timeout: int) -> list[list[float]]:
+    """AWS Bedrock embedding provider.
+
+    Lazily imports boto3 and uses the model id from settings. Defaults to
+    Titan Text Embeddings V2 which returns 1024-dim vectors.
+    """
+    try:
+        import boto3  # type: ignore[reportMissingImports]
+        from botocore.config import Config  # type: ignore[reportMissingImports]
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "boto3 must be installed for the bedrock embedding provider. "
+            "Install: `pip install boto3`"
+        ) from exc
+
+    cfg = load_settings().get("bedrock", {}) or {}
+    region = os.getenv("AWS_REGION") or cfg.get("region", "us-east-1")
+    model_id = (
+        os.getenv("BEDROCK_EMBEDDING_MODEL_ID")
+        or cfg.get("embedding_model_id")
+        or "amazon.titan-embed-text-v2:0"
+    )
+
+    client = boto3.client(
+        "bedrock-runtime",
+        region_name=region,
+        config=Config(read_timeout=timeout, connect_timeout=timeout),
+    )
+
+    vectors: list[list[float]] = []
+    for text in inputs:
+        body = {"inputText": text}
+        if model_id.startswith("amazon.titan-embed-text-v2"):
+            body["dimensions"] = int(cfg.get("embedding_dimension") or 1024)
+            body["normalize"] = True
+        import json as _json
+
+        resp = client.invoke_model(
+            modelId=model_id,
+            body=_json.dumps(body).encode("utf-8"),
+            accept="application/json",
+            contentType="application/json",
+        )
+        payload = _json.loads(resp["body"].read())
+        embedding = payload.get("embedding") or payload.get("embeddings")
+        if embedding is None:
+            raise RuntimeError(f"Bedrock returned no embedding: {payload}")
+        if isinstance(embedding[0], list):
+            embedding = embedding[0]
+        vectors.append(embedding)
+    return vectors
+
+
 def _azure_embed_request(inputs: list[str], timeout: int) -> list[list[float]]:
     cfg = load_settings().get("azure_openai", {})
     endpoint = (os.getenv("AZURE_OPENAI_ENDPOINT") or cfg.get("endpoint", "")).rstrip("/")
@@ -79,6 +132,10 @@ def get_normalized_embedding(
         vectors = _azure_embed_request([full_text], request_timeout)
         return _normalize_vector(vectors[0])
 
+    if _embedding_provider() == "bedrock":
+        vectors = _bedrock_embed_request([full_text], request_timeout)
+        return _normalize_vector(vectors[0])
+
     last_error: Optional[Exception] = None
     embed_url = get_ollama_url("embed")
     try:
@@ -127,6 +184,10 @@ def get_batch_normalized_embeddings(
 
     if _embedding_provider() == "azure_openai":
         vectors = _azure_embed_request(prepared, request_timeout)
+        return [_normalize_vector(v) for v in vectors]
+
+    if _embedding_provider() == "bedrock":
+        vectors = _bedrock_embed_request(prepared, request_timeout)
         return [_normalize_vector(v) for v in vectors]
 
     embed_url = get_ollama_url("embed")
