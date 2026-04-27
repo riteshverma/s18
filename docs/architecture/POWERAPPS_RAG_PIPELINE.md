@@ -2,13 +2,14 @@
 
 > Architecture for ingesting data from Microsoft Power Apps into the S18
 > RAG stack with a cloud-agnostic abstraction over Azure (Blob + AI Search +
-> Azure OpenAI) and AWS (S3 + OpenSearch / Bedrock KB + Bedrock embeddings).
+> Azure OpenAI), AWS (S3 + OpenSearch / Bedrock KB + Bedrock embeddings), and
+> Google Cloud (GCS + Vertex AI Vector Search + Vertex AI embeddings).
 
 ## 1. Goals
 
 1. **Single API surface** for Power Automate / Power Apps regardless of cloud.
 2. **Cloud routing per tenant**, not per binary build. Switching a tenant
-   from Azure to AWS is a JSON config change, never a redeploy.
+   from Azure to AWS/GCP is a JSON config change, never a redeploy.
 3. **Reuse existing S18 plumbing**: `IntegrationAdapter` contract, tenancy
    resolution, Celery executor, Prometheus metrics, Supabase auth.
 4. **No SDK is required for clouds you do not use** (lazy imports, optional
@@ -26,10 +27,12 @@ flowchart LR
     Celery --> Vec[VectorStore facade<br/>integrations/vectors]
     Obj -->|"Azure"| Blob[Azure Blob]
     Obj -->|"AWS"| S3[(AWS S3)]
+    Obj -->|"GCP"| GCS[(Google Cloud Storage)]
     Obj -->|local dev| FS[(local_fs)]
     Vec -->|Azure| AIS[Azure AI Search]
     Vec -->|AWS| OS[OpenSearch / AOSS]
     Vec -->|AWS managed| KB[Bedrock Knowledge Base]
+    Vec -->|GCP| VVS[Vertex AI Vector Search]
     Vec -->|local dev| FAISS[(FAISS index.bin)]
     API --> Rag[/rag/search /rag/ask/]
     Rag --> Vec
@@ -42,12 +45,12 @@ flowchart LR
 | HTTP entrypoints | [`routers/ingest.py`](../../routers/ingest.py) | `/ingest/powerapps`, `/ingest/powerapps/files`, `/ingest/jobs/{id}`, `/ingest/health` |
 | Integration adapter | [`integrations/adapters/powerapps.py`](../../integrations/adapters/powerapps.py) | Maps Power Automate envelopes -> `CanonicalRunRequest` |
 | Profile | [`config/integrations/powerapps_generic_v1.json`](../../config/integrations/powerapps_generic_v1.json) | Per-tenant cloud + chunking overrides |
-| Object storage facade | [`integrations/storage/`](../../integrations/storage/) | `ObjectStore` Protocol + `local_fs`, `azure_blob`, `aws_s3` backends |
-| Vector store facade | [`integrations/vectors/`](../../integrations/vectors/) | `VectorStore` Protocol + `faiss`, `azure_ai_search`, `aws_opensearch`, `bedrock_kb` |
+| Object storage facade | [`integrations/storage/`](../../integrations/storage/) | `ObjectStore` Protocol + `local_fs`, `azure_blob`, `aws_s3`, `gcs` backends |
+| Vector store facade | [`integrations/vectors/`](../../integrations/vectors/) | `VectorStore` Protocol + `faiss`, `azure_ai_search`, `aws_opensearch`, `bedrock_kb`, `vertex_ai_vector_search` |
 | Pipeline helpers | [`integrations/ingest/pipeline.py`](../../integrations/ingest/pipeline.py) | Chunking, parsing, record materialization |
 | Jobs ledger | [`integrations/ingest/jobs.py`](../../integrations/ingest/jobs.py) | File-backed by default, swap for Supabase / DynamoDB / Cosmos by subclassing |
 | Celery tasks | [`workers/ingest_tasks.py`](../../workers/ingest_tasks.py) | `materialize` / `parse_and_chunk` / `embed_and_index` |
-| Embeddings | [`core/embedding.py`](../../core/embedding.py) | Ollama / Azure OpenAI / Bedrock providers |
+| Embeddings | [`core/embedding.py`](../../core/embedding.py) | Ollama / Azure OpenAI / Bedrock / Vertex AI providers |
 | RAG read path | [`routers/rag.py`](../../routers/rag.py) | Routes to cloud `VectorStore` when tenant is configured for one |
 
 ## 4. Tenancy & data isolation
@@ -61,6 +64,8 @@ Both facades call it, so:
 - Azure: blob path prefix is `<namespace>/`; AI Search index name is
   `s18-rag-<namespace>`.
 - AWS: S3 key prefix is `<namespace>/`; OpenSearch index is `s18-rag-<namespace>`.
+- GCP: GCS key prefix is `<namespace>/`; Vertex AI index/endpoint IDs are
+  configured per tenant profile or override map.
 
 Tenant-tier overrides in `ingest.object_store.tenant_overrides` and
 `ingest.vector_store.tenant_overrides` let an `enterprise-health` customer
@@ -109,6 +114,7 @@ under `ingest`:
       "provider": "local_fs",
       "azure_blob": {"account_url": "", "container": ""},
       "aws_s3": {"bucket": "", "region": "us-east-1"},
+      "gcs": {"bucket": "", "project": ""},
       "tenant_overrides": {}
     },
     "vector_store": {
@@ -116,6 +122,7 @@ under `ingest`:
       "azure_ai_search": {"endpoint": "", "index_name": ""},
       "aws_opensearch": {"endpoint": "", "region": "us-east-1"},
       "bedrock_kb": {"knowledge_base_id": "", "data_source_id": ""},
+      "vertex_ai_vector_search": {"project": "", "location": "us-central1"},
       "tenant_overrides": {}
     }
   }
@@ -131,14 +138,16 @@ Per-tenant cloud routing examples:
       "provider": "local_fs",
       "tenant_overrides": {
         "acme-health": "azure_blob",
-        "globex-aws": "aws_s3"
+        "globex-aws": "aws_s3",
+        "globex-gcp": "gcs"
       }
     },
     "vector_store": {
       "provider": "faiss",
       "tenant_overrides": {
         "acme-health": "azure_ai_search",
-        "globex-aws": "aws_opensearch"
+        "globex-aws": "aws_opensearch",
+        "globex-gcp": "vertex_ai_vector_search"
       }
     }
   }
@@ -182,6 +191,16 @@ resources required per tenant:
   `bedrock-agent-runtime:Retrieve`.
 - VPC endpoints for S3 + Bedrock when running inside a private subnet.
 
+### GCP path
+
+- GCS bucket with uniform bucket-level access and CMEK for bucket encryption.
+- Vertex AI Vector Search Index + Index Endpoint (deployed index ID exported to
+  app settings).
+- Vertex AI embedding model access enabled in the same project/location.
+- Workload Identity or service account binding for API + worker with
+  `roles/storage.objectAdmin`, `roles/aiplatform.user`.
+- Private Service Connect / VPC-SC perimeter for regulated workloads.
+
 ## 9. Security & compliance hooks
 
 - All endpoints require Supabase JWT (`require_supabase_user`).
@@ -192,6 +211,8 @@ resources required per tenant:
 - `ObjectRef.metadata` always carries `tenant_id`, `integration_id`, and
   the SHA-256 of the original bytes, enabling audit replay without
   recomputation.
+- Cloud backends use bounded retry/backoff for transient failures (timeouts,
+  429/5xx throttling), while non-retryable auth/config errors fail fast.
 - The Bedrock Knowledge Base path lets fully managed RAG run without S18
   ever computing embeddings; useful for healthcare clouds that mandate
   Bedrock-managed inference for HIPAA / data residency.

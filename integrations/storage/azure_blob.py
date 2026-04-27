@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import random
+import time
 from typing import Any, Dict, Iterable, Optional
 from urllib.parse import quote, urlparse
 
@@ -25,6 +27,8 @@ class AzureBlobObjectStore(ObjectStore):
         namespace: str = "shared",
         sas_token_env: Optional[str] = None,
         connection_string_env: Optional[str] = None,
+        retry_attempts: int = 3,
+        retry_backoff_seconds: float = 0.6,
     ) -> None:
         if not container:
             raise ValueError("AzureBlobObjectStore requires a container name")
@@ -34,6 +38,8 @@ class AzureBlobObjectStore(ObjectStore):
         self._sas_env = sas_token_env
         self._conn_env = connection_string_env
         self._client = None
+        self._retry_attempts = max(1, int(retry_attempts))
+        self._retry_backoff_seconds = max(0.05, float(retry_backoff_seconds))
 
     def _client_lazy(self):
         if self._client is not None:
@@ -62,6 +68,32 @@ class AzureBlobObjectStore(ObjectStore):
             account_url=self.account_url, credential=DefaultAzureCredential()
         )
         return self._client
+
+    def _call_azure(self, fn):
+        last_error: Optional[Exception] = None
+        for idx in range(self._retry_attempts):
+            try:
+                return fn()
+            except Exception as exc:  # pragma: no cover - network/runtime dependent
+                last_error = exc
+                text = str(exc).lower()
+                retryable = any(
+                    token in text
+                    for token in [
+                        "timeout",
+                        "tempor",
+                        "throttl",
+                        "503",
+                        "502",
+                        "429",
+                        "connection",
+                    ]
+                )
+                if idx >= self._retry_attempts - 1 or not retryable:
+                    raise
+                sleep_for = self._retry_backoff_seconds * (2 ** idx) + random.uniform(0, 0.1)
+                time.sleep(min(sleep_for, 4.0))
+        raise RuntimeError(f"Azure Blob operation failed: {last_error}") from last_error
 
     def _full_key(self, key: str) -> str:
         clean = key.strip("/").replace("..", "")
@@ -100,11 +132,13 @@ class AzureBlobObjectStore(ObjectStore):
         meta = {k: str(v) for k, v in (metadata or {}).items()}
         meta["sha256"] = sha
         client = self._client_lazy().get_blob_client(self.container, full_key)
-        client.upload_blob(
-            data,
-            overwrite=True,
-            content_settings=ContentSettings(content_type=content_type or "application/octet-stream"),
-            metadata=meta,
+        self._call_azure(
+            lambda: client.upload_blob(
+                data,
+                overwrite=True,
+                content_settings=ContentSettings(content_type=content_type or "application/octet-stream"),
+                metadata=meta,
+            )
         )
         return ObjectRef(
             provider=self.provider,
@@ -116,7 +150,7 @@ class AzureBlobObjectStore(ObjectStore):
         )
 
     def get(self, uri: str) -> bytes:
-        return self._blob_client(uri).download_blob().readall()
+        return self._call_azure(lambda: self._blob_client(uri).download_blob().readall())
 
     def presign(self, uri: str, *, ttl_seconds: int = 900) -> str:
         from azure.storage.blob import BlobSasPermissions, generate_blob_sas
@@ -168,10 +202,12 @@ class AzureBlobObjectStore(ObjectStore):
         return out
 
     def delete(self, uri: str) -> None:
-        self._blob_client(uri).delete_blob(delete_snapshots="include")
+        self._call_azure(
+            lambda: self._blob_client(uri).delete_blob(delete_snapshots="include")
+        )
 
     def stat(self, uri: str) -> Dict[str, Any]:
-        props = self._blob_client(uri).get_blob_properties()
+        props = self._call_azure(lambda: self._blob_client(uri).get_blob_properties())
         return {
             "size": props.size,
             "sha256": (props.metadata or {}).get("sha256"),
