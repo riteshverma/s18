@@ -27,7 +27,10 @@ class LocalFsObjectStore(ObjectStore):
         self.namespace = namespace
 
     def _resolve(self, key: str) -> Path:
-        clean = key.strip("/").replace("..", "")
+        # Scrub `..` traversals plus any leading slash/backslash so the
+        # second operand of `self.root / clean` can never become absolute
+        # (which on POSIX or Windows would silently discard the root).
+        clean = key.replace("..", "").replace("\\", "/").lstrip("/")
         return (self.root / clean).resolve()
 
     def _ensure_inside_root(self, path: Path) -> None:

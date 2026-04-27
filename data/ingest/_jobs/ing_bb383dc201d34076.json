@@ -1,0 +1,19 @@
+{
+  "job_id": "ing_bb383dc201d34076",
+  "tenant_id": "default",
+  "integration_id": "powerapps",
+  "workflow_id": "generic",
+  "status": "completed",
+  "created_at": "2026-04-27T08:24:05.286260+00:00",
+  "updated_at": "2026-04-27T08:24:05.433878+00:00",
+  "record_count": 1,
+  "file_count": 0,
+  "chunk_count": 1,
+  "indexed_count": 1,
+  "object_uris": [],
+  "chunk_ids": [
+    "b25748b626a5b56cd35f53fc"
+  ],
+  "errors": [],
+  "metadata": {}
+}

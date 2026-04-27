@@ -25,7 +25,9 @@ class FaissLocalVectorStore(VectorStore):
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.index_dir / "index.bin"
         self.metadata_path = self.index_dir / "metadata.json"
-        self._lock = threading.Lock()
+        # Re-entrant: upsert() holds the lock and calls ensure_index(), which
+        # also acquires it. A plain Lock would deadlock under that pattern.
+        self._lock = threading.RLock()
         self._index = None
         self._metadata: List[Dict[str, Any]] = []
         self._dimension: Optional[int] = None
