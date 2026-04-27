@@ -1,0 +1,93 @@
+{
+  "name": "S18-Ingest-Dataverse-Row",
+  "displayName": "S18 RAG Ingest - Dataverse row created/updated",
+  "description": "Forwards a Dataverse row + attachments to the S18 ingest pipeline whenever the row is created or updated.",
+  "schemaVersion": "1.0.0.0",
+  "trigger": {
+    "type": "OpenApiConnection",
+    "kind": "Button",
+    "operationId": "WhenARowIsAddedOrModified",
+    "connectionName": "shared_commondataserviceforapps",
+    "parameters": {
+      "subscriptionRequest/scope": 4,
+      "subscriptionRequest/entityname": "@parameters('TableLogicalName')",
+      "subscriptionRequest/changetype": 3
+    }
+  },
+  "parameters": {
+    "TableLogicalName": {
+      "type": "string",
+      "metadata": {"displayName": "Dataverse table logical name"},
+      "defaultValue": "contact"
+    },
+    "TenantId": {
+      "type": "string",
+      "metadata": {"displayName": "S18 tenant id"},
+      "defaultValue": "default"
+    },
+    "TenantTier": {
+      "type": "string",
+      "metadata": {"displayName": "S18 tenant tier"},
+      "defaultValue": "enterprise-health"
+    },
+    "DataRegion": {
+      "type": "string",
+      "metadata": {"displayName": "Data region"},
+      "defaultValue": "in"
+    },
+    "WorkflowId": {
+      "type": "string",
+      "metadata": {"displayName": "Workflow id (e.g. claims)"},
+      "defaultValue": "generic"
+    }
+  },
+  "actions": {
+    "Compose_Record": {
+      "type": "Compose",
+      "inputs": {
+        "tableLogicalName": "@parameters('TableLogicalName')",
+        "recordId": "@triggerOutputs()?['body/<EntityKey>']",
+        "kind": "dataverse",
+        "fields": "@triggerOutputs()?['body']"
+      },
+      "runAfter": {}
+    },
+    "Compose_Envelope": {
+      "type": "Compose",
+      "inputs": {
+        "tenant_id": "@parameters('TenantId')",
+        "tenant_tier": "@parameters('TenantTier')",
+        "data_region": "@parameters('DataRegion')",
+        "integration_id": "powerapps",
+        "workflow_id": "@parameters('WorkflowId')",
+        "trigger": {
+          "kind": "dataverse_row_change",
+          "entity": "@parameters('TableLogicalName')",
+          "event_id": "@workflow().run.name"
+        },
+        "record": "@outputs('Compose_Record')",
+        "files": [],
+        "idempotency_key": "@workflow().run.name"
+      },
+      "runAfter": {"Compose_Record": ["Succeeded"]}
+    },
+    "Call_S18_Ingest": {
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "connectionName": "shared_s18ragingest",
+          "operationId": "IngestPowerApps"
+        },
+        "parameters": {
+          "body": "@outputs('Compose_Envelope')"
+        }
+      },
+      "runAfter": {"Compose_Envelope": ["Succeeded"]}
+    },
+    "Set_Job_Id": {
+      "type": "Compose",
+      "inputs": "@body('Call_S18_Ingest')?['job_id']",
+      "runAfter": {"Call_S18_Ingest": ["Succeeded"]}
+    }
+  }
+}

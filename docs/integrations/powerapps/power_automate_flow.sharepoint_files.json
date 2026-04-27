@@ -1,0 +1,84 @@
+{
+  "name": "S18-Ingest-SharePoint-File",
+  "displayName": "S18 RAG Ingest - SharePoint file created in folder",
+  "description": "Watches a SharePoint document library and pushes new files (PDF/DOCX/etc.) to the S18 ingest pipeline.",
+  "schemaVersion": "1.0.0.0",
+  "trigger": {
+    "type": "OpenApiConnection",
+    "kind": "Button",
+    "operationId": "OnNewFile",
+    "connectionName": "shared_sharepointonline",
+    "parameters": {
+      "dataset": "@parameters('SharePointSiteUrl')",
+      "folderId": "@parameters('SharePointFolderId')"
+    }
+  },
+  "parameters": {
+    "SharePointSiteUrl": {"type": "string", "metadata": {"displayName": "SharePoint site URL"}},
+    "SharePointFolderId": {"type": "string", "metadata": {"displayName": "SharePoint folder id"}},
+    "TenantId": {"type": "string", "defaultValue": "default"},
+    "TenantTier": {"type": "string", "defaultValue": "enterprise-health"},
+    "DataRegion": {"type": "string", "defaultValue": "in"},
+    "WorkflowId": {"type": "string", "defaultValue": "documents"}
+  },
+  "actions": {
+    "Get_File_Content": {
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "connectionName": "shared_sharepointonline",
+          "operationId": "GetFileContent"
+        },
+        "parameters": {
+          "dataset": "@parameters('SharePointSiteUrl')",
+          "id": "@triggerOutputs()?['body/{Identifier}']"
+        }
+      },
+      "runAfter": {}
+    },
+    "Compose_Envelope": {
+      "type": "Compose",
+      "inputs": {
+        "tenant_id": "@parameters('TenantId')",
+        "tenant_tier": "@parameters('TenantTier')",
+        "data_region": "@parameters('DataRegion')",
+        "integration_id": "powerapps",
+        "workflow_id": "@parameters('WorkflowId')",
+        "trigger": {
+          "kind": "sharepoint_file_create",
+          "entity": "sharepoint_document",
+          "event_id": "@workflow().run.name"
+        },
+        "record": {
+          "recordId": "@triggerOutputs()?['body/{Identifier}']",
+          "kind": "sharepoint",
+          "tableLogicalName": "sharepoint_document",
+          "title": "@triggerOutputs()?['body/{FilenameWithExtension}']",
+          "fields": "@triggerOutputs()?['body']"
+        },
+        "files": [
+          {
+            "name": "@triggerOutputs()?['body/{FilenameWithExtension}']",
+            "contentType": "@triggerOutputs()?['headers/Content-Type']",
+            "contentBytes": "@base64(body('Get_File_Content'))"
+          }
+        ],
+        "idempotency_key": "@triggerOutputs()?['body/{Identifier}']"
+      },
+      "runAfter": {"Get_File_Content": ["Succeeded"]}
+    },
+    "Call_S18_Ingest": {
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "connectionName": "shared_s18ragingest",
+          "operationId": "IngestPowerApps"
+        },
+        "parameters": {
+          "body": "@outputs('Compose_Envelope')"
+        }
+      },
+      "runAfter": {"Compose_Envelope": ["Succeeded"]}
+    }
+  }
+}

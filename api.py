@@ -218,6 +218,8 @@ from routers import skills
 app.include_router(skills.router)
 from routers import harness as harness_router
 app.include_router(harness_router.router)
+from routers import ingest as ingest_router
+app.include_router(ingest_router.router)
 
 
 
