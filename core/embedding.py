@@ -7,10 +7,18 @@ from typing import Any, Optional
 import numpy as np
 import requests
 
-from config.settings_loader import get_model, get_ollama_url, get_timeout, load_settings
+from config.settings_loader import (
+    get_llama_cpp_timeout,
+    get_llama_cpp_url,
+    get_model,
+    get_ollama_url,
+    get_timeout,
+    load_settings,
+)
 
 EMBED_MODEL = get_model("embedding")
 OLLAMA_TIMEOUT = get_timeout()
+LLAMA_CPP_TIMEOUT = get_llama_cpp_timeout()
 
 
 def _embedding_retry_config() -> tuple[int, float]:
@@ -227,6 +235,33 @@ def _azure_embed_request(inputs: list[str], timeout: int) -> list[list[float]]:
     return vectors
 
 
+def _llama_cpp_embed_request(inputs: list[str], timeout: int) -> list[list[float]]:
+    model_name = get_model("embedding")
+    url = get_llama_cpp_url("embeddings")
+    attempts, backoff = _embedding_retry_config()
+
+    def _post():
+        response = requests.post(
+            url,
+            json={"model": model_name, "input": inputs},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    payload = _retry_call(
+        _post,
+        retryable=_requests_retryable,
+        attempts=attempts,
+        backoff=backoff,
+    )
+    data = sorted(payload.get("data", []), key=lambda item: item.get("index", 0))
+    vectors = [item.get("embedding", []) for item in data]
+    if not vectors:
+        raise RuntimeError("llama.cpp returned no embedding vectors.")
+    return vectors
+
+
 def _normalize_vector(values: list[float]) -> np.ndarray:
     vec = np.array(values, dtype=np.float32)
     norm = np.linalg.norm(vec)
@@ -255,6 +290,10 @@ def get_normalized_embedding(
 
     if _embedding_provider() == "vertex_ai":
         vectors = _vertex_embed_request([full_text], request_timeout)
+        return _normalize_vector(vectors[0])
+    if _embedding_provider() == "llama_cpp":
+        request_timeout = timeout or LLAMA_CPP_TIMEOUT
+        vectors = _llama_cpp_embed_request([full_text], request_timeout)
         return _normalize_vector(vectors[0])
 
     last_error: Optional[Exception] = None
@@ -313,6 +352,10 @@ def get_batch_normalized_embeddings(
 
     if _embedding_provider() == "vertex_ai":
         vectors = _vertex_embed_request(prepared, request_timeout)
+        return [_normalize_vector(v) for v in vectors]
+    if _embedding_provider() == "llama_cpp":
+        request_timeout = timeout or LLAMA_CPP_TIMEOUT
+        vectors = _llama_cpp_embed_request(prepared, request_timeout)
         return [_normalize_vector(v) for v in vectors]
 
     embed_url = get_ollama_url("embed")

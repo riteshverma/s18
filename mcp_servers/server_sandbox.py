@@ -13,6 +13,10 @@ sys.path.append(str(root_dir))
 sys.stderr.write(f"DEBUG: Added to path: {root_dir}\n")
 sys.stderr.write(f"DEBUG: Contents of root: {os.listdir(root_dir)}\n")
 import importlib.util
+try:
+    from stdio_safety import configure_mcp_stdio_logging
+except ImportError:
+    from .stdio_safety import configure_mcp_stdio_logging
 
 # Use importlib to avoid conflict with 'mcp_servers.tools'
 sandbox_path = root_dir / "tools/sandbox.py"
@@ -26,6 +30,8 @@ spec.loader.exec_module(sandbox_mod)
 run_user_code = sandbox_mod.run_user_code
 
 from mcp.server.fastmcp import FastMCP
+
+configure_mcp_stdio_logging()
 
 # Initialize FastMCP server
 mcp = FastMCP("sandbox")

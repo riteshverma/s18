@@ -265,6 +265,4 @@ async def prometheus_metrics():
 
 if __name__ == "__main__":
     import uvicorn
-    # Enable reload=True for development if needed, but here we'll just keep it simple
-    # or actually enable it to avoid these restart issues.
-    uvicorn.run("api:app", host="0.0.0.0", port=8001, reload=True, timeout_keep_alive=75)
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True, timeout_keep_alive=75)

@@ -39,7 +39,7 @@ class ModelManager:
             model_name: The model to use. Can be:
                 - A key from models.json (e.g., "gemini", "phi4")
                 - An actual model name (e.g., "gemini-2.5-flash", "llama3:8b")
-            provider: Optional explicit provider ("gemini", "ollama", or "azure_openai").
+            provider: Optional explicit provider ("gemini", "ollama", "llama_cpp", or "azure_openai").
                       If provided, bypasses models.json lookup.
         """
         self.config = json.loads(MODELS_JSON.read_text())
@@ -47,14 +47,16 @@ class ModelManager:
         self._azure_fallback_provider: Optional[str] = None
         self._azure_fallback_model: Optional[str] = None
 
-        # Load settings for Ollama URL
+        # Load settings for local model endpoints
         try:
             from config.settings_loader import settings
             self._settings = settings
             self.ollama_base_url = settings.get("ollama", {}).get("base_url", "http://127.0.0.1:11434")
+            self.llama_cpp_base_url = settings.get("llama_cpp", {}).get("base_url", "http://127.0.0.1:8080")
         except:
             self._settings = {}
             self.ollama_base_url = "http://127.0.0.1:11434"
+            self.llama_cpp_base_url = "http://127.0.0.1:8080"
 
         # 🎯 NEW: Support explicit provider specification (from settings)
         if provider:
@@ -81,6 +83,18 @@ class ModelManager:
                     }
                 }
                 self.client = None  # Ollama uses HTTP, no client needed
+            elif provider == "llama_cpp":
+                llama_cfg = self._settings.get("llama_cpp", {})
+                endpoints = llama_cfg.get("endpoints", {}) if isinstance(llama_cfg.get("endpoints"), dict) else {}
+                self.model_info = {
+                    "type": "llama_cpp",
+                    "model": self.text_model_key,
+                    "url": {
+                        "chat_completions": f"{self.llama_cpp_base_url}{endpoints.get('chat_completions', '/v1/chat/completions')}",
+                        "embeddings": f"{self.llama_cpp_base_url}{endpoints.get('embeddings', '/v1/embeddings')}",
+                    },
+                }
+                self.client = None  # llama.cpp uses HTTP, no client needed
             elif provider == "azure_openai":
                 # Azure OpenAI: model_name is deployment name (chat deployment)
                 azure_cfg = self._settings.get("azure_openai", {})
@@ -145,6 +159,18 @@ class ModelManager:
                 self.client = None
                 self._azure_fallback_provider = azure_cfg.get("fallback_provider")
                 self._azure_fallback_model = azure_cfg.get("fallback_model")
+            elif self.model_type == "llama_cpp":
+                llama_cfg = self._settings.get("llama_cpp", {})
+                endpoints = llama_cfg.get("endpoints", {}) if isinstance(llama_cfg.get("endpoints"), dict) else {}
+                self.model_info = {
+                    "type": "llama_cpp",
+                    "model": self.model_info.get("model", self.text_model_key),
+                    "url": {
+                        "chat_completions": f"{self.llama_cpp_base_url}{endpoints.get('chat_completions', '/v1/chat/completions')}",
+                        "embeddings": f"{self.llama_cpp_base_url}{endpoints.get('embeddings', '/v1/embeddings')}",
+                    },
+                }
+                self.client = None
             # Ollama doesn't need a persistent client
 
         # Ollama timeout from config (used for completion stage; must allow ~240s+ per step)
@@ -154,6 +180,12 @@ class ModelManager:
                 self._ollama_timeout_seconds = get_timeout()
             except Exception:
                 self._ollama_timeout_seconds = 300
+        elif self.model_type == "llama_cpp":
+            try:
+                from config.settings_loader import get_llama_cpp_timeout
+                self._llama_cpp_timeout_seconds = get_llama_cpp_timeout()
+            except Exception:
+                self._llama_cpp_timeout_seconds = 300
 
     async def generate_text(self, prompt: str) -> str:
         if self.model_type == "gemini":
@@ -161,6 +193,8 @@ class ModelManager:
 
         elif self.model_type == "ollama":
             return await self._ollama_generate(prompt)
+        elif self.model_type == "llama_cpp":
+            return await self._llama_cpp_generate(prompt)
         elif self.model_type == "azure_openai":
             try:
                 return await self._azure_generate(prompt)
@@ -186,6 +220,15 @@ class ModelManager:
         elif self.model_type == "ollama":
             # Ollama multimodal: extract text and images separately
             return await self._ollama_generate_content(contents)
+        elif self.model_type == "llama_cpp":
+            has_non_text = any(not isinstance(c, str) for c in contents)
+            if has_non_text:
+                raise RuntimeError(
+                    "llama.cpp multimodal generation is not enabled in this integration. "
+                    "Use an Ollama multimodal model for image content."
+                )
+            prompt = "\n".join(c for c in contents if isinstance(c, str))
+            return await self._llama_cpp_generate(prompt)
         elif self.model_type == "azure_openai":
             # Phase 1 migration: text content is supported directly; multimodal content
             # temporarily uses fallback provider if configured.
@@ -205,15 +248,17 @@ class ModelManager:
 
     def _build_azure_fallback_manager(self) -> Optional["ModelManager"]:
         provider = (self._azure_fallback_provider or "").strip().lower()
-        if provider not in {"gemini", "ollama"}:
+        if provider not in {"gemini", "ollama", "llama_cpp"}:
             return None
         model_name = self._azure_fallback_model
         if not model_name:
             agent_settings = self._settings.get("agent", {})
             if provider == "gemini":
                 model_name = agent_settings.get("default_model", "gemini-2.5-flash")
-            else:
+            elif provider == "ollama":
                 model_name = self._settings.get("models", {}).get("semantic_chunking", "gemma3:4b")
+            else:
+                model_name = self._settings.get("agent", {}).get("default_model", "Llama-3.2-3B-Instruct")
         try:
             return ModelManager(model_name, provider=provider)
         except Exception as e:
@@ -388,3 +433,34 @@ class ModelManager:
                     return result["response"].strip()
         except Exception as e:
             raise RuntimeError(f"Ollama generation failed: {str(e)}")
+
+    async def _llama_cpp_generate(self, prompt: str) -> str:
+        try:
+            import aiohttp
+
+            timeout = aiohttp.ClientTimeout(
+                total=getattr(self, "_llama_cpp_timeout_seconds", 300)
+            )
+            payload = {
+                "model": self.model_info["model"],
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+            }
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    self.model_info["url"]["chat_completions"],
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    choices = result.get("choices", [])
+                    if not choices:
+                        raise RuntimeError("llama.cpp returned no choices.")
+                    message = choices[0].get("message", {})
+                    content = message.get("content")
+                    if isinstance(content, list):
+                        text_parts = [part.get("text", "") for part in content if isinstance(part, dict)]
+                        return "\n".join(p for p in text_parts if p).strip()
+                    return (content or "").strip()
+        except Exception as e:
+            raise RuntimeError(f"llama.cpp generation failed: {str(e)}")

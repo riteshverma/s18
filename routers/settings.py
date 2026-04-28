@@ -7,11 +7,14 @@ import os
 
 # Import from config system
 from config.settings_loader import (
+    get_llama_cpp_url,
     reload_settings,
     save_settings,
     reset_settings,
     get_ollama_url,
+    normalize_llama_cpp_endpoint_path,
     validate_ollama_base_url,
+    validate_llama_cpp_base_url,
     load_settings,
 )
 from shared.state import settings
@@ -52,6 +55,24 @@ async def update_settings(request: UpdateSettingsRequest):
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
+        llama_cpp_settings = request.settings.get("llama_cpp", {})
+        if isinstance(llama_cpp_settings, dict):
+            if "base_url" in llama_cpp_settings:
+                try:
+                    llama_cpp_settings["base_url"] = validate_llama_cpp_base_url(
+                        str(llama_cpp_settings["base_url"])
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
+            endpoint_settings = llama_cpp_settings.get("endpoints", {})
+            if isinstance(endpoint_settings, dict):
+                for endpoint_name, endpoint_path in endpoint_settings.items():
+                    try:
+                        endpoint_settings[endpoint_name] = normalize_llama_cpp_endpoint_path(
+                            str(endpoint_path), str(endpoint_name)
+                        )
+                    except ValueError as exc:
+                        raise HTTPException(status_code=400, detail=str(exc))
 
         # Use shared global settings
         global settings 
@@ -196,6 +217,75 @@ async def pull_ollama_model(request: PullModelRequest):
         return {"status": "success", "message": f"Model '{request.name}' pulled successfully"}
     except requests.exceptions.Timeout:
         raise HTTPException(status_code=504, detail="Model pull timed out - try from terminal")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/llama_cpp/models")
+async def get_llama_cpp_models():
+    """Get list of models from llama.cpp OpenAI-compatible endpoint."""
+    try:
+        response = requests.get(get_llama_cpp_url("models"), timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        models = []
+        for item in data.get("data", []):
+            name = item.get("id", "")
+            if not name:
+                continue
+            models.append(
+                {
+                    "name": name,
+                    "capabilities": ["text", "embedding"],
+                    "owned_by": item.get("owned_by", "llama.cpp"),
+                }
+            )
+        return {"status": "success", "models": models}
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="llama.cpp server is not running or unreachable.")
+    except requests.exceptions.HTTPError as exc:
+        detail = exc.response.text if exc.response is not None else str(exc)
+        raise HTTPException(status_code=502, detail=f"Failed to query llama.cpp models: {detail}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/llama_cpp/status")
+async def get_llama_cpp_status():
+    """Check llama.cpp runtime configuration and basic connectivity."""
+    try:
+        cfg = load_settings().get("llama_cpp", {})
+        endpoint = os.environ.get("LLAMA_CPP_BASE_URL", cfg.get("base_url", ""))
+        timeout = os.environ.get("LLAMA_CPP_TIMEOUT", str(cfg.get("timeout", 360)))
+
+        configured = bool(endpoint)
+        reachable = False
+        model_count = None
+        error = None
+        if configured:
+            try:
+                models_resp = requests.get(get_llama_cpp_url("models"), timeout=5)
+                models_resp.raise_for_status()
+                model_count = len(models_resp.json().get("data", []))
+                reachable = True
+            except Exception as exc:
+                error = str(exc)
+                try:
+                    health_resp = requests.get(get_llama_cpp_url("health"), timeout=5)
+                    if health_resp.status_code < 500:
+                        reachable = True
+                except Exception:
+                    pass
+
+        return {
+            "status": "success",
+            "configured": configured,
+            "reachable": reachable,
+            "base_url": endpoint,
+            "timeout_seconds": int(timeout) if str(timeout).isdigit() else timeout,
+            "model_count": model_count,
+            "error": error,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

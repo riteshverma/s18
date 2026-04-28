@@ -14,12 +14,18 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.schemas.clinical import validate_cbc_payload
+try:
+    from stdio_safety import configure_mcp_stdio_logging
+except ImportError:
+    from .stdio_safety import configure_mcp_stdio_logging
 
 
 # MCP protocol safety: avoid stdout noise.
 def print(*args, **kwargs):
     sys.stderr.write(" ".join(map(str, args)) + "\n")
     sys.stderr.flush()
+
+configure_mcp_stdio_logging()
 
 
 mcp = FastMCP("mockehr")

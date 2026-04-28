@@ -1,7 +1,9 @@
 # S18Share
 
-**Agentic AI** – A FastAPI backend for AI agents with memory, RAG, MCP servers, scheduled jobs, and a skills system.
+Open-source agent runtime and orchestration framework for AI systems.
 
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)
+![License](https://img.shields.io/badge/License-See%20LICENSE-lightgrey)
 ![Workflow Agnostic](https://img.shields.io/badge/Architecture-Workflow--Agnostic-2f855a)
 ![MCP Hub](https://img.shields.io/badge/MCP-Orchestration_Hub-blue)
 ![Docker CI](https://img.shields.io/badge/CI-Docker%20%2B%20Tests-success)
@@ -11,11 +13,25 @@
 
 ## The magic moment (under 30 seconds)
 
-**One sentence:** Send a natural-language job to **`POST /runs`**, and S18 orchestrates an **agent loop** that can call **REMME memory**, **RAG**, and **MCP tools** (browser, sandbox, custom servers) behind one canonical contract—optionally **verified by Supabase JWT** and **audited to Supabase tables**.
+**One sentence:** Send a natural-language job to **`POST /runs`**, and S18 orchestrates an **agent loop** that can call **REMME memory**, **RAG**, and **MCP tools** (browser, sandbox, custom servers) behind one canonical contract, with optional Supabase JWT verification and audit logging.
 
-**Proof in three steps:** `uv sync` → put `GEMINI_API_KEY` in `.env` → `uv run python api.py` → open **`/docs`** and execute **`POST /runs`** with `{"query": "…"}`. You will see a run id and the pipeline come alive without wiring a separate orchestration framework.
+**Proof in three steps:** `uv sync` -> put `GEMINI_API_KEY` in `.env` -> `uv run python api.py` -> open **`/docs`** and execute **`POST /runs`** with `{"query": "..."}`. You will see a run id and the pipeline come alive without wiring a separate orchestration framework.
 
 **Go deeper in five minutes:** [docs/QUICKSTART_5_MIN.md](docs/QUICKSTART_5_MIN.md) (git clone → running agent, Swagger UI as the built-in front end).
+
+## Why it exists
+
+Most agent prototypes start as fragile scripts: prompts, tools, memory, scheduled jobs, and telemetry all live in different places. S18 gives those pieces a runtime boundary so teams can ship AI workflows with request contracts, state, observability, local/cloud model options, and MCP integrations without rebuilding orchestration plumbing every time.
+
+## Core capabilities
+
+- **Agent runtime:** multi-step planning and execution through FastAPI routes and a reusable `s18_engine` import surface.
+- **Workflow-agnostic contracts:** normalize product-specific payloads into canonical `/runs` requests via integration adapters.
+- **Memory and retrieval:** REMME user memory plus RAG document indexing/search.
+- **MCP hub:** built-in RAG/browser/sandbox servers plus configurable external MCP servers.
+- **Scheduling and automation:** cron-style jobs, skills, inbox flows, and trusted CLI harness jobs.
+- **Local-first or cloud models:** profile overlays for Gemma/Qwen/Ollama/llama.cpp alongside cloud model providers.
+- **Observability:** Prometheus metrics, Docker monitoring assets, and runtime health endpoints.
 
 ## Architecture at a glance
 
@@ -125,6 +141,8 @@ Primary files:
 ## Document Map
 
 - [The magic moment (under 30 seconds)](#the-magic-moment-under-30-seconds)
+- [Why it exists](#why-it-exists)
+- [Core capabilities](#core-capabilities)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [5-minute quickstart](docs/QUICKSTART_5_MIN.md)
 - [Start Here](#start-here)
@@ -145,6 +163,8 @@ Primary files:
 - [Engineering rigor signals](#engineering-rigor-signals)
 - [Project structure](#project-structure)
 - [Configuration](#configuration)
+- [When to use S18 vs orchestration frameworks](#when-to-use-s18-vs-orchestration-frameworks)
+- [Roadmap](#roadmap)
 - [Wise-AI Integration Sync (Mar 2026)](#wise-ai-integration-sync-mar-2026)
 - [License](#license)
 
@@ -213,6 +233,10 @@ The scaffold creates a ready-to-run MCP server starter in `mcp_servers/custom/`.
 Use profile overlays to run S18 in laptop/privacy-focused modes without editing
 tracked settings files.
 
+Both local profiles include `ollama` and `llama_cpp` connection blocks, so you can
+switch providers by changing `agent.model_provider` / `models.embedding_provider`
+without rewriting profile files.
+
 Available profiles under `config/profiles/`:
 
 - `local-laptop-gemma`
@@ -259,7 +283,7 @@ python benchmarks/local_vs_cloud/benchmark_runs.py \
 - **Skills** – Pluggable skills with intent matching and run/success hooks
 - **Streaming** – SSE endpoint for real-time events from the event bus
 - **Harness jobs** – Auth-protected background jobs that run trusted local CLIs (`codex`, `claude`, `gemini`) with persisted state and SSE output events
-- **Config** – Centralized settings in `config/` (Ollama, models, RAG, agent, REMME)
+- **Config** – Centralized settings in `config/` (Ollama, llama.cpp, models, RAG, agent, REMME)
 
 ---
 
@@ -315,16 +339,10 @@ This is an active architecture track that complements harness jobs. Treat this s
 
 ### 1. Install dependencies
 
-Using [uv](https://github.com/astral-sh/uv):
+S18 uses [uv](https://github.com/astral-sh/uv) and `pyproject.toml` as the canonical local setup:
 
 ```bash
 uv sync
-```
-
-Or with pip:
-
-```bash
-pip install -e .
 ```
 
 ### 2. Environment variables
@@ -343,6 +361,7 @@ pip install -e .
 Optional:
 
 - **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
+- **llama.cpp** – Optional local OpenAI-compatible server at `LLAMA_CPP_BASE_URL` (default `http://localhost:8080`) for local text generation and embeddings.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
 - **S18_HARNESS_STATE_DIR** – Optional override for harness job storage location. If unset, harness state defaults to OS-local app data (for example `%LOCALAPPDATA%/S18Share/harness_jobs` on Windows).
 - **S18_CODEX_BIN / S18_CLAUDE_BIN / S18_GEMINI_BIN** – Optional explicit binary paths for provider CLIs; otherwise harness resolves providers from `PATH`.
@@ -560,6 +579,29 @@ Verify MCP registration:
 uv run python scripts/test_gbrain_mcp_registration.py
 uv run python scripts/test_gbrain_mcp_live.py
 ```
+
+---
+
+## When to use S18 vs orchestration frameworks
+
+S18 is not trying to replace every graph or multi-agent library. It is a runtime layer around agentic systems: API contracts, model/provider configuration, memory/RAG, MCP servers, scheduled jobs, auth/logging hooks, and monitoring assets in one backend.
+
+Use S18 when you need:
+
+- A FastAPI surface for product integrations, especially a stable `POST /runs` contract.
+- Runtime state, streaming, scheduler jobs, and operational visibility around agent workflows.
+- A local-first path that can switch between laptop/private models and cloud providers.
+- MCP tool orchestration as part of the backend instead of a one-off script.
+
+Use LangGraph, CrewAI, AutoGen, or similar libraries directly when your main need is the agent-planning abstraction itself and you do not need S18's backend/runtime surface. S18 can coexist with those patterns by treating them as implementation choices behind adapters or agent-loop modules.
+
+## Roadmap
+
+- Tighten the reusable `s18_engine` surface for downstream apps and examples.
+- Expand workflow-agnostic examples beyond the existing finance and travel demos.
+- Continue hardening MCP marketplace integration and server lifecycle controls.
+- Improve A2A / AG-UI interoperability for structured agent events and UI streaming.
+- Broaden production-readiness docs around auth, observability, deployment, and tenancy.
 
 ---
 

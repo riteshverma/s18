@@ -19,6 +19,14 @@ sys.path.append(str(Path(__file__).parent))
 # 2. Add project root to path so 'config.settings_loader' works
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Stdio safety: keep transport stdout clean for JSON-RPC frames.
+try:
+    from stdio_safety import configure_mcp_stdio_logging
+except ImportError:
+    from .stdio_safety import configure_mcp_stdio_logging
+
+configure_mcp_stdio_logging()
+
 # Import local models
 try:
     from models import AddInput, AddOutput, SqrtInput, SqrtOutput, StringsToIntsInput, StringsToIntsOutput, ExpSumInput, ExpSumOutput, PythonCodeInput, PythonCodeOutput, UrlInput, FilePathInput, MarkdownInput, MarkdownOutput, ChunkListOutput, SearchDocumentsInput
@@ -74,7 +82,15 @@ try:
 except ImportError:
     BM25_AVAILABLE = False
 
-from config.settings_loader import settings, get_ollama_url, get_model, get_timeout, load_settings
+from config.settings_loader import (
+    settings,
+    get_llama_cpp_timeout,
+    get_llama_cpp_url,
+    get_model,
+    get_ollama_url,
+    get_timeout,
+    load_settings,
+)
 from core.embedding import (
     get_normalized_embedding,
     try_get_normalized_embedding,
@@ -95,6 +111,7 @@ CHUNK_OVERLAP = settings["rag"]["chunk_overlap"]
 MAX_CHUNK_LENGTH = settings["rag"]["max_chunk_length"]
 TOP_K = settings["rag"]["top_k"]
 OLLAMA_TIMEOUT = get_timeout()
+LLAMA_CPP_TIMEOUT = get_llama_cpp_timeout()
 ROOT = Path(__file__).parent.resolve()
 BASE_DATA_DIR = ROOT.parent / "data"
 MEMORY_SUMMARIES_DIR = ROOT.parent / "memory" / "session_summaries_index"
@@ -517,6 +534,21 @@ CONTEXT FROM DOCUMENT:
                 headers={"api-key": api_key, "Content-Type": "application/json"},
                 json={"messages": payload_messages, "temperature": 0.2},
                 timeout=OLLAMA_TIMEOUT,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        elif provider == "llama_cpp":
+            if image:
+                raise RuntimeError(
+                    "llama.cpp multimodal query is not enabled in this integration. "
+                    "Use an Ollama or Azure OpenAI vision-capable model."
+                )
+            response = requests.post(
+                get_llama_cpp_url("chat_completions"),
+                headers={"Content-Type": "application/json"},
+                json={"model": model_name, "messages": messages, "temperature": 0.2},
+                timeout=LLAMA_CPP_TIMEOUT,
             )
             response.raise_for_status()
             data = response.json()
@@ -1108,6 +1140,8 @@ Keep your response concise (2-3 sentences max)."""
             response.raise_for_status()
             caption = response.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
             return caption if caption else "[No caption returned]"
+        elif provider == "llama_cpp":
+            return "[llama.cpp captioning is not available: image input is not supported by this integration yet.]"
 
         with requests.post(OLLAMA_URL, json={
             "model": VISION_MODEL,

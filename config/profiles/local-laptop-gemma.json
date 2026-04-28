@@ -16,6 +16,16 @@
     "base_url": "http://127.0.0.1:11434",
     "timeout": 360
   },
+  "llama_cpp": {
+    "base_url": "http://127.0.0.1:8080",
+    "timeout": 360,
+    "endpoints": {
+      "chat_completions": "/v1/chat/completions",
+      "embeddings": "/v1/embeddings",
+      "models": "/v1/models",
+      "health": "/health"
+    }
+  },
   "mcp": {
     "mode": "legacy"
   }

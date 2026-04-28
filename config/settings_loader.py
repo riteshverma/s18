@@ -32,39 +32,80 @@ PROFILES_DIR = CONFIG_DIR / "profiles"
 # --- Settings Cache ---
 _settings_cache = None
 
-_ALLOWED_OLLAMA_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_ALLOWED_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _DEFAULT_OLLAMA_PORT = 11434
+_DEFAULT_LLAMA_CPP_PORT = 8080
 _ALLOWED_MCP_MODES = {"legacy", "strict"}
 _DEFAULT_MCP_MODE = "legacy"
 _DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS = 5
 
 
-def _normalize_ollama_base_url(base_url: str, loopback_only: bool) -> str:
-    """Validate and normalize Ollama base URL."""
+def _normalize_local_http_base_url(
+    base_url: str,
+    *,
+    setting_name: str,
+    default_port: int,
+    loopback_only: bool,
+) -> str:
+    """Validate and normalize local HTTP service base URL."""
     raw = (base_url or "").strip()
     if not raw:
-        raise ValueError("ollama.base_url cannot be empty")
+        raise ValueError(f"{setting_name} cannot be empty")
 
     parsed = urlsplit(raw)
     if parsed.scheme not in {"http", "https"}:
-        raise ValueError("ollama.base_url must use http or https")
+        raise ValueError(f"{setting_name} must use http or https")
     if not parsed.hostname:
-        raise ValueError("ollama.base_url must include a hostname")
+        raise ValueError(f"{setting_name} must include a hostname")
     if parsed.username or parsed.password:
-        raise ValueError("ollama.base_url cannot include credentials")
+        raise ValueError(f"{setting_name} cannot include credentials")
     if parsed.query or parsed.fragment:
-        raise ValueError("ollama.base_url cannot include query or fragment")
+        raise ValueError(f"{setting_name} cannot include query or fragment")
     if parsed.path not in {"", "/"}:
-        raise ValueError("ollama.base_url must not include a path")
+        raise ValueError(f"{setting_name} must not include a path")
 
     host = parsed.hostname.lower()
-    if loopback_only and host not in _ALLOWED_OLLAMA_HOSTS:
+    if loopback_only and host not in _ALLOWED_LOCAL_HOSTS:
         raise ValueError(
-            "ollama.base_url host must be loopback (127.0.0.1, localhost, or ::1)"
+            f"{setting_name} host must be loopback (127.0.0.1, localhost, or ::1)"
         )
 
-    port = parsed.port or _DEFAULT_OLLAMA_PORT
+    port = parsed.port or default_port
     return f"{parsed.scheme}://{host}:{port}"
+
+
+def _normalize_ollama_base_url(base_url: str, loopback_only: bool) -> str:
+    """Validate and normalize Ollama base URL."""
+    return _normalize_local_http_base_url(
+        base_url,
+        setting_name="ollama.base_url",
+        default_port=_DEFAULT_OLLAMA_PORT,
+        loopback_only=loopback_only,
+    )
+
+
+def _normalize_llama_cpp_base_url(base_url: str, loopback_only: bool) -> str:
+    """Validate and normalize llama.cpp base URL."""
+    return _normalize_local_http_base_url(
+        base_url,
+        setting_name="llama_cpp.base_url",
+        default_port=_DEFAULT_LLAMA_CPP_PORT,
+        loopback_only=loopback_only,
+    )
+
+
+def normalize_llama_cpp_endpoint_path(path: str, endpoint_name: str) -> str:
+    """Validate and normalize llama.cpp endpoint path."""
+    normalized = (path or "").strip()
+    if not normalized:
+        raise ValueError(f"llama_cpp.endpoints.{endpoint_name} cannot be empty")
+    if not normalized.startswith("/"):
+        raise ValueError(f"llama_cpp.endpoints.{endpoint_name} must start with '/'")
+    if "?" in normalized or "#" in normalized:
+        raise ValueError(
+            f"llama_cpp.endpoints.{endpoint_name} cannot include query or fragment"
+        )
+    return normalized
 
 
 def validate_ollama_base_url(base_url: str) -> str:
@@ -75,6 +116,16 @@ def validate_ollama_base_url(base_url: str) -> str:
 def normalize_runtime_ollama_base_url(base_url: str) -> str:
     """Validate trusted runtime Ollama URL without loopback host restriction."""
     return _normalize_ollama_base_url(base_url, loopback_only=False)
+
+
+def validate_llama_cpp_base_url(base_url: str) -> str:
+    """Validate and normalize llama.cpp base URL to loopback-only endpoints."""
+    return _normalize_llama_cpp_base_url(base_url, loopback_only=True)
+
+
+def normalize_runtime_llama_cpp_base_url(base_url: str) -> str:
+    """Validate trusted runtime llama.cpp URL without loopback host restriction."""
+    return _normalize_llama_cpp_base_url(base_url, loopback_only=False)
 
 
 def normalize_mcp_mode(mode: str | None) -> str:
@@ -135,6 +186,14 @@ def load_settings() -> dict:
         if env_ollama_timeout and env_ollama_timeout.isdigit():
             _settings_cache.setdefault("ollama", {})
             _settings_cache["ollama"]["timeout"] = int(env_ollama_timeout)
+        env_llama_cpp_base_url = os.getenv("LLAMA_CPP_BASE_URL")
+        if env_llama_cpp_base_url:
+            _settings_cache.setdefault("llama_cpp", {})
+            _settings_cache["llama_cpp"]["base_url"] = env_llama_cpp_base_url
+        env_llama_cpp_timeout = os.getenv("LLAMA_CPP_TIMEOUT")
+        if env_llama_cpp_timeout and env_llama_cpp_timeout.isdigit():
+            _settings_cache.setdefault("llama_cpp", {})
+            _settings_cache["llama_cpp"]["timeout"] = int(env_llama_cpp_timeout)
         env_run_poll = os.getenv("RUN_POLL_TIMEOUT_SECONDS")
         if env_run_poll and env_run_poll.isdigit():
             _settings_cache["run_poll_timeout_seconds"] = int(env_run_poll)
@@ -241,7 +300,7 @@ def load_settings() -> dict:
             or _settings_cache.get("agent", {}).get("default_model", "")
         )
         azure_key_present = bool(os.getenv("AZURE_OPENAI_API_KEY", "").strip())
-        if azure_endpoint and azure_key_present and _explicit_provider not in {"ollama", "gemini"}:
+        if azure_endpoint and azure_key_present and _explicit_provider not in {"ollama", "gemini", "llama_cpp"}:
             _settings_cache.setdefault("agent", {})
             _settings_cache["agent"]["model_provider"] = "azure_openai"
             if azure_chat_deployment:
@@ -251,7 +310,7 @@ def load_settings() -> dict:
             if azure_cfg.get("embedding_deployment"):
                 _settings_cache["models"]["embedding"] = azure_cfg["embedding_deployment"]
                 _settings_cache["models"]["embedding_provider"] = "azure_openai"
-        elif os.getenv("GEMINI_API_KEY", "").strip() and _explicit_provider not in {"ollama", "azure_openai"}:
+        elif os.getenv("GEMINI_API_KEY", "").strip() and _explicit_provider not in {"ollama", "azure_openai", "llama_cpp"}:
             _settings_cache.setdefault("agent", {})
             _settings_cache["agent"]["model_provider"] = "gemini"
             dm = str(_settings_cache["agent"].get("default_model") or "")
@@ -297,13 +356,51 @@ def get_ollama_url(endpoint: str = "generate") -> str:
     }
     return f"{base}{endpoints.get(endpoint, '/api/' + endpoint)}"
 
+
+def get_llama_cpp_url(endpoint: str = "chat_completions") -> str:
+    """Get full llama.cpp URL for a specific endpoint."""
+    runtime_settings = load_settings()
+    cfg = runtime_settings.get("llama_cpp", {})
+    base = normalize_runtime_llama_cpp_base_url(
+        cfg.get("base_url", "http://127.0.0.1:8080")
+    )
+    if endpoint == "base":
+        return base
+
+    configured_paths = (
+        cfg.get("endpoints", {}) if isinstance(cfg.get("endpoints"), dict) else {}
+    )
+    default_paths = {
+        "chat_completions": "/v1/chat/completions",
+        "embeddings": "/v1/embeddings",
+        "models": "/v1/models",
+        "health": "/health",
+    }
+    endpoint_path = configured_paths.get(
+        endpoint, default_paths.get(endpoint, f"/{endpoint}")
+    )
+    endpoint_path = normalize_llama_cpp_endpoint_path(str(endpoint_path), endpoint)
+    return f"{base}{endpoint_path}"
+
 def get_model(purpose: str) -> str:
     """Get model name for a specific purpose."""
     return load_settings()["models"].get(purpose, "gemma3:4b")
 
+
+def get_embedding_provider() -> str:
+    """Get the configured embedding provider."""
+    provider = str(load_settings().get("models", {}).get("embedding_provider", "")).strip().lower()
+    return provider or "ollama"
+
+
 def get_timeout() -> int:
     """Get Ollama timeout in seconds."""
     return load_settings()["ollama"]["timeout"]
+
+
+def get_llama_cpp_timeout() -> int:
+    """Get llama.cpp timeout in seconds."""
+    return int(load_settings().get("llama_cpp", {}).get("timeout", 360))
 
 def get_run_poll_timeout() -> int:
     """Recommended timeout in seconds for clients polling GET /runs/{id}. Full runs often exceed 5 minutes."""
