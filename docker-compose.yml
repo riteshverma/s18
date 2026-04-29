@@ -32,7 +32,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - llama_cpp
       - redis
     networks:
       - default
@@ -66,12 +65,13 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - redis
-      - llama_cpp
     networks:
       - default
       - shared_integration_net
 
   llama_cpp:
+    profiles:
+      - llama_cpp
     image: samueltallet/alpine-llama-cpp-server:latest
     container_name: s18share-llama-cpp
     restart: unless-stopped
