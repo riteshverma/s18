@@ -19,6 +19,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config.settings_loader import settings, get_ollama_url, get_model, get_timeout
 
 
+def _hint_ollama_404_failure(model: str, api_url: str) -> str:
+    return (
+        f"\n[HINT] Ollama returned 404 — often the model is missing on THAT host. Try: "
+        f"`ollama pull {model}`. URL was {api_url!r}. "
+        "If RemMe runs in Docker beside the Compose `ollama` service, set "
+        "OLLAMA_BASE_URL=http://ollama:11434 (avoid host.docker.internal unless Ollama is only on the host OS)."
+    )
+
+
 class RemmeExtractor:
     """
     Extracts memories and structured preferences from conversations.
@@ -97,6 +106,14 @@ EXISTING RELEVANT MEMORIES:
             # Parse JSON
             return self._parse_extraction_result(content)
             
+        except requests.HTTPError as e:
+            resp = getattr(e, "response", None)
+            body_snip = (resp.text or "")[:600] if resp is not None else ""
+            suffix = ""
+            if resp is not None and resp.status_code == 404:
+                suffix = _hint_ollama_404_failure(self.model, self.api_url)
+            print(f"[ERROR] Ollama Request Failed: {e}\n[DEBUG] Response snippet: {body_snip}{suffix}")
+            return [], {}
         except requests.exceptions.RequestException as e:
             print(f"[ERROR] Ollama Request Failed: {e}")
             return [], {}

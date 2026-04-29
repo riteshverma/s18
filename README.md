@@ -231,19 +231,33 @@ The scaffold creates a ready-to-run MCP server starter in `mcp_servers/custom/`.
 ## Local-first profiles
 
 Use profile overlays to run S18 in laptop/privacy-focused modes without editing
-tracked settings files.
-
-Both local profiles include `ollama` and `llama_cpp` connection blocks, so you can
-switch providers by changing `agent.model_provider` / `models.embedding_provider`
-without rewriting profile files.
+tracked settings files. The default local path is **Ollama mode** because it is
+usually faster to start and simpler for laptops. **llama.cpp mode** is available
+when you want an OpenAI-compatible local server, especially on a machine where
+you can run `llama-server` natively for better CPU/GPU performance than Docker.
 
 Available profiles under `config/profiles/`:
 
-- `local-laptop-gemma`
-- `local-laptop-qwen`
-- `privacy-first`
+- `local-laptop-gemma` - Ollama mode with `gemma3:4b`
+- `local-laptop-qwen` - Ollama mode with Qwen models
+- `local-llama-cpp` - llama.cpp mode for chat and embeddings
+- `privacy-first` - Ollama-first private local profile
 
-Set a profile at runtime:
+Quick toggle scripts for Docker-based local development:
+
+```powershell
+.\scripts\use-ollama.ps1
+.\scripts\use-llama-cpp.ps1
+```
+
+If you run `llama-server` outside Docker on the host for better performance,
+start it first, then point the Docker API/worker at the host server:
+
+```powershell
+.\scripts\use-llama-cpp.ps1 -HostServer
+```
+
+For non-Docker local development, set a profile at runtime:
 
 ```bash
 S18_PROFILE=local-laptop-gemma uv run python api.py
@@ -253,6 +267,15 @@ PowerShell:
 
 ```powershell
 $env:S18_PROFILE="local-laptop-gemma"; uv run python api.py
+```
+
+For native llama.cpp outside Docker, run an OpenAI-compatible `llama-server`
+on port `8080`, then use:
+
+```powershell
+$env:S18_PROFILE="local-llama-cpp"
+$env:LLAMA_CPP_BASE_URL="http://127.0.0.1:8080"
+uv run python api.py
 ```
 
 Benchmark local vs cloud latency using:
@@ -360,8 +383,9 @@ uv sync
 
 Optional:
 
-- **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
-- **llama.cpp** – Optional local OpenAI-compatible server at `LLAMA_CPP_BASE_URL` (default `http://localhost:8080`) for local text generation and embeddings.
+- **S18_PROFILE** – Runtime profile overlay. Use `local-laptop-gemma` for Ollama mode or `local-llama-cpp` for llama.cpp mode.
+- **Ollama** – Default local config points to `http://127.0.0.1:11434`. In Docker Compose, use `OLLAMA_BASE_URL=http://ollama:11434` when using the bundled Ollama service.
+- **llama.cpp** – Optional OpenAI-compatible server at `LLAMA_CPP_BASE_URL`. Use `http://127.0.0.1:8080` for a host-local Python run, `http://host.docker.internal:8080` when Docker API calls a host `llama-server`, or `http://llama_cpp:8080` for the bundled Compose service.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
 - **S18_HARNESS_STATE_DIR** – Optional override for harness job storage location. If unset, harness state defaults to OS-local app data (for example `%LOCALAPPDATA%/S18Share/harness_jobs` on Windows).
 - **S18_CODEX_BIN / S18_CLAUDE_BIN / S18_GEMINI_BIN** – Optional explicit binary paths for provider CLIs; otherwise harness resolves providers from `PATH`.
@@ -424,6 +448,7 @@ Set `GEMINI_API_KEY` in `.env`.
 Set in `.env`:
 
 ```bash
+S18_PROFILE=local-laptop-gemma
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 ```
 
@@ -438,16 +463,52 @@ docker compose up --build -d api
 Keep in `.env`:
 
 ```bash
+S18_PROFILE=local-laptop-gemma
 OLLAMA_BASE_URL=http://ollama:11434
 ```
 
 Then:
 
 ```bash
-docker compose up --build -d
+docker compose --profile ollama up --build -d
 ```
 
-### 4. Verify (Docker mapping)
+### 4. Run API + host llama.cpp
+
+For best llama.cpp performance, many users run `llama-server` directly on the
+host OS or a dedicated machine instead of inside Docker. Start an
+OpenAI-compatible llama.cpp server with embeddings enabled, for example:
+
+```bash
+llama-server -m ./models/model.gguf --host 0.0.0.0 --port 8080 --embeddings --pooling mean
+```
+
+If the S18 API runs in Docker and llama.cpp runs on the host, set:
+
+```bash
+S18_PROFILE=local-llama-cpp
+LLAMA_CPP_BASE_URL=http://host.docker.internal:8080
+```
+
+Then:
+
+```bash
+docker compose up --build -d api
+```
+
+PowerShell shortcut:
+
+```powershell
+.\scripts\use-llama-cpp.ps1 -HostServer
+```
+
+If you prefer the bundled Compose llama.cpp service instead, use:
+
+```powershell
+.\scripts\use-llama-cpp.ps1
+```
+
+### 5. Verify (Docker mapping)
 
 - API: [http://localhost:8001](http://localhost:8001)
 - Health: [http://localhost:8001/health](http://localhost:8001/health)
