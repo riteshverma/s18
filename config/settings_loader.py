@@ -400,7 +400,12 @@ def get_timeout() -> int:
 
 def get_llama_cpp_timeout() -> int:
     """Get llama.cpp timeout in seconds."""
-    return int(load_settings().get("llama_cpp", {}).get("timeout", 360))
+    raw = load_settings().get("llama_cpp", {}).get("timeout", 360)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 360
+    return value if value > 0 else 360
 
 def get_run_poll_timeout() -> int:
     """Recommended timeout in seconds for clients polling GET /runs/{id}. Full runs often exceed 5 minutes."""

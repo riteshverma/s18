@@ -7,12 +7,14 @@ import os
 
 # Import from config system
 from config.settings_loader import (
+    get_llama_cpp_timeout,
     get_llama_cpp_url,
     reload_settings,
     save_settings,
     reset_settings,
     get_ollama_url,
     normalize_llama_cpp_endpoint_path,
+    normalize_runtime_llama_cpp_base_url,
     validate_ollama_base_url,
     validate_llama_cpp_base_url,
     load_settings,
@@ -244,10 +246,18 @@ async def get_llama_cpp_models():
     except requests.exceptions.ConnectionError:
         raise HTTPException(status_code=503, detail="llama.cpp server is not running or unreachable.")
     except requests.exceptions.HTTPError as exc:
-        detail = exc.response.text if exc.response is not None else str(exc)
-        raise HTTPException(status_code=502, detail=f"Failed to query llama.cpp models: {detail}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        status = (
+            exc.response.status_code if exc.response is not None else "error"
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to query llama.cpp models (HTTP {status}).",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Unexpected error querying llama.cpp models.",
+        )
 
 
 @router.get("/llama_cpp/status")
@@ -255,10 +265,17 @@ async def get_llama_cpp_status():
     """Check llama.cpp runtime configuration and basic connectivity."""
     try:
         cfg = load_settings().get("llama_cpp", {})
-        endpoint = os.environ.get("LLAMA_CPP_BASE_URL", cfg.get("base_url", ""))
-        timeout = os.environ.get("LLAMA_CPP_TIMEOUT", str(cfg.get("timeout", 360)))
+        endpoint_raw = os.environ.get("LLAMA_CPP_BASE_URL", cfg.get("base_url", ""))
+        endpoint_display = ""
+        if endpoint_raw:
+            try:
+                endpoint_display = normalize_runtime_llama_cpp_base_url(
+                    str(endpoint_raw)
+                )
+            except ValueError:
+                endpoint_display = str(endpoint_raw).strip()
 
-        configured = bool(endpoint)
+        configured = bool(str(endpoint_raw).strip())
         reachable = False
         model_count = None
         error = None
@@ -268,8 +285,8 @@ async def get_llama_cpp_status():
                 models_resp.raise_for_status()
                 model_count = len(models_resp.json().get("data", []))
                 reachable = True
-            except Exception as exc:
-                error = str(exc)
+            except Exception:
+                error = "failed to reach llama.cpp models endpoint"
                 try:
                     health_resp = requests.get(get_llama_cpp_url("health"), timeout=5)
                     if health_resp.status_code < 500:
@@ -281,13 +298,16 @@ async def get_llama_cpp_status():
             "status": "success",
             "configured": configured,
             "reachable": reachable,
-            "base_url": endpoint,
-            "timeout_seconds": int(timeout) if str(timeout).isdigit() else timeout,
+            "base_url": endpoint_display,
+            "timeout_seconds": get_llama_cpp_timeout(),
             "model_count": model_count,
             "error": error,
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load llama.cpp status.",
+        )
 
 
 @router.get("/gemini/status")
