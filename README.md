@@ -30,7 +30,7 @@ Most agent prototypes start as fragile scripts: prompts, tools, memory, schedule
 - **Memory and retrieval:** REMME user memory plus RAG document indexing/search.
 - **MCP hub:** built-in RAG/browser/sandbox servers plus configurable external MCP servers.
 - **Scheduling and automation:** cron-style jobs, skills, inbox flows, and trusted CLI harness jobs.
-- **Local-first or cloud models:** profile overlays for Gemma/Qwen/Ollama/llama.cpp alongside cloud model providers.
+- **Local-first or cloud models:** profile overlays for local models alongside cloud model providers.
 - **Observability:** Prometheus metrics, Docker monitoring assets, and runtime health endpoints.
 
 ## Architecture at a glance
