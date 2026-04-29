@@ -233,6 +233,10 @@ The scaffold creates a ready-to-run MCP server starter in `mcp_servers/custom/`.
 Use profile overlays to run S18 in laptop/privacy-focused modes without editing
 tracked settings files.
 
+Both local profiles include `ollama` and `llama_cpp` connection blocks, so you can
+switch providers by changing `agent.model_provider` / `models.embedding_provider`
+without rewriting profile files.
+
 Available profiles under `config/profiles/`:
 
 - `local-laptop-gemma`
@@ -279,7 +283,7 @@ python benchmarks/local_vs_cloud/benchmark_runs.py \
 - **Skills** – Pluggable skills with intent matching and run/success hooks
 - **Streaming** – SSE endpoint for real-time events from the event bus
 - **Harness jobs** – Auth-protected background jobs that run trusted local CLIs (`codex`, `claude`, `gemini`) with persisted state and SSE output events
-- **Config** – Centralized settings in `config/` (Ollama, models, RAG, agent, REMME)
+- **Config** – Centralized settings in `config/` (Ollama, llama.cpp, models, RAG, agent, REMME)
 
 ---
 
@@ -357,6 +361,7 @@ uv sync
 Optional:
 
 - **Ollama** – Default config points to `http://127.0.0.1:11434`. Run [Ollama](https://ollama.ai) locally for embedding, semantic chunking, and optional agent overrides.
+- **llama.cpp** – Optional local OpenAI-compatible server at `LLAMA_CPP_BASE_URL` (default `http://localhost:8080`) for local text generation and embeddings.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
 - **S18_HARNESS_STATE_DIR** – Optional override for harness job storage location. If unset, harness state defaults to OS-local app data (for example `%LOCALAPPDATA%/S18Share/harness_jobs` on Windows).
 - **S18_CODEX_BIN / S18_CLAUDE_BIN / S18_GEMINI_BIN** – Optional explicit binary paths for provider CLIs; otherwise harness resolves providers from `PATH`.

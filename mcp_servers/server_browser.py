@@ -12,10 +12,18 @@ import asyncio
 import os
 from dotenv import load_dotenv
 
+# Stdio safety: keep transport stdout clean for JSON-RPC frames.
+try:
+    from stdio_safety import configure_mcp_stdio_logging
+except ImportError:
+    from .stdio_safety import configure_mcp_stdio_logging
+
 # MCP Protocol Safety: Redirect print to stderr
 def print(*args, **kwargs):
     sys.stderr.write(" ".join(map(str, args)) + "\n")
     sys.stderr.flush()
+
+configure_mcp_stdio_logging()
 
 load_dotenv()
 
@@ -185,10 +193,12 @@ async def browser_use_action(string: str, headless: bool = True) -> str:
             model_provider = agent_settings.get("model_provider", "gemini")
             model_name = agent_settings.get("default_model", "gemini-2.5-flash")
             ollama_base_url = settings.get("ollama", {}).get("base_url", "http://127.0.0.1:11434")
+            llama_cpp_base_url = settings.get("llama_cpp", {}).get("base_url", "http://127.0.0.1:8080")
         except:
             model_provider = "gemini"
             model_name = "gemini-2.5-flash"
             ollama_base_url = "http://127.0.0.1:11434"
+            llama_cpp_base_url = "http://127.0.0.1:8080"
         
         # Initialize LLM based on provider
         if model_provider == "ollama":
@@ -224,6 +234,25 @@ async def browser_use_action(string: str, headless: bool = True) -> str:
                 except Exception as e:
                     print(f"⚠️ Azure OpenAI init failed ({e}), falling back to Gemini")
                     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
+        elif model_provider == "llama_cpp":
+            try:
+                from langchain_openai import ChatOpenAI  # type: ignore[reportMissingImports]
+                base_url = llama_cpp_base_url.rstrip("/")
+                if not base_url.endswith("/v1"):
+                    base_url = f"{base_url}/v1"
+                llm = ChatOpenAI(
+                    model=model_name,
+                    api_key=os.getenv("LLAMA_CPP_API_KEY", "llama-cpp"),
+                    base_url=base_url,
+                    temperature=0.2,
+                )
+                print(f"🖥️ Browser Use: Using llama.cpp model {model_name}")
+            except ImportError:
+                print("⚠️ langchain_openai not installed, falling back to Gemini")
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
+            except Exception as e:
+                print(f"⚠️ llama.cpp init failed ({e}), falling back to Gemini")
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
         else:
             llm = ChatGoogleGenerativeAI(model=model_name, google_api_key=os.getenv("GEMINI_API_KEY"))
             print(f"☁️ Browser Use: Using Gemini model {model_name}")

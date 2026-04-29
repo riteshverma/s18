@@ -37,6 +37,30 @@ class SettingsRouterValidationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("host must be loopback", response.json().get("detail", ""))
 
+    def test_put_settings_rejects_unsafe_llama_cpp_base_url(self):
+        with patch("routers.settings.reload_settings", return_value={"llama_cpp": {"base_url": "http://127.0.0.1:8080"}}), patch(
+            "routers.settings.save_settings"
+        ):
+            response = self.client.put(
+                "/settings",
+                json={"settings": {"llama_cpp": {"base_url": "http://example.com:8080"}}},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("host must be loopback", response.json().get("detail", ""))
+
+    def test_put_settings_rejects_invalid_llama_cpp_endpoint_path(self):
+        with patch("routers.settings.reload_settings", return_value={"llama_cpp": {"base_url": "http://127.0.0.1:8080"}}), patch(
+            "routers.settings.save_settings"
+        ):
+            response = self.client.put(
+                "/settings",
+                json={"settings": {"llama_cpp": {"endpoints": {"chat_completions": "v1/chat/completions"}}}},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("must start with '/'", response.json().get("detail", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

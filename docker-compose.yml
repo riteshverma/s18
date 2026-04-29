@@ -16,6 +16,8 @@ services:
       AZURE_OPENAI_CHAT_DEPLOYMENT: ${AZURE_OPENAI_CHAT_DEPLOYMENT:-}
       AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:-}
       AUTH_ENABLED: ${S18_AUTH_ENABLED:-false}
+      LLAMA_CPP_BASE_URL: ${LLAMA_CPP_BASE_URL:-http://llama_cpp:8080}
+      LLAMA_CPP_TIMEOUT: ${LLAMA_CPP_TIMEOUT:-360}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
       S18_RUN_EXECUTOR: ${S18_RUN_EXECUTOR:-in_process}
@@ -30,7 +32,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - ollama
+      - llama_cpp
       - redis
     networks:
       - default
@@ -47,6 +49,8 @@ services:
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       AUTH_ENABLED: ${S18_AUTH_ENABLED:-false}
+      LLAMA_CPP_BASE_URL: ${LLAMA_CPP_BASE_URL:-http://llama_cpp:8080}
+      LLAMA_CPP_TIMEOUT: ${LLAMA_CPP_TIMEOUT:-360}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-300}
       S18_RUN_EXECUTOR: celery
@@ -62,19 +66,34 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - redis
-      - ollama
+      - llama_cpp
     networks:
       - default
       - shared_integration_net
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: s18share-ollama
+  llama_cpp:
+    image: samueltallet/alpine-llama-cpp-server:latest
+    container_name: s18share-llama-cpp
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "8080:8080"
+    command:
+      - "/opt/llama.cpp/llama-server"
+      - "-m"
+      - "/models/${LLAMA_CPP_MODEL_FILE:-model.gguf}"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--embeddings"
+      - "--pooling"
+      - "${LLAMA_CPP_POOLING:-mean}"
+      - "--ctx-size"
+      - "${LLAMA_CPP_CTX_SIZE:-4096}"
+      - "--n-predict"
+      - "${LLAMA_CPP_N_PREDICT:-1024}"
     volumes:
-      - ollama_data:/root/.ollama
+      - ./models:/models
     networks:
       - default
       - shared_integration_net
@@ -92,7 +111,6 @@ services:
       - default
 
 volumes:
-  ollama_data:
   redis_data:
 
 networks:
