@@ -98,6 +98,20 @@ services:
       - default
       - shared_integration_net
 
+  ollama:
+    profiles:
+      - ollama
+    image: ollama/ollama:latest
+    container_name: s18share-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - default
+      - shared_integration_net
+
   redis:
     image: redis:7-alpine
     container_name: s18share-redis
@@ -111,6 +125,7 @@ services:
       - default
 
 volumes:
+  ollama_data:
   redis_data:
 
 networks:
