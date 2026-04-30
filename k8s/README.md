@@ -9,6 +9,8 @@ This directory contains baseline manifests to run S18Share on Kubernetes.
 - A Kubernetes cluster with:
   - storage class for PVCs
   - ingress controller (if using `ingress.yaml`)
+- Optional for worker autoscaling:
+  - [KEDA](https://keda.sh/docs/latest/deploy/) installed in the cluster
 
 ## 1) Configure secrets and image
 
@@ -34,11 +36,36 @@ kubectl apply -f k8s/hpa.yaml
 kubectl apply -f k8s/ingress.yaml
 ```
 
+Enable `/runs` queue autoscaling (KEDA + Redis scaler):
+
+```bash
+kubectl apply -f k8s/keda-worker-scaledobject.yaml
+```
+
+Enable ingest queue autoscaling with a separate envelope:
+
+```bash
+kubectl apply -f k8s/keda-ingest-worker-scaledobject.yaml
+```
+
+Preset tuning values are documented in `k8s/keda-values.md`.
+
+If Redis requires authentication:
+
+1. Copy `k8s/keda-triggerauth.template.yaml` -> `k8s/keda-triggerauth.yaml`
+2. Set `redis-password`
+3. Apply it: `kubectl apply -f k8s/keda-triggerauth.yaml`
+4. Uncomment `authenticationRef` in:
+   - `k8s/keda-worker-scaledobject.yaml`
+   - `k8s/keda-ingest-worker-scaledobject.yaml`
+
 ## 3) Verify
 
 ```bash
-kubectl -n s18share get pods,svc,pvc,hpa
+kubectl -n s18share get pods,svc,pvc,hpa,scaledobject
 kubectl -n s18share logs deploy/s18share-api --tail=200
+kubectl -n s18share describe scaledobject s18share-worker-redis
+kubectl -n s18share describe scaledobject s18share-ingest-worker-redis
 ```
 
 ## Notes
@@ -46,3 +73,14 @@ kubectl -n s18share logs deploy/s18share-api --tail=200
 - Start with `replicas: 1` while using file-based state (SQLite/snapshots/index files).
 - Scale-out safely after migrating state to external/shared data stores.
 - Set `S18_RUN_EXECUTOR=celery` for the API once Redis and the worker deployment are ready to own run execution.
+- Worker split with separate queue behavior:
+  - `s18share-worker` consumes queue `celery` (`/runs` tasks)
+  - `s18share-ingest-worker` consumes queue `ingest` (ingest pipeline tasks)
+- API autoscaling remains on `k8s/hpa.yaml` (unchanged).
+- `k8s/configmap.yaml` sets strict MCP readiness defaults for `/runs`:
+  - `MCP_MODE=strict`
+  - `MCP_REQUIRED_SERVERS=rag,sandbox`
+  - `MCP_STARTUP_TIMEOUT_SECONDS=10`
+- Queue names can be adjusted via:
+  - `S18_CELERY_RUNS_QUEUE`
+  - `S18_CELERY_INGEST_QUEUE`

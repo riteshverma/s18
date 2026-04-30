@@ -153,6 +153,14 @@ class ProfileSettingsTests(unittest.TestCase):
             reload_settings()
             self.assertEqual(get_mcp_mode(), "strict")
             self.assertIn("rag", get_mcp_required_servers())
+            self.assertIn("sandbox", get_mcp_required_servers())
+
+    def test_distribution_runs_profile_requires_rag_and_sandbox(self):
+        with patch.dict("os.environ", {"S18_PROFILE": "distribution-runs"}, clear=False):
+            reload_settings()
+            self.assertEqual(get_mcp_mode(), "strict")
+            self.assertEqual(get_mcp_required_servers(), ["rag", "sandbox"])
+            self.assertEqual(get_mcp_startup_timeout(), 10.0)
 
     def test_env_overrides_llama_cpp_connection(self):
         with patch.dict(

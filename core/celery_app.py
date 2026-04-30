@@ -10,6 +10,9 @@ def _broker_url() -> str:
 def _result_backend_url() -> str:
     return os.getenv("CELERY_RESULT_BACKEND", _broker_url())
 
+RUNS_QUEUE = os.getenv("S18_CELERY_RUNS_QUEUE", "celery").strip() or "celery"
+INGEST_QUEUE = os.getenv("S18_CELERY_INGEST_QUEUE", "ingest").strip() or "ingest"
+
 
 celery_app = Celery(
     "s18share",
@@ -26,6 +29,14 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     task_acks_late=True,
+    task_default_queue=RUNS_QUEUE,
+    task_routes={
+        "s18share.run_agent": {"queue": RUNS_QUEUE},
+        "s18share.resume_agent": {"queue": RUNS_QUEUE},
+        "s18share.ingest.materialize": {"queue": INGEST_QUEUE},
+        "s18share.ingest.parse_and_chunk": {"queue": INGEST_QUEUE},
+        "s18share.ingest.embed_and_index": {"queue": INGEST_QUEUE},
+    },
     worker_prefetch_multiplier=int(os.getenv("S18_CELERY_PREFETCH_MULTIPLIER", "1")),
     broker_connection_retry_on_startup=True,
 )

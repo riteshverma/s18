@@ -14,7 +14,7 @@
   },
   "mcp": {
     "mode": "strict",
-    "required_servers": ["rag"],
+    "required_servers": ["rag", "sandbox"],
     "startup_timeout_seconds": 8
   }
 }

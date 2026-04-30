@@ -1,0 +1,23 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: s18share-worker-redis
+  namespace: s18share
+spec:
+  scaleTargetRef:
+    name: s18share-worker
+  pollingInterval: 15
+  cooldownPeriod: 60
+  minReplicaCount: 1
+  maxReplicaCount: 8
+  triggers:
+    - type: redis
+      metadata:
+        address: s18share-redis.s18share.svc.cluster.local:6379
+        listName: celery
+        listLength: "5"
+        databaseIndex: "0"
+      # If Redis requires auth, copy keda-triggerauth.template.yaml to
+      # keda-triggerauth.yaml, set the password secret, apply it, then uncomment:
+      # authenticationRef:
+      #   name: s18share-redis-auth

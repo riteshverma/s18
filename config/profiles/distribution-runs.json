@@ -1,0 +1,12 @@
+{
+  "agent": {
+    "planning_mode": "conservative",
+    "max_steps": 4
+  },
+  "mcp": {
+    "mode": "strict",
+    "required_servers": ["rag", "sandbox"],
+    "startup_timeout_seconds": 10
+  },
+  "run_poll_timeout_seconds": 1200
+}

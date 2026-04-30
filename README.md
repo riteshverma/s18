@@ -242,6 +242,7 @@ Available profiles under `config/profiles/`:
 - `local-laptop-qwen` - Ollama mode with Qwen models
 - `local-llama-cpp` - llama.cpp mode for chat and embeddings
 - `privacy-first` - Ollama-first private local profile
+- `distribution-runs` - strict MCP readiness profile for `/runs` (requires `rag` + `sandbox`)
 
 Quick toggle scripts for Docker-based local development:
 
@@ -384,6 +385,11 @@ uv sync
 Optional:
 
 - **S18_PROFILE** – Runtime profile overlay. Use `local-laptop-gemma` for Ollama mode or `local-llama-cpp` for llama.cpp mode.
+- **MCP_MODE** – `legacy` (best-effort MCP startup) or `strict` (health/readiness requires listed MCP servers).
+- **MCP_REQUIRED_SERVERS** – Comma-separated required MCP servers in strict mode (for example `rag,sandbox` for `/runs` with retrieval + sandbox tools).
+- **MCP_STARTUP_TIMEOUT_SECONDS** – Startup budget for MCP server bring-up before readiness is evaluated.
+- **S18_CELERY_RUNS_QUEUE** – Queue name for `/runs` background tasks (default `celery`).
+- **S18_CELERY_INGEST_QUEUE** – Queue name for ingest pipeline tasks (default `ingest`).
 - **Ollama** – Default local config points to `http://127.0.0.1:11434`. In Docker Compose, use `OLLAMA_BASE_URL=http://ollama:11434` when using the bundled Ollama service.
 - **llama.cpp** – Optional OpenAI-compatible server at `LLAMA_CPP_BASE_URL`. Use `http://127.0.0.1:8080` for a host-local Python run, `http://host.docker.internal:8080` when Docker API calls a host `llama-server`, or `http://llama_cpp:8080` for the bundled Compose service.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
