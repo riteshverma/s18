@@ -61,7 +61,7 @@ if ($HostServer) {
     Write-Host "llama.cpp URL for Docker: http://host.docker.internal:8080"
 }
 else {
-    Write-Host "llama.cpp URL for Docker: http://llama_cpp:8080"
+    Write-Host "llama.cpp URL for Docker: http://s18share-llama-cpp:8080"
 }
 Write-Host "For a non-Docker local shell, run: `$env:S18_PROFILE='local-llama-cpp'; `$env:LLAMA_CPP_BASE_URL='http://127.0.0.1:8080'"
 
