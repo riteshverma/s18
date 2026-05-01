@@ -53,6 +53,18 @@ def _requests_retryable(exc: Exception) -> bool:
     return False
 
 
+def _raise_for_status_with_body(response: requests.Response, service_name: str) -> None:
+    """Preserve HTTP retry behavior while logging useful provider errors."""
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        body = (response.text or "").strip()
+        if len(body) > 500:
+            body = f"{body[:500]}..."
+        detail = f"{exc}; {service_name} response body: {body or '<empty>'}"
+        raise requests.HTTPError(detail, response=response) from exc
+
+
 def _extract_embedding(body: dict[str, Any]) -> Optional[list[float]]:
     if "embedding" in body:
         return body["embedding"]
@@ -246,7 +258,7 @@ def _llama_cpp_embed_request(inputs: list[str], timeout: int) -> list[list[float
             json={"model": model_name, "input": inputs},
             timeout=timeout,
         )
-        response.raise_for_status()
+        _raise_for_status_with_body(response, "llama.cpp embeddings")
         return response.json()
 
     payload = _retry_call(
