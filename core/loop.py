@@ -612,16 +612,24 @@ class AgentLoop4:
         # If any node is still pending/running, we aren't at a dead end yet
         if not self.context.all_done():
             return False
-            
-        has_new_leaf_clarification = False
+
+        # Prevent infinite replanning loops: consume each completed leaf
+        # clarification node at most once unless a brand-new one appears later.
+        consumed = self.context.plan_graph.graph.get("_replan_consumed_clarifications", [])
+        if not isinstance(consumed, list):
+            consumed = []
+        consumed_set = set(consumed)
+
         for node_id, node_data in self.context.plan_graph.nodes(data=True):
             if node_data.get("agent") == "ClarificationAgent" and node_data.get("status") == "completed":
                 # Check if it was a leaf node (no arrows coming out)
                 if not list(self.context.plan_graph.successors(node_id)):
-                    has_new_leaf_clarification = True
-                    break
-        
-        return has_new_leaf_clarification
+                    if node_id not in consumed_set:
+                        consumed.append(node_id)
+                        self.context.plan_graph.graph["_replan_consumed_clarifications"] = consumed
+                        return True
+
+        return False
 
     def _repair_cbc_plan_dependencies(self, new_nodes, new_edges):
         """

@@ -251,6 +251,11 @@ Quick toggle scripts for Docker-based local development:
 .\scripts\use-llama-cpp.ps1
 ```
 
+These scripts now use dedicated Docker env files (`.env.docker.*`) so switching
+between runtimes does not mutate your shared `.env` and break another mode.
+Run `.\scripts\preflight-runtime.ps1 -Mode ollama` or `-Mode llama_cpp` any
+time you want an explicit connectivity/model sanity check.
+
 If you run `llama-server` outside Docker on the host for better performance,
 start it first, then point the Docker API/worker at the host server:
 
@@ -461,7 +466,7 @@ OLLAMA_BASE_URL=http://host.docker.internal:11434
 Then:
 
 ```bash
-docker compose up --build -d api
+docker compose --env-file .env.docker.ollama up --build -d api
 ```
 
 ### 3. Run API + Ollama in Docker
@@ -476,7 +481,7 @@ OLLAMA_BASE_URL=http://ollama:11434
 Then:
 
 ```bash
-docker compose --profile ollama up --build -d
+docker compose --env-file .env.docker.ollama --profile ollama up --build -d
 ```
 
 ### 4. Run API + host llama.cpp
@@ -499,7 +504,7 @@ LLAMA_CPP_BASE_URL=http://host.docker.internal:8080
 Then:
 
 ```bash
-docker compose up --build -d api
+docker compose --env-file .env.docker.llama-cpp-host up --build -d api
 ```
 
 PowerShell shortcut:
@@ -513,6 +518,28 @@ If you prefer the bundled Compose llama.cpp service instead, use:
 ```powershell
 .\scripts\use-llama-cpp.ps1
 ```
+
+or run directly:
+
+```bash
+docker compose --env-file .env.docker.llama-cpp --profile llama_cpp up --build -d
+```
+
+### Runtime preflight (recommended)
+
+Before running production-like sessions after switching providers:
+
+```powershell
+.\scripts\preflight-runtime.ps1 -Mode ollama
+# or
+.\scripts\preflight-runtime.ps1 -Mode llama_cpp
+```
+
+Checks include:
+- required containers up (`s18share-api`, `s18share-redis`, provider container)
+- provider endpoint reachable from `s18share-api`
+- Ollama model readiness (`gemma3:4b`, `nomic-embed-text`)
+- optional Wise→S18 health check when `wiseai-backend-1` is running
 
 ### 5. Verify (Docker mapping)
 
