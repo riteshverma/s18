@@ -96,6 +96,7 @@ from core.embedding import (
     try_get_normalized_embedding,
     get_batch_normalized_embeddings,
 )
+from core.model_manager import ModelManager
 
 mcp = FastMCP("Local Storage RAG")
 
