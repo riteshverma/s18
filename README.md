@@ -251,6 +251,11 @@ Quick toggle scripts for Docker-based local development:
 .\scripts\use-llama-cpp.ps1
 ```
 
+These scripts now use dedicated Docker env files (`.env.docker.*`) so switching
+between runtimes does not mutate your shared `.env` and break another mode.
+Run `.\scripts\preflight-runtime.ps1 -Mode ollama` or `-Mode llama_cpp` any
+time you want an explicit connectivity/model sanity check.
+
 If you run `llama-server` outside Docker on the host for better performance,
 start it first, then point the Docker API/worker at the host server:
 
@@ -391,7 +396,7 @@ Optional:
 - **S18_CELERY_RUNS_QUEUE** – Queue name for `/runs` background tasks (default `celery`).
 - **S18_CELERY_INGEST_QUEUE** – Queue name for ingest pipeline tasks (default `ingest`).
 - **Ollama** – Default local config points to `http://127.0.0.1:11434`. In Docker Compose, use `OLLAMA_BASE_URL=http://ollama:11434` when using the bundled Ollama service.
-- **llama.cpp** – Optional OpenAI-compatible server at `LLAMA_CPP_BASE_URL`. Use `http://127.0.0.1:8080` for a host-local Python run, `http://host.docker.internal:8080` when Docker API calls a host `llama-server`, or `http://llama_cpp:8080` for the bundled Compose service.
+- **llama.cpp** – Optional OpenAI-compatible server at `LLAMA_CPP_BASE_URL`. Use `http://127.0.0.1:8080` for a host-local Python run, `http://host.docker.internal:8080` when Docker API calls a host `llama-server`, or `http://s18share-llama-cpp:8080` for the bundled Compose service.
 - **Git** – Required for GitHub explorer features; the API will warn at startup if Git is not found.
 - **S18_HARNESS_STATE_DIR** – Optional override for harness job storage location. If unset, harness state defaults to OS-local app data (for example `%LOCALAPPDATA%/S18Share/harness_jobs` on Windows).
 - **S18_CODEX_BIN / S18_CLAUDE_BIN / S18_GEMINI_BIN** – Optional explicit binary paths for provider CLIs; otherwise harness resolves providers from `PATH`.
@@ -461,7 +466,7 @@ OLLAMA_BASE_URL=http://host.docker.internal:11434
 Then:
 
 ```bash
-docker compose up --build -d api
+docker compose --env-file .env.docker.ollama up --build -d api
 ```
 
 ### 3. Run API + Ollama in Docker
@@ -476,7 +481,7 @@ OLLAMA_BASE_URL=http://ollama:11434
 Then:
 
 ```bash
-docker compose --profile ollama up --build -d
+docker compose --env-file .env.docker.ollama --profile ollama up --build -d
 ```
 
 ### 4. Run API + host llama.cpp
@@ -499,7 +504,7 @@ LLAMA_CPP_BASE_URL=http://host.docker.internal:8080
 Then:
 
 ```bash
-docker compose up --build -d api
+docker compose --env-file .env.docker.llama-cpp-host up --build -d api
 ```
 
 PowerShell shortcut:
@@ -513,6 +518,28 @@ If you prefer the bundled Compose llama.cpp service instead, use:
 ```powershell
 .\scripts\use-llama-cpp.ps1
 ```
+
+or run directly:
+
+```bash
+docker compose --env-file .env.docker.llama-cpp --profile llama_cpp up --build -d
+```
+
+### Runtime preflight (recommended)
+
+Before running production-like sessions after switching providers:
+
+```powershell
+.\scripts\preflight-runtime.ps1 -Mode ollama
+# or
+.\scripts\preflight-runtime.ps1 -Mode llama_cpp
+```
+
+Checks include:
+- required containers up (`s18share-api`, `s18share-redis`, provider container)
+- provider endpoint reachable from `s18share-api`
+- Ollama model readiness (`gemma3:4b`, `nomic-embed-text`)
+- optional Wise→S18 health check when `wiseai-backend-1` is running
 
 ### 5. Verify (Docker mapping)
 
