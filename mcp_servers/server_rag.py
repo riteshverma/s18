@@ -12,6 +12,7 @@ import subprocess
 import hashlib
 import time
 import shutil
+import errno
 
 # Fix attributes/imports pathing
 # 1. Add current directory (mcp_servers) to path so 'import models' works
@@ -84,6 +85,7 @@ except ImportError:
 
 from config.settings_loader import (
     settings,
+    get_embedding_provider,
     get_llama_cpp_timeout,
     get_llama_cpp_url,
     get_model,
@@ -123,10 +125,85 @@ INDEXING_STATUS = {
     "active": False,
     "total": 0,
     "completed": 0,
-    "currentFile": ""
+    "currentFile": "",
+    "last_error": "",
 }
 INDEXING_LOCK = threading.Lock()
 REINDEX_BUSY_LOCK = threading.Lock()
+INDEX_MANIFEST_NAME = "manifest.json"
+INDEX_MANIFEST_VERSION = 1
+
+
+def _manifest_path(index_cache: Path) -> Path:
+    return index_cache / INDEX_MANIFEST_NAME
+
+
+def _current_embedding_signature(dim: Optional[int] = None) -> dict:
+    active_settings = load_settings()
+    provider = str(
+        (active_settings.get("models", {}).get("embedding_provider") or get_embedding_provider() or "ollama")
+    ).strip().lower()
+    model = str(get_model("embedding")).strip()
+    signature = {
+        "provider": provider,
+        "model": model,
+    }
+    if dim is not None:
+        signature["dimension"] = int(dim)
+    return signature
+
+
+def _load_index_manifest(index_cache: Path) -> Optional[dict]:
+    manifest_path = _manifest_path(index_cache)
+    if not manifest_path.exists():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        if not isinstance(manifest, dict):
+            return None
+        return manifest
+    except Exception as e:
+        mcp_log("WARN", f"Failed to read index manifest: {e}")
+        return None
+
+
+def _save_index_manifest(index_cache: Path, dim: int) -> None:
+    from datetime import datetime
+
+    payload = {
+        "version": INDEX_MANIFEST_VERSION,
+        "embedding": _current_embedding_signature(dim=dim),
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+    _manifest_path(index_cache).write_text(json.dumps(payload, indent=2))
+
+
+def _validate_manifest_compatibility(
+    manifest: dict,
+    *,
+    provider: str,
+    model: str,
+    dimension: Optional[int] = None,
+) -> tuple[bool, str]:
+    emb = manifest.get("embedding", {}) if isinstance(manifest, dict) else {}
+    manifest_provider = str(emb.get("provider", "")).strip().lower()
+    manifest_model = str(emb.get("model", "")).strip()
+    manifest_dim_raw = emb.get("dimension")
+    manifest_dim = int(manifest_dim_raw) if isinstance(manifest_dim_raw, (int, float)) else None
+
+    if manifest_provider and manifest_provider != provider:
+        return False, (
+            f"provider mismatch: index={manifest_provider}, runtime={provider}"
+        )
+    if manifest_model and manifest_model != model:
+        return False, (
+            f"model mismatch: index={manifest_model}, runtime={model}"
+        )
+    if dimension is not None and manifest_dim is not None and int(dimension) != manifest_dim:
+        return False, (
+            f"dimension mismatch: index={manifest_dim}, runtime={int(dimension)}"
+        )
+    return True, ""
 
 def get_rg_path():
     """Find the ripgrep binary. Checks .bin/ folder first, then system path."""
@@ -469,7 +546,7 @@ def preview_document(path: str) -> MarkdownOutput:
         mcp_log("ERROR", f"Preview failed: {str(e)}")
         return MarkdownOutput(markdown=f"### ❌ Critical Error\nExtraction failed: {str(e)}")
 @mcp.tool()
-async def ask_document(query: str, doc_id: str, history: list[dict] = [], image: str = None) -> str:
+async def ask_document(query: str, doc_id: str, history: list[dict] = [], image: str = None, debug_reasoning: bool = False) -> str:
     """Ask a question about a specific document.
     Incorporates chat history, relevant document extracts, and optional image input.
     """
@@ -480,12 +557,17 @@ async def ask_document(query: str, doc_id: str, history: list[dict] = [], image:
     context_text = "\n\n".join(context_results) if context_results else "No relevant context found in document."
     
     # 2. Build Prompt
+    reasoning_instruction = (
+        "CRITICAL: Always start your response with a thinking process enclosed in <think> tags.\n"
+        "Analyze the context, identify key sections, and plan your answer before providing the final response."
+        if debug_reasoning
+        else "Reason internally. Do not reveal chain-of-thought. Return only the final answer with citations."
+    )
     system_prompt = f"""You are a helpful document assistant. 
 Answer the user's question based strictly on the provided context from the document.
 If the context doesn't contain the answer, say so, but try to be helpful based on what is available.
 
-CRITICAL: Always start your response with a thinking process enclosed in <think> tags. 
-Analyze the context, identify key sections, and plan your answer before providing the final response.
+{reasoning_instruction}
 
 CONTEXT FROM DOCUMENT:
 ---
@@ -599,17 +681,77 @@ def search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]:
         analysis = analyze_query(query)
         mcp_log("SEARCH", f"Intent: {analysis.intent}, Entities: {analysis.entities}")
         
-        # 2. FAISS vector search
-        index = faiss.read_index(str(ROOT / "faiss_index" / "index.bin"))
-        query_vec = get_embedding(query).reshape(1, -1)
-        D, I = index.search(query_vec, k=50 if doc_path else 30)
-        
+        # 2. FAISS vector search (best-effort; fall back gracefully if unavailable/misaligned)
         faiss_results = []
-        for rank, idx in enumerate(I[0]):
-            if idx < 0 or idx >= len(metadata):
-                continue
-            chunk_id = metadata[idx].get('chunk_id', f'idx_{idx}')
-            faiss_results.append((chunk_id, float(D[0][rank])))
+        index_cache = ROOT / "faiss_index"
+        index_path = index_cache / "index.bin"
+        runtime_sig = _current_embedding_signature()
+        manifest = _load_index_manifest(index_cache)
+        allow_faiss = True
+        if manifest:
+            manifest_ok, manifest_reason = _validate_manifest_compatibility(
+                manifest,
+                provider=runtime_sig["provider"],
+                model=runtime_sig["model"],
+            )
+            if not manifest_ok:
+                allow_faiss = False
+                mcp_log(
+                    "WARN",
+                    (
+                        "Index compatibility guard triggered "
+                        f"({manifest_reason}); skipping FAISS and using BM25/lexical fallback. "
+                        "Run force reindex after embedding model/provider changes."
+                    ),
+                )
+
+        if index_path.exists() and allow_faiss:
+            try:
+                index = faiss.read_index(str(index_path))
+                query_vec = get_embedding(query).reshape(1, -1)
+                query_dim = int(query_vec.shape[1])
+                index_dim = int(getattr(index, "d", query_dim))
+                if manifest:
+                    manifest_ok, manifest_reason = _validate_manifest_compatibility(
+                        manifest,
+                        provider=runtime_sig["provider"],
+                        model=runtime_sig["model"],
+                        dimension=query_dim,
+                    )
+                    if not manifest_ok:
+                        mcp_log(
+                            "WARN",
+                            (
+                                "Index compatibility guard triggered "
+                                f"({manifest_reason}); skipping FAISS and using BM25/lexical fallback. "
+                                "Run force reindex to rebuild vectors for the current embedding model."
+                            ),
+                        )
+                        index = None
+                if index_dim != query_dim:
+                    mcp_log(
+                        "WARN",
+                        (
+                            f"Vector dim mismatch (index={index_dim}, query={query_dim}); "
+                            "skipping FAISS and using BM25/lexical fallback. "
+                            "Run force reindex to rebuild vectors for the current embedding model."
+                        ),
+                    )
+                elif index is not None:
+                    D, I = index.search(query_vec, k=50 if doc_path else 30)
+                    for rank, idx in enumerate(I[0]):
+                        if idx < 0 or idx >= len(metadata):
+                            continue
+                        chunk_id = metadata[idx].get('chunk_id', f'idx_{idx}')
+                        faiss_results.append((chunk_id, float(D[0][rank])))
+            except Exception as vec_err:
+                vec_detail = str(vec_err).strip() or repr(vec_err)
+                mcp_log(
+                    "WARN",
+                    f"Vector search unavailable ({vec_detail}); falling back to BM25/lexical.",
+                )
+        else:
+            mcp_log("WARN", "FAISS index.bin missing; using BM25/lexical fallback.")
         
         # 3. BM25 keyword search (if available)
         bm25_results = []
@@ -779,8 +921,11 @@ def search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]:
         return results if results else ["No relevant documents found."]
         
     except Exception as e:
-        mcp_log("ERROR", f"Hybrid search failed: {e}")
-        return [f"ERROR: Failed to search: {str(e)}"]
+        import traceback
+
+        detail = str(e).strip() or repr(e)
+        mcp_log("ERROR", f"Hybrid search failed: {detail}\n{traceback.format_exc()}")
+        return [f"ERROR: Failed to search: {detail}"]
 
 @mcp.tool()
 def keyword_search(query: str) -> list[str]:
@@ -1629,6 +1774,29 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
     mcp_log("INFO", f"Loaded cache with {len(CACHE_META)} files, ledger with {len(ledger_data.get('files', {}))} files")
 
     index = faiss.read_index(str(INDEX_FILE)) if INDEX_FILE.exists() else None
+    runtime_sig = _current_embedding_signature()
+    manifest = _load_index_manifest(INDEX_CACHE)
+    if index is not None and manifest:
+        manifest_ok, manifest_reason = _validate_manifest_compatibility(
+            manifest,
+            provider=runtime_sig["provider"],
+            model=runtime_sig["model"],
+        )
+        if not manifest_ok:
+            mismatch_msg = (
+                f"Index compatibility guard triggered ({manifest_reason}). "
+                "Run force reindex to rebuild vectors for the active embedding model/provider."
+            )
+            mcp_log("ERROR", mismatch_msg)
+            with INDEXING_LOCK:
+                INDEXING_STATUS["active"] = False
+                INDEXING_STATUS["currentFile"] = ""
+                INDEXING_STATUS["last_error"] = mismatch_msg
+            try:
+                REINDEX_BUSY_LOCK.release()
+            except:
+                pass
+            return
 
     files_to_process = []
     if specific_files:
@@ -1646,10 +1814,16 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
                         continue
                     files_to_process.append(Path(root) / f)
         else:
-            mcp_log("ERROR", f"Target path not found: {target_path}")
+            mcp_log("ERROR", f"Target path not found under data/: {target_path} (resolved: {target_file})")
             with INDEXING_LOCK:
                 INDEXING_STATUS["active"] = False
+                INDEXING_STATUS["total"] = 0
+                INDEXING_STATUS["completed"] = 0
                 INDEXING_STATUS["currentFile"] = ""
+                INDEXING_STATUS["last_error"] = (
+                    f"Path not found under data/: {target_path}. "
+                    "Copy or upload the file under data/ first (same relative path)."
+                )
             try:
                 REINDEX_BUSY_LOCK.release()
             except:
@@ -1716,9 +1890,33 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
                             metadata = [m for m in metadata if m.get("doc") != rel_path]
                             
                         # 2. Add new
+                        emb_dim = len(new_embs[0])
                         if index is None:
-                            dim = len(new_embs[0])
-                            index = faiss.IndexFlatL2(dim)
+                            index = faiss.IndexFlatL2(emb_dim)
+                        elif int(getattr(index, "d", emb_dim)) != emb_dim:
+                            mismatch_msg = (
+                                f"Embedding dimension mismatch for {rel_path}: "
+                                f"index={int(getattr(index, 'd', -1))}, new={emb_dim}. "
+                                "Run force reindex to rebuild vectors for the current embedding model."
+                            )
+                            mcp_log("ERROR", mismatch_msg)
+                            from datetime import datetime
+                            ledger_data["files"][rel_path] = {
+                                "hash": fhash,
+                                "status": "error",
+                                "indexed_at": datetime.utcnow().isoformat() + "Z",
+                                "chunk_count": 0,
+                                "error": mismatch_msg
+                            }
+                            try:
+                                LEDGER_FILE.write_text(json.dumps(ledger_data, indent=2))
+                            except Exception as e:
+                                mcp_log("WARN", f"Ledger save failed during mismatch handling: {e}")
+                            with INDEXING_LOCK:
+                                INDEXING_STATUS["completed"] += 1
+                                INDEXING_STATUS["currentFile"] = Path(rel_path).name
+                                INDEXING_STATUS["last_error"] = mismatch_msg
+                            continue
                         index.add(np.stack(new_embs))
                         metadata.extend(new_meta)
                         CACHE_META[rel_path] = fhash # Update cache
@@ -1738,6 +1936,7 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
                             CACHE_FILE.write_text(json.dumps(CACHE_META, indent=2))
                             METADATA_FILE.write_text(json.dumps(metadata, indent=2))
                             faiss.write_index(index, str(INDEX_FILE))
+                            _save_index_manifest(INDEX_CACHE, int(getattr(index, "d", emb_dim)))
                             # Also save ledger
                             LEDGER_FILE.write_text(json.dumps(ledger_data, indent=2))
                         except Exception as e:
@@ -1793,15 +1992,20 @@ async def reindex_documents(target_path: str = None, force: bool = False) -> str
         INDEXING_STATUS["completed"] = 0
         INDEXING_STATUS["total"] = 0
         INDEXING_STATUS["currentFile"] = "Initializing scan..."
+        INDEXING_STATUS["last_error"] = ""
 
     try:
         INDEX_CACHE = ROOT / "faiss_index"
         
-        if force and not target_path:
-            # Full Rescan: Wipe existing data
-            mcp_log("INFO", "Force Rescan - Wiping existing index...")
-            
-            for f in ["index.bin", "metadata.json", "doc_index_cache.json", "ledger.json"]:
+        if force:
+            # Force mode always resets vector artifacts first.
+            # If target_path is provided, we rebuild only that scope on a clean index.
+            if target_path:
+                mcp_log("INFO", f"Force reindex for target path '{target_path}' - wiping existing index artifacts...")
+            else:
+                mcp_log("INFO", "Force full reindex - wiping existing index artifacts...")
+
+            for f in ["index.bin", "metadata.json", "doc_index_cache.json", "ledger.json", "bm25_index.pkl", INDEX_MANIFEST_NAME]:
                 path = INDEX_CACHE / f
                 if path.exists():
                     try:
@@ -1816,6 +2020,7 @@ async def reindex_documents(target_path: str = None, force: bool = False) -> str
     except Exception as e:
         with INDEXING_LOCK:
             INDEXING_STATUS["active"] = False
+            INDEXING_STATUS["last_error"] = str(e)
         try:
             REINDEX_BUSY_LOCK.release()
         except:
@@ -1826,7 +2031,26 @@ async def reindex_documents(target_path: str = None, force: bool = False) -> str
 @mcp.tool()
 async def get_indexing_status() -> str:
     """Get the current indexing progress status as JSON."""
-    return json.dumps(INDEXING_STATUS)
+    payload = dict(INDEXING_STATUS)
+    try:
+        index_cache = ROOT / "faiss_index"
+        manifest = _load_index_manifest(index_cache)
+        runtime_sig = _current_embedding_signature()
+        payload["index_manifest"] = manifest
+        if manifest:
+            ok, reason = _validate_manifest_compatibility(
+                manifest,
+                provider=runtime_sig["provider"],
+                model=runtime_sig["model"],
+            )
+            payload["index_compatible"] = ok
+            payload["index_compatibility_reason"] = reason
+        else:
+            payload["index_compatible"] = None
+            payload["index_compatibility_reason"] = ""
+    except Exception:
+        pass
+    return json.dumps(payload)
 
 
 @mcp.tool()
@@ -1986,23 +2210,39 @@ class SessionSummarySyncService:
             try:
                 self.sync()
             except Exception as e:
-                mcp_log("ERROR", f"Sync failed: {e}")
+                msg = f"Sync failed: {e}"
+                if getattr(e, "errno", None) == errno.ENOMEM:
+                    msg += (
+                        " (ENOMEM: system/container short on RAM or cgroup limit — increase Docker memory, "
+                        "pause heavy indexing/embedding, or set S18_SESSION_SUMMARY_SYNC=false)"
+                    )
+                mcp_log("ERROR", msg)
             
             # Wait for next interval
             self.stop_event.wait(interval_sec)
+
+def _session_summary_sync_enabled() -> bool:
+    raw = os.getenv("S18_SESSION_SUMMARY_SYNC")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
 
 def start_background_services():
     """Initialize and start background threads."""
     sync_service = SessionSummarySyncService(MEMORY_SUMMARIES_DIR, SYNC_TARGET_DIR)
     
     # Start sync thread
-    sync_thread = threading.Thread(
-        target=sync_service.run_forever, 
-        args=(60,), # Check every minute
-        daemon=True,
-        name="SessionSyncThread"
-    )
-    sync_thread.start()
+    if _session_summary_sync_enabled():
+        sync_thread = threading.Thread(
+            target=sync_service.run_forever,
+            args=(60,),  # Check every minute
+            daemon=True,
+            name="SessionSyncThread",
+        )
+        sync_thread.start()
+    else:
+        mcp_log("INFO", "Session summary → RAG sync disabled (S18_SESSION_SUMMARY_SYNC=false)")
     
     # Initialize the index scheduler with callbacks
     INDEX_CACHE = ROOT / "faiss_index"
@@ -2017,6 +2257,23 @@ def start_background_services():
             
             metadata = json.loads(METADATA_FILE.read_text()) if METADATA_FILE.exists() else []
             index = faiss.read_index(str(INDEX_FILE)) if INDEX_FILE.exists() else None
+            manifest = _load_index_manifest(INDEX_CACHE)
+            runtime_sig = _current_embedding_signature()
+            if index is not None and manifest:
+                manifest_ok, manifest_reason = _validate_manifest_compatibility(
+                    manifest,
+                    provider=runtime_sig["provider"],
+                    model=runtime_sig["model"],
+                )
+                if not manifest_ok:
+                    mcp_log(
+                        "WARN",
+                        (
+                            f"Skipping scheduler update for {rel_path}: index compatibility guard "
+                            f"({manifest_reason}). Run force reindex to rebuild vectors."
+                        ),
+                    )
+                    return {"chunk_count": 0}
             
             # Remove old entries for this file
             metadata = [m for m in metadata if m.get("doc") != rel_path]
@@ -2029,15 +2286,26 @@ def start_background_services():
                 new_meta = result.get("metadata", [])
                 
                 if new_embs:
+                    emb_dim = len(new_embs[0])
                     if index is None:
-                        dim = len(new_embs[0])
-                        index = faiss.IndexFlatL2(dim)
+                        index = faiss.IndexFlatL2(emb_dim)
+                    elif int(getattr(index, "d", emb_dim)) != emb_dim:
+                        mcp_log(
+                            "WARN",
+                            (
+                                f"Skipping scheduler update for {rel_path}: "
+                                f"embedding dim {emb_dim} != index dim {int(getattr(index, 'd', -1))}. "
+                                "Run force reindex to rebuild index for the current embedding model."
+                            ),
+                        )
+                        return {"chunk_count": 0}
                     index.add(np.stack(new_embs))
                     metadata.extend(new_meta)
                     
                     # Save atomically
                     METADATA_FILE.write_text(json.dumps(metadata, indent=2))
                     faiss.write_index(index, str(INDEX_FILE))
+                    _save_index_manifest(INDEX_CACHE, int(getattr(index, "d", emb_dim)))
                     
                     # Rebuild BM25 index
                     if BM25_AVAILABLE:
@@ -2048,7 +2316,8 @@ def start_background_services():
             
             return {"chunk_count": 0}
         except Exception as e:
-            mcp_log("ERROR", f"Process callback failed for {rel_path}: {e}")
+            detail = str(e).strip() or repr(e)
+            mcp_log("ERROR", f"Process callback failed for {rel_path}: {detail}")
             raise
     
     def delete_file_callback(rel_path: str):

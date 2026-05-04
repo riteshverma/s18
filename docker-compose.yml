@@ -24,6 +24,8 @@ services:
       S18_RUN_EXECUTOR: ${S18_RUN_EXECUTOR:-in_process}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      MCP_STDIO_CONNECT_TIMEOUT_SECONDS: ${MCP_STDIO_CONNECT_TIMEOUT_SECONDS:-120}
+      S18_SESSION_SUMMARY_SYNC: ${S18_SESSION_SUMMARY_SYNC:-true}
       DEBUG_LOG_PATH: ${DEBUG_LOG_PATH:-/app/data/debug-f905fa.log}
     volumes:
       - ./data:/app/data
@@ -57,6 +59,7 @@ services:
       S18_RUN_EXECUTOR: celery
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      MCP_STDIO_CONNECT_TIMEOUT_SECONDS: ${MCP_STDIO_CONNECT_TIMEOUT_SECONDS:-120}
       DEBUG_LOG_PATH: ${DEBUG_LOG_PATH:-/app/data/debug-f905fa.log}
     volumes:
       - ./data:/app/data
@@ -92,6 +95,10 @@ services:
       - "${LLAMA_CPP_POOLING:-mean}"
       - "--ctx-size"
       - "${LLAMA_CPP_CTX_SIZE:-4096}"
+      - "--batch-size"
+      - "${LLAMA_CPP_BATCH_SIZE:-512}"
+      - "--ubatch-size"
+      - "${LLAMA_CPP_UBATCH_SIZE:-512}"
       - "--n-predict"
       - "${LLAMA_CPP_N_PREDICT:-1024}"
     volumes:

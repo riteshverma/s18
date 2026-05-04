@@ -16,3 +16,10 @@ memory/debug_logs
 tests
 benchmarks
 CODEBASE_ANALYSIS.md
+models
+.cursor
+agent-transcripts
+terminals
+__pycache__/
+*.ipynb
+*.ipynb_checkpoints
