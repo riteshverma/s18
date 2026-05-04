@@ -21,6 +21,7 @@ from core.prometheus_metrics import MCP_TOOL_CALLS_TOTAL, MCP_TOOL_LATENCY_MS, e
 from config.settings_loader import (
     get_mcp_mode,
     get_mcp_required_servers,
+    get_mcp_stdio_connect_timeout,
     settings,
 )
 
@@ -350,8 +351,20 @@ class MultiMCP:
                 cwd=cwd_param,
             )
             
-            # Connect with timeout
-            async with asyncio.timeout(20): # 20s timeout (increased for installations)
+            # Connect with timeout (spawn + MCP initialize); cold `uv run` can exceed a few seconds.
+            cfg_timeout = config.get("stdio_connect_timeout_seconds")
+            try:
+                connect_timeout = (
+                    float(cfg_timeout)
+                    if cfg_timeout is not None
+                    else float(get_mcp_stdio_connect_timeout())
+                )
+            except (TypeError, ValueError):
+                connect_timeout = float(get_mcp_stdio_connect_timeout())
+            if connect_timeout <= 0:
+                connect_timeout = float(get_mcp_stdio_connect_timeout())
+
+            async with asyncio.timeout(connect_timeout):
                 read, write = await self.exit_stack.enter_async_context(stdio_client(server_params))
                 session = await self.exit_stack.enter_async_context(ClientSession(read, write))
                 await session.initialize()

@@ -38,6 +38,7 @@ _DEFAULT_LLAMA_CPP_PORT = 8080
 _ALLOWED_MCP_MODES = {"legacy", "strict"}
 _DEFAULT_MCP_MODE = "legacy"
 _DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS = 5
+_DEFAULT_MCP_STDIO_CONNECT_TIMEOUT_SECONDS = 120
 
 
 def _normalize_local_http_base_url(
@@ -214,6 +215,15 @@ def load_settings() -> dict:
             if startup_timeout is not None and startup_timeout > 0:
                 _settings_cache.setdefault("mcp", {})
                 _settings_cache["mcp"]["startup_timeout_seconds"] = startup_timeout
+        env_mcp_stdio_connect_timeout = os.getenv("MCP_STDIO_CONNECT_TIMEOUT_SECONDS")
+        if env_mcp_stdio_connect_timeout:
+            try:
+                stdio_timeout = float(env_mcp_stdio_connect_timeout)
+            except ValueError:
+                stdio_timeout = None
+            if stdio_timeout is not None and stdio_timeout > 0:
+                _settings_cache.setdefault("mcp", {})
+                _settings_cache["mcp"]["stdio_connect_timeout_seconds"] = stdio_timeout
         env_mcp_required_servers = os.getenv("MCP_REQUIRED_SERVERS")
         if env_mcp_required_servers is not None:
             _settings_cache.setdefault("mcp", {})
@@ -438,6 +448,23 @@ def get_mcp_startup_timeout() -> float:
     except (TypeError, ValueError):
         return float(_DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS)
     return timeout_value if timeout_value > 0 else float(_DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS)
+
+
+def get_mcp_stdio_connect_timeout() -> float:
+    """Max seconds to wait for each MCP stdio subprocess to handshake (spawn + initialize)."""
+    mcp_settings = load_settings().get("mcp", {})
+    timeout = mcp_settings.get(
+        "stdio_connect_timeout_seconds", _DEFAULT_MCP_STDIO_CONNECT_TIMEOUT_SECONDS
+    )
+    try:
+        timeout_value = float(timeout)
+    except (TypeError, ValueError):
+        return float(_DEFAULT_MCP_STDIO_CONNECT_TIMEOUT_SECONDS)
+    return (
+        timeout_value
+        if timeout_value > 0
+        else float(_DEFAULT_MCP_STDIO_CONNECT_TIMEOUT_SECONDS)
+    )
 
 # --- Initialize on import ---
 settings = load_settings()

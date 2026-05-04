@@ -3,6 +3,8 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict
+import ast
+import logging
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 import hashlib
@@ -26,6 +28,7 @@ from integrations.tenancy import resolve_tenant_context
 from integrations.vectors import get_vector_store
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
+logger = logging.getLogger(__name__)
 
 # Get shared instances
 multi_mcp = get_multi_mcp()
@@ -50,6 +53,36 @@ def _resolve_vector_provider(user: Dict[str, Any]) -> tuple[str, Dict[str, str]]
         or "faiss"
     )
     return str(provider).lower(), tenant_context
+
+
+def _extract_mcp_text_entries(result: Any) -> list[str]:
+    """Extract text fields from MCP CallToolResult-like payloads."""
+    entries: list[str] = []
+    content = getattr(result, "content", None)
+    if not isinstance(content, list):
+        return entries
+    for item in content:
+        text = getattr(item, "text", None)
+        if text is None and isinstance(item, dict):
+            text = item.get("text")
+        if isinstance(text, str):
+            entries.append(text)
+    return entries
+
+
+def _parse_text_or_list_payload(text: str) -> list[str]:
+    """Parse text that may encode a list payload; otherwise return as singleton."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            parsed = parser(raw)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item is not None]
+        except Exception:
+            continue
+    return [text]
 
 
 # === Document Management Endpoints ===
@@ -446,9 +479,28 @@ async def get_indexing_status():
             for item in result.content:
                 if hasattr(item, 'text'):
                     return json.loads(item.text)
-        return {"active": False, "total": 0, "completed": 0, "currentFile": ""}
+        return {
+            "active": False,
+            "total": 0,
+            "completed": 0,
+            "currentFile": "",
+            "last_error": "",
+            "index_manifest": None,
+            "index_compatible": None,
+            "index_compatibility_reason": "",
+        }
     except Exception as e:
-        return {"active": False, "total": 0, "completed": 0, "currentFile": ""}
+        logger.warning("Failed to read indexing status: %s", e)
+        return {
+            "active": False,
+            "total": 0,
+            "completed": 0,
+            "currentFile": "",
+            "last_error": "",
+            "index_manifest": None,
+            "index_compatible": None,
+            "index_compatibility_reason": "",
+        }
 
 
 # === Search Endpoints ===
@@ -472,18 +524,18 @@ def find_page_for_chunk(doc_path: str, chunk_text: str) -> int:
             doc.close()
             return 1  # Too short to search
 
-        print(f"DEBUG Page search: '{search_text[:40]}...' in {doc_path}")  # DEBUG
+        logger.debug("Page search snippet '%s' in %s", search_text[:40], doc_path)
         for page_num, page in enumerate(doc):
             # Search for text on this page
             if page.search_for(search_text):
-                print(f"DEBUG Found on page {page_num + 1}")  # DEBUG
+                logger.debug("Found match on page %s for %s", page_num + 1, doc_path)
                 doc.close()
                 return page_num + 1  # 1-indexed
         
         doc.close()
         return 1  # Default to page 1 if not found
     except Exception as e:
-        print(f"Page lookup failed: {e}")
+        logger.debug("Page lookup failed for %s: %s", doc_path, e)
         return 1
 
 
@@ -497,6 +549,8 @@ async def rag_search(query: str, user: Dict[str, Any] = Depends(require_supabase
     so the existing local dev path keeps working unchanged.
     """
     start_ms = now_ms()
+    if not query or not query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
     provider, tenant_context = _resolve_vector_provider(user)
     if provider != "faiss":
         try:
@@ -536,32 +590,9 @@ async def rag_search(query: str, user: Dict[str, Any] = Depends(require_supabase
     try:
         args = {"query": query}
         result = await multi_mcp.call_tool("rag", "search_stored_documents_rag", args)
-        
-        # DEBUG: Log raw MCP result
-        print(f"DEBUG MCP Result type: {type(result)}")
-        print(f"DEBUG MCP Result: {result}")
-        
-        # Extract results from CallToolResult
-        raw_results = []
-        if hasattr(result, 'content') and isinstance(result.content, list):
-            print(f"DEBUG: Found content list with {len(result.content)} items")
-            for i, item in enumerate(result.content):
-                print(f"DEBUG: Item {i} type: {type(item)}, hasattr text: {hasattr(item, 'text')}")
-                if hasattr(item, 'text'):
-                    print(f"DEBUG: Item text (first 200 chars): {item.text[:200] if len(item.text) > 200 else item.text}")
-                    try:
-                        import ast
-                        parsed = ast.literal_eval(item.text)
-                        print(f"DEBUG: Parsed type: {type(parsed)}, is list: {isinstance(parsed, list)}")
-                        if isinstance(parsed, list):
-                            raw_results.extend(parsed)
-                        else:
-                            raw_results.append(item.text)
-                    except Exception as parse_err:
-                        print(f"DEBUG: Parse error: {parse_err}")
-                        raw_results.append(item.text)
-        else:
-            print(f"DEBUG: No content list found. hasattr content: {hasattr(result, 'content')}")
+        raw_results: list[str] = []
+        for text in _extract_mcp_text_entries(result):
+            raw_results.extend(_parse_text_or_list_payload(text))
         
         # Parse results - page navigation handled by frontend search
         structured_results = []
@@ -592,9 +623,7 @@ async def rag_search(query: str, user: Dict[str, Any] = Depends(require_supabase
             RAG_EMPTY_RESULT_TOTAL.labels(endpoint="search").inc()
         return {"status": "success", "results": structured_results}
     except Exception as e:
-        import traceback
-        print(f"RAG SEARCH ERROR: {e}")
-        print(traceback.format_exc())
+        logger.exception("RAG search failed: %s", e)
         RAG_REQUESTS_TOTAL.labels(endpoint="search", status="error").inc()
         RAG_SEARCH_LATENCY_MS.labels(endpoint="search").observe(elapsed_ms(start_ms))
         raise HTTPException(status_code=500, detail=str(e))
@@ -604,22 +633,16 @@ async def rag_search(query: str, user: Dict[str, Any] = Depends(require_supabase
 async def rag_keyword_search(query: str, user: Dict[str, Any] = Depends(require_supabase_user)):
     """Keyword search across document chunks (exact match)"""
     start_ms = now_ms()
+    if not query or not query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
     try:
         args = {"query": query}
         result = await multi_mcp.call_tool("rag", "keyword_search", args)
         
         # Extract matches from CallToolResult
-        matches = []
-        if hasattr(result, 'content') and isinstance(result.content, list):
-            for item in result.content:
-                if hasattr(item, 'text'):
-                    try:
-                        import ast
-                        parsed = ast.literal_eval(item.text)
-                        if isinstance(parsed, list):
-                            matches.extend(parsed)
-                    except:
-                        matches.append(item.text)
+        matches: list[str] = []
+        for text in _extract_mcp_text_entries(result):
+            matches.extend(_parse_text_or_list_payload(text))
         
         match_count = len(matches)
         RAG_REQUESTS_TOTAL.labels(endpoint="keyword_search", status="success").inc()
@@ -642,6 +665,8 @@ async def rag_ripgrep_search(
     user: Dict[str, Any] = Depends(require_supabase_user),
 ):
     """Deep pattern search using ripgrep"""
+    if not query or not query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
     try:
         args = {"query": query, "regex": regex, "case_sensitive": case_sensitive, "target_dir": target_dir}
         result = await multi_mcp.call_tool("rag", "advanced_ripgrep_search", args)
@@ -680,8 +705,7 @@ async def rag_ripgrep_search(
                     text_content = item['text']
                 
                 if text_content:
-                    # DEBUG: Print snippet
-                    print(f"DEBUG: MCP Text Content Start: {text_content[:100]}...")
+                    logger.debug("Ripgrep MCP text payload starts with: %s", text_content[:100])
                     
                     extracted = extract_json_list(text_content)
                     
@@ -719,15 +743,13 @@ async def rag_ripgrep_search(
         elif isinstance(result, list):
             results = result
             
-        print(f"DEBUG: Ripgrep router returning {len(results)} structured results")
+        logger.debug("Ripgrep router returning %s structured results", len(results))
         if len(results) > 0:
-            print(f"DEBUG: First result sample: {results[0]}")
+            logger.debug("First ripgrep result sample: %s", results[0])
             
         return {"status": "success", "results": results}
     except Exception as e:
-        import traceback
-        print(f"Ripgrep router error: {e}")
-        traceback.print_exc()
+        logger.exception("Ripgrep router error: %s", e)
         raise HTTPException(status_code=500, detail=f"Ripgrep search failed: {str(e)}")
 
 
@@ -770,9 +792,7 @@ async def get_document_chunks(path: str):
                 image_pattern = re.compile(r'!\[.*?\]\((.*?)\)')
                 doc_chunks = [image_pattern.sub(caption_replacer, c) for c in doc_chunks]
         except Exception as e:
-            print(f"Caption injection ERROR: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning("Caption injection failed for %s: %s", path, e)
         # ---------------------------------
         
         # Concatenate chunks with separators
@@ -930,6 +950,7 @@ async def ask_rag_document(request: Request, user: Dict[str, Any] = Depends(requ
         query = body.get("query")
         history = body.get("history", [])
         image = body.get("image") # Base64 image
+        debug_reasoning = bool(body.get("debug_reasoning", False))
         
         if not doc_id or not query:
             raise HTTPException(status_code=400, detail="Missing docId or query")
@@ -957,6 +978,12 @@ async def ask_rag_document(request: Request, user: Dict[str, Any] = Depends(requ
         # 2. Build Ollama Prompt
         tools = body.get("tools")
         project_root = body.get("project_root", "Unknown")
+        reasoning_instruction = (
+            "CRITICAL: Always start your response with a thinking process enclosed in <think> tags.\n"
+            "Analyze the context, identify key sections, and plan your answer before providing the final response."
+            if debug_reasoning
+            else "Reason internally. Do not reveal chain-of-thought. Return only the final answer with citations."
+        )
         system_prompt = f"""You are a helpful document assistant and coding agent. 
 Answer the user's question based strictly on the provided context from the document or by using your tools.
 
@@ -973,8 +1000,7 @@ SHELL ENVIRONMENT:
 
 If the context doesn't contain the answer, say so, but try to be helpful based on what is available.
 
-CRITICAL: Always start your response with a thinking process enclosed in <think> tags. 
-Analyze the context, identify key sections, and plan your answer before providing the final response.
+{reasoning_instruction}
 
 CONTEXT FROM DOCUMENT:
 ---
@@ -1017,6 +1043,16 @@ When the tool output is provided to you in a subsequent message, use it to answe
 
         async def token_generator():
             try:
+                if debug_reasoning:
+                    debug_payload = {
+                        "debug_reasoning": True,
+                        "doc_id": doc_id,
+                        "query": query,
+                        "retrieved_count": len(context_list),
+                        "retrieved_context": context_list,
+                    }
+                    yield f"event: debug\ndata: {json.dumps(debug_payload)}\n\n"
+
                 # Use a separate session or direct httpx for streaming
                 import httpx
                 async with httpx.AsyncClient(timeout=300) as client:
