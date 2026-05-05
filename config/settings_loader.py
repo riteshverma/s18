@@ -403,6 +403,53 @@ def get_embedding_provider() -> str:
     return provider or "ollama"
 
 
+def get_rag_rerank_settings() -> dict:
+    """Get normalized RAG reranker settings with safe defaults."""
+    rag_settings = load_settings().get("rag", {})
+    rerank = rag_settings.get("rerank", {}) if isinstance(rag_settings, dict) else {}
+    if not isinstance(rerank, dict):
+        rerank = {}
+
+    def _positive_int(value, default: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+
+    def _optional_positive_int(value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    def _positive_float(value, default: float) -> float:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+
+    provider = str(rerank.get("provider", "local_oss") or "local_oss").strip().lower()
+    if provider in {"none", "disabled", "off"}:
+        provider = "noop"
+
+    return {
+        "enabled": bool(rerank.get("enabled", False)),
+        "provider": provider,
+        "model": str(rerank.get("model", "") or "").strip(),
+        "candidate_k": _positive_int(rerank.get("candidate_k"), 40),
+        "top_k": _optional_positive_int(rerank.get("top_k")),
+        "timeout_seconds": _positive_float(rerank.get("timeout_seconds"), 8.0),
+        "batch_size": _positive_int(rerank.get("batch_size"), 8),
+    }
+
+
 def get_timeout() -> int:
     """Get Ollama timeout in seconds."""
     return load_settings()["ollama"]["timeout"]

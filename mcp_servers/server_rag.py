@@ -99,6 +99,7 @@ from core.embedding import (
     get_batch_normalized_embeddings,
 )
 from core.model_manager import ModelManager
+from core.rag_rerank import RerankCandidate, build_reranker, load_rerank_config
 
 mcp = FastMCP("Local Storage RAG")
 
@@ -513,6 +514,136 @@ def entity_gate(results: list, metadata: list, analysis: QueryAnalysis) -> tuple
     
     return filtered, True
 
+
+def _apply_stage2_rerank(
+    query: str,
+    candidate_results: list[tuple[str, float]],
+    chunk_lookup: dict[str, dict],
+    *,
+    default_top_k: int,
+) -> tuple[list[tuple[str, float]], int]:
+    """Apply optional stage-2 reranking to candidate tuples."""
+    rerank_cfg = load_rerank_config(load_settings())
+    if not rerank_cfg.enabled or not candidate_results:
+        return candidate_results, default_top_k
+
+    effective_top_k = int(rerank_cfg.top_k or default_top_k)
+    candidate_k = max(rerank_cfg.candidate_k, effective_top_k)
+    trimmed_candidates = candidate_results[:candidate_k]
+    reranker_inputs: list[RerankCandidate] = []
+    base_scores: dict[str, float] = {}
+    for chunk_id, score in trimmed_candidates:
+        entry = chunk_lookup.get(chunk_id)
+        if not entry:
+            continue
+        chunk_text = (entry.get("chunk") or "").strip()
+        if not chunk_text:
+            continue
+        reranker_inputs.append(
+            RerankCandidate(
+                candidate_id=chunk_id,
+                text=chunk_text,
+                base_score=float(score),
+                metadata={
+                    "doc": entry.get("doc"),
+                    "page": entry.get("page"),
+                },
+            )
+        )
+        base_scores[chunk_id] = float(score)
+
+    if not reranker_inputs:
+        return candidate_results, effective_top_k
+
+    reranker = build_reranker(rerank_cfg)
+    reranked = reranker.rerank(query, reranker_inputs, top_k=candidate_k)
+    if not reranked:
+        return candidate_results, effective_top_k
+
+    reranked_scores: dict[str, float] = {}
+    reranked_ids: list[str] = []
+    seen: set[str] = set()
+    for item in reranked:
+        chunk_id = item.candidate.candidate_id
+        if chunk_id in seen:
+            continue
+        seen.add(chunk_id)
+        reranked_ids.append(chunk_id)
+        reranked_scores[chunk_id] = float(item.score)
+
+    reordered: list[tuple[str, float]] = [
+        (chunk_id, reranked_scores.get(chunk_id, base_scores.get(chunk_id, 0.0)))
+        for chunk_id in reranked_ids
+        if chunk_id in base_scores
+    ]
+    for chunk_id, score in candidate_results:
+        if chunk_id not in seen:
+            reordered.append((chunk_id, score))
+
+    mcp_log(
+        "SEARCH",
+        (
+            "Stage-2 reranker enabled "
+            f"(provider={rerank_cfg.provider}, model={rerank_cfg.model or 'default'}, "
+            f"candidate_k={candidate_k}, top_k={effective_top_k})"
+        ),
+    )
+    return reordered, effective_top_k
+
+
+_HISTORY_QUERY_HINTS = {
+    "conversation",
+    "chat",
+    "session",
+    "history",
+    "transcript",
+    "previous",
+    "earlier",
+    "memory",
+    "summary",
+    "summaries",
+}
+
+
+def _is_history_doc_path(doc_rel_path: str) -> bool:
+    normalized = str(doc_rel_path or "").replace("\\", "/").strip().lower()
+    return normalized.startswith("conversation_history/")
+
+
+def _query_requests_history(query: str) -> bool:
+    lowered = str(query or "").strip().lower()
+    if not lowered:
+        return False
+    return any(hint in lowered for hint in _HISTORY_QUERY_HINTS)
+
+
+def _deprioritize_history_candidates(
+    candidate_results: list[tuple[str, float]],
+    chunk_lookup: dict[str, dict],
+    *,
+    query: str,
+    doc_path: str | None,
+) -> list[tuple[str, float]]:
+    """Keep history/session artifacts as backfill unless query asks for them."""
+    if doc_path or _query_requests_history(query):
+        return candidate_results
+
+    primary: list[tuple[str, float]] = []
+    history: list[tuple[str, float]] = []
+    for chunk_id, score in candidate_results:
+        entry = chunk_lookup.get(chunk_id, {})
+        if _is_history_doc_path(entry.get("doc", "")):
+            history.append((chunk_id, score))
+        else:
+            primary.append((chunk_id, score))
+
+    if primary and history:
+        mcp_log(
+            "SEARCH",
+            f"Source tuning applied: prioritized non-history candidates ({len(primary)}) over history ({len(history)})",
+        )
+    return primary + history
+
 @mcp.tool()
 def preview_document(path: str) -> MarkdownOutput:
     """Preview a document using the AI-enhanced extraction logic used for indexing."""
@@ -860,7 +991,19 @@ def search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]:
 
             candidate_results = sorted(reranked, key=lambda x: x[1], reverse=True)
 
-        max_candidates = max(TOP_K * 10, 40)
+        candidate_results, effective_top_k = _apply_stage2_rerank(
+            query,
+            candidate_results,
+            chunk_lookup,
+            default_top_k=TOP_K,
+        )
+        candidate_results = _deprioritize_history_candidates(
+            candidate_results,
+            chunk_lookup,
+            query=query,
+            doc_path=doc_path,
+        )
+        max_candidates = max(effective_top_k * 10, 40)
         for chunk_id, score in candidate_results[:max_candidates]:
             data = chunk_lookup.get(chunk_id)
             if not data:
@@ -888,7 +1031,7 @@ def search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]:
             results.append(f"{chunk_text}\n[Source: {doc_rel_path} p{page}]")
             seen_docs.add(doc_rel_path)
             
-            if len(results) >= TOP_K:
+            if len(results) >= effective_top_k:
                 break
         
         # 7. Fallback lexical pass when semantic candidates get filtered out
@@ -914,7 +1057,7 @@ def search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]:
                     page = entry.get("page", 1)
                     results.append(f"{chunk_text}\n[Source: {doc_rel_path} p{page}]")
                     seen_docs.add(doc_rel_path)
-                    if len(results) >= TOP_K:
+                    if len(results) >= effective_top_k:
                         break
 
         mcp_log("SEARCH", f"Returning {len(results)} results from {len(seen_docs)} docs")

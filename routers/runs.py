@@ -240,7 +240,7 @@ def _normalize_run_status(raw_status: Optional[str]) -> str:
 
 
 def _retrieve_memories_sync(query: str):
-    return remme_store.search_text(query, limit=3)
+    return remme_store.search_text(query, limit=3, requester="run_context")
 
 
 async def _build_memory_context(run_id: str, query: str):
@@ -463,10 +463,10 @@ async def process_run(
                             if not embedding_available:
                                 continue
                             emb = await asyncio.to_thread(get_embedding, text, "search_document")
-                            remme_store.update_text(target_id, text, emb)
+                            remme_store.update_text(target_id, text, emb, source=f"run_{run_id}")
                             print(f"🔄 Remme: Updated fact {target_id}: {text}")
                         elif action == "delete" and target_id:
-                            remme_store.delete(target_id)
+                            remme_store.delete(target_id, source=f"run_{run_id}")
                             print(f"🗑️ Remme: Deleted fact {target_id}")
                     except RuntimeError as e:
                         # core.embedding raises RuntimeError when Ollama is

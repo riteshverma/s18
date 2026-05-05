@@ -35,6 +35,12 @@ class AddMemoryRequest(BaseModel):
     text: str
     category: str = "general"
 
+
+class ConsolidateMemoriesRequest(BaseModel):
+    dry_run: bool = False
+    token_overlap_threshold: float = 0.82
+    min_text_length: int = 24
+
 class GBrainCanaryToggleRequest(BaseModel):
     enabled: bool
 
@@ -109,7 +115,7 @@ async def background_smart_scan():
                 # Search Context
                 existing = []
                 try:
-                    existing = remme_store.search_text(query, limit=5)
+                    existing = remme_store.search_text(query, limit=5, requester="smart_scan")
                 except:
                     pass
                 
@@ -138,7 +144,7 @@ async def background_smart_scan():
                                 processed_count += 1
                             elif action == "update" and tid and text:
                                 emb = get_embedding(text, task_type="search_document")
-                                remme_store.update_text(tid, text, emb)
+                                remme_store.update_text(tid, text, emb, source=f"run_{run_id}")
                                 processed_count += 1
                         except Exception as e:
                             print(f"❌ RemMe Action Failed: {e}")
@@ -237,7 +243,7 @@ async def get_memories():
     """Get all stored memories with source existence check"""
     start_ms = now_ms()
     try:
-        memories = remme_store.get_all()
+        memories = remme_store.get_all(requester="manual_api", apply_read_policy=True)
         summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
         
         # Add source_exists flag
@@ -284,7 +290,7 @@ async def get_memories():
 async def cleanup_dangling_memories():
     """Delete all memories where the source session no longer exists"""
     try:
-        memories = remme_store.get_all()
+        memories = remme_store.get_all(apply_read_policy=False)
         summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
         ids_to_delete = []
         
@@ -305,10 +311,56 @@ async def cleanup_dangling_memories():
                 ids_to_delete.append(m["id"])
         
         for mid in ids_to_delete:
-            remme_store.delete(mid)
+            remme_store.delete(mid, source="cleanup_dangling")
             
         return {"status": "success", "deleted_count": len(ids_to_delete)}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cleanup_expired")
+async def cleanup_expired_memories():
+    """Delete expired memories based on policy TTL metadata."""
+    start_ms = now_ms()
+    try:
+        deleted = remme_store.cleanup_expired(source="manual_cleanup")
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="cleanup_expired", status="success").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="cleanup_expired").observe(elapsed_ms(start_ms))
+        return {"status": "success", "deleted_count": deleted}
+    except Exception as e:
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="cleanup_expired", status="error").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="cleanup_expired").observe(elapsed_ms(start_ms))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/consolidate")
+async def consolidate_memories(request: ConsolidateMemoriesRequest):
+    """Merge duplicate or near-duplicate memories into canonical entries."""
+    start_ms = now_ms()
+    try:
+        threshold = float(request.token_overlap_threshold)
+        min_len = int(request.min_text_length)
+        if threshold <= 0 or threshold > 1:
+            raise HTTPException(status_code=400, detail="token_overlap_threshold must be in (0, 1].")
+        if min_len < 1:
+            raise HTTPException(status_code=400, detail="min_text_length must be >= 1.")
+
+        report = remme_store.consolidate_memories(
+            dry_run=bool(request.dry_run),
+            source="manual_consolidate",
+            token_overlap_threshold=threshold,
+            min_text_length=min_len,
+        )
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="consolidate", status="success").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="consolidate").observe(elapsed_ms(start_ms))
+        return {"status": "success", "report": report}
+    except HTTPException:
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="consolidate", status="error").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="consolidate").observe(elapsed_ms(start_ms))
+        raise
+    except Exception as e:
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="consolidate", status="error").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="consolidate").observe(elapsed_ms(start_ms))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -340,6 +392,10 @@ async def add_memory(request: AddMemoryRequest):
         MEMORY_OPERATIONS_TOTAL.labels(endpoint="add_memory", status="success").inc()
         MEMORY_OPERATION_LATENCY_MS.labels(endpoint="add_memory").observe(elapsed_ms(start_ms))
         return {"status": "success", "memory": memory}
+    except ValueError as e:
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="add_memory", status="error").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="add_memory").observe(elapsed_ms(start_ms))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         MEMORY_OPERATIONS_TOTAL.labels(endpoint="add_memory", status="error").inc()
         MEMORY_OPERATION_LATENCY_MS.labels(endpoint="add_memory").observe(elapsed_ms(start_ms))
@@ -351,10 +407,14 @@ async def delete_memory(memory_id: str):
     """Delete a memory"""
     start_ms = now_ms()
     try:
-        remme_store.delete(memory_id)
+        remme_store.delete(memory_id, source="manual_api")
         MEMORY_OPERATIONS_TOTAL.labels(endpoint="delete_memory", status="success").inc()
         MEMORY_OPERATION_LATENCY_MS.labels(endpoint="delete_memory").observe(elapsed_ms(start_ms))
         return {"status": "success", "id": memory_id}
+    except ValueError as e:
+        MEMORY_OPERATIONS_TOTAL.labels(endpoint="delete_memory", status="error").inc()
+        MEMORY_OPERATION_LATENCY_MS.labels(endpoint="delete_memory").observe(elapsed_ms(start_ms))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         MEMORY_OPERATIONS_TOTAL.labels(endpoint="delete_memory", status="error").inc()
         MEMORY_OPERATION_LATENCY_MS.labels(endpoint="delete_memory").observe(elapsed_ms(start_ms))

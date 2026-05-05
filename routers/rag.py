@@ -16,6 +16,7 @@ import io
 from shared.state import get_multi_mcp, PROJECT_ROOT
 from config.settings_loader import settings
 from core.supabase_auth import require_supabase_user
+from core.rag_rerank import RerankCandidate, build_reranker, load_rerank_config
 from core.prometheus_metrics import (
     RAG_EMPTY_RESULT_TOTAL,
     RAG_REQUESTS_TOTAL,
@@ -556,14 +557,63 @@ async def rag_search(query: str, user: Dict[str, Any] = Depends(require_supabase
         try:
             from core.embedding import get_normalized_embedding
 
+            rag_cfg = settings.get("rag", {}) or {}
+            default_top_k = int(rag_cfg.get("top_k") or 5)
+            rerank_cfg = load_rerank_config(settings)
+            effective_top_k = int(rerank_cfg.top_k or default_top_k)
+            query_k = max(default_top_k, rerank_cfg.candidate_k) if rerank_cfg.enabled else default_top_k
+
             embedding = get_normalized_embedding(query, task_type="search_query")
             store = get_vector_store(tenant_context)
             hits = store.query(
                 embedding=embedding.tolist(),
                 text=query,
-                k=int(settings.get("rag", {}).get("top_k") or 5),
+                k=query_k,
                 filters={"tenant_id": tenant_context["tenant_id"]},
             )
+            if rerank_cfg.enabled and hits:
+                reranker = build_reranker(rerank_cfg)
+                hit_map: dict[str, Any] = {}
+                candidates: list[RerankCandidate] = []
+                for idx, hit in enumerate(hits):
+                    candidate_id = f"hit_{idx}"
+                    hit_map[candidate_id] = hit
+                    candidates.append(
+                        RerankCandidate(
+                            candidate_id=candidate_id,
+                            text=hit.text,
+                            base_score=float(hit.score),
+                            metadata={
+                                "chunk_id": hit.chunk_id,
+                                "doc_id": hit.doc_id,
+                                "source_uri": hit.source_uri,
+                                "page": (hit.metadata or {}).get("page"),
+                            },
+                        )
+                    )
+                reranked = reranker.rerank(query, candidates, top_k=query_k)
+                if reranked:
+                    ordered_hits = []
+                    seen: set[str] = set()
+                    for item in reranked:
+                        cid = item.candidate.candidate_id
+                        if cid in seen:
+                            continue
+                        hit = hit_map.get(cid)
+                        if hit is None:
+                            continue
+                        ordered_hits.append(hit)
+                        seen.add(cid)
+                    for idx, hit in enumerate(hits):
+                        cid = f"hit_{idx}"
+                        if cid in seen:
+                            continue
+                        ordered_hits.append(hit)
+                    hits = ordered_hits
+            else:
+                effective_top_k = default_top_k
+            hits = hits[:effective_top_k]
+
             structured_results = [
                 {
                     "content": h.text,
