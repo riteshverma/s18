@@ -17,7 +17,16 @@
     "chunk_overlap": 40,
     "max_chunk_length": 512,
     "semantic_word_limit": 1024,
-    "top_k": 3
+    "top_k": 3,
+    "rerank": {
+      "enabled": true,
+      "provider": "local_oss",
+      "model": "",
+      "candidate_k": 40,
+      "top_k": null,
+      "timeout_seconds": 8.0,
+      "batch_size": 8
+    }
   },
   "agent": {
     "model_provider": "ollama",
@@ -44,7 +53,54 @@
     "test_agent_model": "gemma3:4b"
   },
   "remme": {
-    "extraction_prompt": "You are a Contextual Memory Management AI.\nYour job is to update the \"Memory Vault\" based on the latest conversation.\n\nRULES:\n1. ANTI-FRAGMENTATION: NEVER split related items into separate facts. Merge them into ONE rich, coherent memory entry.\n2. NO REDUNDANCY: If info is already captured, do nothing unless you have NEW details (use \"update\").\n3. CONTEXTUAL HUBS: Prefer a single \"Hub\" memory over separate atomic facts; emit it as one entry in \"memories\" (see OUTPUT FORMAT).\n4. NO NEGATIVE FACTS: NEVER store \"not found\" or \"missing\" info.\n5. NO META-LOGS: Do not store internal reasoning or agent traces.\n6. HIGH SALIENCE ONLY: Focus on project decisions, user preferences, architectural details.\n7. ACTIONS: \"add\" for new facts, \"update\" to expand existing, \"delete\" if proven false.\n\nOUTPUT FORMAT: Respond with JSON only: {\"memories\": [{\"action\": \"add\"|\"update\"|\"delete\", \"text\": \"...\", \"id\": \"...\" only for update/delete}], \"preferences\": {...}}. If nothing to store: {\"memories\": [], \"preferences\": {}}."
+    "extraction_prompt": "You are a Contextual Memory Management AI.\nYour job is to update the \"Memory Vault\" based on the latest conversation.\n\nRULES:\n1. ANTI-FRAGMENTATION: NEVER split related items into separate facts. Merge them into ONE rich, coherent memory entry.\n2. NO REDUNDANCY: If info is already captured, do nothing unless you have NEW details (use \"update\").\n3. CONTEXTUAL HUBS: Prefer a single \"Hub\" memory over separate atomic facts; emit it as one entry in \"memories\" (see OUTPUT FORMAT).\n4. NO NEGATIVE FACTS: NEVER store \"not found\" or \"missing\" info.\n5. NO META-LOGS: Do not store internal reasoning or agent traces.\n6. HIGH SALIENCE ONLY: Focus on project decisions, user preferences, architectural details.\n7. ACTIONS: \"add\" for new facts, \"update\" to expand existing, \"delete\" if proven false.\n\nOUTPUT FORMAT: Respond with JSON only: {\"memories\": [{\"action\": \"add\"|\"update\"|\"delete\", \"text\": \"...\", \"id\": \"...\" only for update/delete}], \"preferences\": {...}}. If nothing to store: {\"memories\": [], \"preferences\": {}}.",
+    "policy": {
+      "enabled": true,
+      "write": {
+        "max_text_length": 2000,
+        "blocked_patterns": [],
+        "allowed_sources": [],
+        "denied_sources": [],
+        "allowed_categories": [],
+        "denied_categories": [],
+        "default_ttl_seconds": null,
+        "source_ttl_overrides": {
+          "run_*": 1209600,
+          "manual_scan_*": 604800,
+          "backfill_*": 259200
+        }
+      },
+      "read": {
+        "allowed_sources": [],
+        "denied_sources": [],
+        "allowed_categories": [],
+        "denied_categories": [],
+        "exclude_expired": true,
+        "requester_overrides": {
+          "run_context": {
+            "allowed_sources": [
+              "manual",
+              "run_*"
+            ],
+            "denied_sources": [
+              "manual_scan_*",
+              "backfill_*"
+            ],
+            "allowed_categories": [],
+            "denied_categories": []
+          },
+          "smart_scan": {
+            "allowed_sources": [
+              "manual",
+              "run_*"
+            ],
+            "denied_sources": [],
+            "allowed_categories": [],
+            "denied_categories": []
+          }
+        }
+      }
+    }
   },
   "gemini": {
     "api_key_env": "GEMINI_API_KEY"

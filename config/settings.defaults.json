@@ -29,7 +29,16 @@
         "chunk_overlap": 40,
         "max_chunk_length": 512,
         "semantic_word_limit": 1024,
-        "top_k": 3
+        "top_k": 3,
+        "rerank": {
+            "enabled": false,
+            "provider": "local_oss",
+            "model": "",
+            "candidate_k": 40,
+            "top_k": null,
+            "timeout_seconds": 8.0,
+            "batch_size": 8
+        }
     },
     "agent": {
         "model_provider": "gemini",
@@ -63,6 +72,53 @@
             "read_from_bridge": false,
             "mirror_dir": "memory/gbrain_bridge",
             "server_id": "gbrain"
+        },
+        "policy": {
+            "enabled": true,
+            "write": {
+                "max_text_length": 2000,
+                "blocked_patterns": [],
+                "allowed_sources": [],
+                "denied_sources": [],
+                "allowed_categories": [],
+                "denied_categories": [],
+                "default_ttl_seconds": null,
+                "source_ttl_overrides": {
+                    "run_*": 1209600,
+                    "manual_scan_*": 604800,
+                    "backfill_*": 259200
+                }
+            },
+            "read": {
+                "allowed_sources": [],
+                "denied_sources": [],
+                "allowed_categories": [],
+                "denied_categories": [],
+                "exclude_expired": true,
+                "requester_overrides": {
+                    "run_context": {
+                        "allowed_sources": [
+                            "manual",
+                            "run_*"
+                        ],
+                        "denied_sources": [
+                            "manual_scan_*",
+                            "backfill_*"
+                        ],
+                        "allowed_categories": [],
+                        "denied_categories": []
+                    },
+                    "smart_scan": {
+                        "allowed_sources": [
+                            "manual",
+                            "run_*"
+                        ],
+                        "denied_sources": [],
+                        "allowed_categories": [],
+                        "denied_categories": []
+                    }
+                }
+            }
         }
     },
     "gemini": {
