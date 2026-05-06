@@ -9,7 +9,7 @@ Open-source agent runtime and orchestration framework for AI systems.
 ![Docker CI](https://img.shields.io/badge/CI-Docker%20%2B%20Tests-success)
 
 - **Python:** 3.11+
-- **Version:** 0.2.0
+- **Version:** 0.9
 
 ## The magic moment (under 30 seconds)
 
