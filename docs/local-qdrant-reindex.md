@@ -6,11 +6,11 @@ This rollout keeps FAISS artifacts intact and mirrors reindex writes into Qdrant
 
 1. Set provider to Qdrant in config (`ingest.vector_store.provider=qdrant`).
 2. Trigger reindex through API:
-   - `POST /rag/reindex?force=true` for full rebuild
-   - `POST /rag/reindex?path=docs/some-file.md` for scoped rebuild
+  - `POST /rag/reindex?force=true` for full rebuild
+  - `POST /rag/reindex?path=docs/some-file.md` for scoped rebuild
 3. During `process_documents`, each successfully indexed file is:
-   - written to FAISS metadata/index (legacy kept intact)
-   - mirrored into Qdrant via `delete_by_doc(rel_path)` + `upsert(...)`
+  - written to FAISS metadata/index (legacy kept intact)
+  - mirrored into Qdrant via `delete_by_doc(rel_path)` + `upsert(...)`
 
 ## Smoke verification
 

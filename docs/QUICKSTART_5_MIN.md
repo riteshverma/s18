@@ -35,6 +35,38 @@ With **`AUTH_ENABLED=false`**, protected routes use a built-in dev user so you d
 
 That is the full loop: **HTTP API → canonical run → agent loop → tools (including MCP)**.
 
+## Two-week P1 execution checklist (user growth)
+
+Use this checklist to prioritize work after your first successful run.
+
+### Week 1: improve activation
+
+- Confirm a clean-machine path can complete the five-minute flow exactly as written.
+- Run both payloads in `POST /runs`:
+  - minimal payload (`{"query": "..."}`)
+  - canonical metadata payload (`integration_id`, `workflow_id`, `contract_version`)
+- Fix the single highest-friction onboarding issue in docs or setup scripts.
+- Capture three numbers at end of week:
+  - first successful run rate
+  - median time to first successful run
+  - top 3 setup failures
+
+### Week 2: improve reliability and conversion
+
+- Validate both local runtime modes with preflight scripts:
+  - `.\scripts\preflight-runtime.ps1 -Mode ollama`
+  - `.\scripts\preflight-runtime.ps1 -Mode llama_cpp`
+- Re-test onboarding after Week 1 fixes and compare first-run success rate.
+- Run one Wise-AI integration flow end-to-end using canonical run metadata.
+- Capture three numbers at end of week:
+  - repeat run rate
+  - unresolved pilot blockers
+  - setup failure count delta vs Week 1
+
+### Decision rule
+
+If a task does not improve activation, reliability, or conversion in the next release window, defer it.
+
 ## Optional: companion web app on port 5173
 
 The API allows CORS for `http://localhost:5173`. If you run a separate Vite (or Wise-AI) frontend that targets this backend, point it at `http://localhost:8000` and send `Authorization: Bearer <supabase_access_token>` when **`AUTH_ENABLED=true`**.

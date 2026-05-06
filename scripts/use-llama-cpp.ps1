@@ -2,7 +2,8 @@ param(
     [switch]$NoDocker,
     [switch]$HostServer,
     [switch]$RestartWorker,
-    [switch]$SkipPreflight
+    [switch]$SkipPreflight,
+    [long]$MinimumModelBytes = 1GB
 )
 
 Set-StrictMode -Version Latest
@@ -18,6 +19,20 @@ else {
 
 if (-not (Test-Path $DockerEnvPath)) {
     throw "Missing Docker env file: $DockerEnvPath"
+}
+
+if (-not $HostServer -and -not $NoDocker) {
+    $modelFileName = if ($env:LLAMA_CPP_MODEL_FILE) { $env:LLAMA_CPP_MODEL_FILE } else { "model.gguf" }
+    $modelPath = Join-Path (Join-Path $Root "models") $modelFileName
+    if (-not (Test-Path $modelPath)) {
+        throw "Missing llama.cpp model: $modelPath. Put a valid GGUF there, set LLAMA_CPP_MODEL_FILE, or use .\scripts\use-ollama.ps1."
+    }
+
+    $modelSize = (Get-Item $modelPath).Length
+    if ($MinimumModelBytes -gt 0 -and $modelSize -lt $MinimumModelBytes) {
+        $sizeMb = [math]::Round($modelSize / 1MB, 1)
+        throw "llama.cpp model '$modelFileName' is only ${sizeMb} MB. A 7B GGUF is usually several GB; this file is likely incomplete/corrupt. Re-download it, set LLAMA_CPP_MODEL_FILE to a valid GGUF, pass -MinimumModelBytes 0 for tiny models, or use .\scripts\use-ollama.ps1."
+    }
 }
 
 function Invoke-Compose {

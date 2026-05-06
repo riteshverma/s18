@@ -73,7 +73,30 @@ r.raise_for_status()
 
 # Optional cross-stack check if wise backend is up.
 if (Test-ContainerRunning "wiseai-backend-1") {
-    Invoke-InContainerPython -Container "wiseai-backend-1" -Code "import requests; r=requests.get('http://s18share-api:8000/health', timeout=10); print('wise_to_s18_health', r.status_code); r.raise_for_status()"
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreferenceExists = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    if ($nativePreferenceExists) {
+        $previousNativePreference = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+    $ErrorActionPreference = "Continue"
+    try {
+        $wiseProbe = docker exec wiseai-backend-1 python -c "import requests; r=requests.get('http://s18share-api:8000/health', timeout=10); print('wise_to_s18_health', r.status_code); r.raise_for_status()" 2>$null
+        $wiseProbeExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        if ($nativePreferenceExists) {
+            $PSNativeCommandUseErrorActionPreference = $previousNativePreference
+        }
+    }
+
+    if ($wiseProbeExitCode -ne 0) {
+        Write-Warning "Optional Wise -> S18 health probe failed. Core S18 preflight already passed."
+    }
+    else {
+        $wiseProbe | Write-Host
+    }
 }
 
 Write-Host "Preflight OK for mode '$Mode'."
