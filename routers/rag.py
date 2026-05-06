@@ -38,8 +38,8 @@ multi_mcp = get_multi_mcp()
 def _resolve_vector_provider(user: Dict[str, Any]) -> tuple[str, Dict[str, str]]:
     """Return (provider, tenant_context) for the calling user.
 
-    Falls back to legacy ``faiss`` MCP path when the tenant has not been
-    routed to a cloud-managed vector store.
+    Routes local providers (``qdrant``/``faiss``) through the MCP hybrid path
+    and cloud providers through the VectorStore facade.
     """
     tenant_context = resolve_tenant_context(
         request_payload={},
@@ -51,7 +51,7 @@ def _resolve_vector_provider(user: Dict[str, Any]) -> tuple[str, Dict[str, str]]
     provider = (
         overrides.get(tenant_context["tenant_id"])
         or backend_cfg.get("provider")
-        or "faiss"
+        or "qdrant"
     )
     return str(provider).lower(), tenant_context
 
@@ -546,14 +546,14 @@ async def rag_search(query: str, user: Dict[str, Any] = Depends(require_supabase
 
     Delegates to the tenant-configured vector store when ``ingest.vector_store``
     points at a cloud backend (Azure AI Search, AWS OpenSearch, Bedrock KB).
-    Falls back to the legacy MCP+FAISS hybrid pipeline for the default tenant
-    so the existing local dev path keeps working unchanged.
+    Local providers (Qdrant default, FAISS fallback) continue using the MCP
+    hybrid pipeline (BM25 + dense + RRF + entity gate + rerank/source tuning).
     """
     start_ms = now_ms()
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
     provider, tenant_context = _resolve_vector_provider(user)
-    if provider != "faiss":
+    if provider not in {"faiss", "qdrant"}:
         try:
             from core.embedding import get_normalized_embedding
 
@@ -671,7 +671,7 @@ async def rag_search(query: str, user: Dict[str, Any] = Depends(require_supabase
         RAG_RESULTS_COUNT.labels(endpoint="search").observe(result_count)
         if result_count == 0:
             RAG_EMPTY_RESULT_TOTAL.labels(endpoint="search").inc()
-        return {"status": "success", "results": structured_results}
+        return {"status": "success", "results": structured_results, "vector_provider": provider}
     except Exception as e:
         logger.exception("RAG search failed: %s", e)
         RAG_REQUESTS_TOTAL.labels(endpoint="search", status="error").inc()

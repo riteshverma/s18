@@ -100,6 +100,7 @@ from core.embedding import (
 )
 from core.model_manager import ModelManager
 from core.rag_rerank import RerankCandidate, build_reranker, load_rerank_config
+from integrations.vectors import Chunk, get_vector_store
 
 mcp = FastMCP("Local Storage RAG")
 
@@ -802,98 +803,152 @@ def search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]:
     Optionally provide doc_path to search within a specific document only.
     """
     global _bm25_index
-    ensure_faiss_ready()
     mcp_log("SEARCH", f"Query: {query} (Doc: {doc_path})")
     
     try:
-        metadata = json.loads((ROOT / "faiss_index" / "metadata.json").read_text())
+        ingest_cfg = (load_settings().get("ingest", {}) or {}).get("vector_store", {}) or {}
+        provider = str(ingest_cfg.get("provider") or "faiss").lower()
+        default_tenant = "default"
+        tenant_context = {
+            "tenant_id": default_tenant,
+            "tenant_tier": "starter",
+            "data_region": "in",
+        }
+        metadata = []
+        vector_store = None
+        if provider == "qdrant":
+            try:
+                vector_store = get_vector_store(tenant_context)
+                export_fn = getattr(vector_store, "export_metadata", None)
+                if callable(export_fn):
+                    metadata = list(export_fn(tenant_id=default_tenant))
+                    mcp_log("SEARCH", f"Loaded {len(metadata)} chunks from Qdrant payload export")
+            except Exception as err:
+                mcp_log("WARN", f"Qdrant metadata export failed ({err}); will try FAISS fallback.")
+                metadata = []
+                vector_store = None
+
+        if not metadata:
+            ensure_faiss_ready()
+            metadata = json.loads((ROOT / "faiss_index" / "metadata.json").read_text())
         
         # 1. Analyze query for intent and entities
         analysis = analyze_query(query)
         mcp_log("SEARCH", f"Intent: {analysis.intent}, Entities: {analysis.entities}")
         
-        # 2. FAISS vector search (best-effort; fall back gracefully if unavailable/misaligned)
+        # 2. Dense vector search (Qdrant-first, FAISS fallback)
         faiss_results = []
-        index_cache = ROOT / "faiss_index"
-        index_path = index_cache / "index.bin"
-        runtime_sig = _current_embedding_signature()
-        manifest = _load_index_manifest(index_cache)
-        allow_faiss = True
-        if manifest:
-            manifest_ok, manifest_reason = _validate_manifest_compatibility(
-                manifest,
-                provider=runtime_sig["provider"],
-                model=runtime_sig["model"],
-            )
-            if not manifest_ok:
-                allow_faiss = False
-                mcp_log(
-                    "WARN",
-                    (
-                        "Index compatibility guard triggered "
-                        f"({manifest_reason}); skipping FAISS and using BM25/lexical fallback. "
-                        "Run force reindex after embedding model/provider changes."
-                    ),
-                )
-
-        if index_path.exists() and allow_faiss:
+        if provider == "qdrant" and vector_store is not None:
             try:
-                index = faiss.read_index(str(index_path))
-                query_vec = get_embedding(query).reshape(1, -1)
-                query_dim = int(query_vec.shape[1])
-                index_dim = int(getattr(index, "d", query_dim))
-                if manifest:
-                    manifest_ok, manifest_reason = _validate_manifest_compatibility(
-                        manifest,
-                        provider=runtime_sig["provider"],
-                        model=runtime_sig["model"],
-                        dimension=query_dim,
-                    )
-                    if not manifest_ok:
-                        mcp_log(
-                            "WARN",
-                            (
-                                "Index compatibility guard triggered "
-                                f"({manifest_reason}); skipping FAISS and using BM25/lexical fallback. "
-                                "Run force reindex to rebuild vectors for the current embedding model."
-                            ),
-                        )
-                        index = None
-                if index_dim != query_dim:
-                    mcp_log(
-                        "WARN",
-                        (
-                            f"Vector dim mismatch (index={index_dim}, query={query_dim}); "
-                            "skipping FAISS and using BM25/lexical fallback. "
-                            "Run force reindex to rebuild vectors for the current embedding model."
-                        ),
-                    )
-                elif index is not None:
-                    D, I = index.search(query_vec, k=50 if doc_path else 30)
-                    for rank, idx in enumerate(I[0]):
-                        if idx < 0 or idx >= len(metadata):
-                            continue
-                        chunk_id = metadata[idx].get('chunk_id', f'idx_{idx}')
-                        faiss_results.append((chunk_id, float(D[0][rank])))
+                query_vec = get_embedding(query).reshape(1, -1)[0].tolist()
+                q_hits = vector_store.query(
+                    embedding=query_vec,
+                    text=query,
+                    k=50 if doc_path else 30,
+                    filters={"tenant_id": default_tenant},
+                )
+                faiss_results = [
+                    (hit.chunk_id, float(hit.score))
+                    for hit in q_hits
+                    if getattr(hit, "chunk_id", "")
+                ]
             except Exception as vec_err:
                 vec_detail = str(vec_err).strip() or repr(vec_err)
                 mcp_log(
                     "WARN",
-                    f"Vector search unavailable ({vec_detail}); falling back to BM25/lexical.",
+                    f"Qdrant dense search unavailable ({vec_detail}); trying FAISS fallback.",
                 )
-        else:
-            mcp_log("WARN", "FAISS index.bin missing; using BM25/lexical fallback.")
+
+        if not faiss_results:
+            index_cache = ROOT / "faiss_index"
+            index_path = index_cache / "index.bin"
+            if provider == "qdrant":
+                try:
+                    metadata = json.loads((ROOT / "faiss_index" / "metadata.json").read_text())
+                    mcp_log("WARN", "Using FAISS metadata fallback for dense-search compatibility.")
+                except Exception:
+                    pass
+            runtime_sig = _current_embedding_signature()
+            manifest = _load_index_manifest(index_cache)
+            allow_faiss = True
+            if manifest:
+                manifest_ok, manifest_reason = _validate_manifest_compatibility(
+                    manifest,
+                    provider=runtime_sig["provider"],
+                    model=runtime_sig["model"],
+                )
+                if not manifest_ok:
+                    allow_faiss = False
+                    mcp_log(
+                        "WARN",
+                        (
+                            "Index compatibility guard triggered "
+                            f"({manifest_reason}); skipping FAISS and using BM25/lexical fallback. "
+                            "Run force reindex after embedding model/provider changes."
+                        ),
+                    )
+
+            if index_path.exists() and allow_faiss:
+                try:
+                    index = faiss.read_index(str(index_path))
+                    query_vec = get_embedding(query).reshape(1, -1)
+                    query_dim = int(query_vec.shape[1])
+                    index_dim = int(getattr(index, "d", query_dim))
+                    if manifest:
+                        manifest_ok, manifest_reason = _validate_manifest_compatibility(
+                            manifest,
+                            provider=runtime_sig["provider"],
+                            model=runtime_sig["model"],
+                            dimension=query_dim,
+                        )
+                        if not manifest_ok:
+                            mcp_log(
+                                "WARN",
+                                (
+                                    "Index compatibility guard triggered "
+                                    f"({manifest_reason}); skipping FAISS and using BM25/lexical fallback. "
+                                    "Run force reindex to rebuild vectors for the current embedding model."
+                                ),
+                            )
+                            index = None
+                    if index_dim != query_dim:
+                        mcp_log(
+                            "WARN",
+                            (
+                                f"Vector dim mismatch (index={index_dim}, query={query_dim}); "
+                                "skipping FAISS and using BM25/lexical fallback. "
+                                "Run force reindex to rebuild vectors for the current embedding model."
+                            ),
+                        )
+                    elif index is not None:
+                        D, I = index.search(query_vec, k=50 if doc_path else 30)
+                        for rank, idx in enumerate(I[0]):
+                            if idx < 0 or idx >= len(metadata):
+                                continue
+                            chunk_id = metadata[idx].get('chunk_id', f'idx_{idx}')
+                            faiss_results.append((chunk_id, float(D[0][rank])))
+                except Exception as vec_err:
+                    vec_detail = str(vec_err).strip() or repr(vec_err)
+                    mcp_log(
+                        "WARN",
+                        f"Vector search unavailable ({vec_detail}); falling back to BM25/lexical.",
+                    )
+            else:
+                mcp_log("WARN", "FAISS index.bin missing; using BM25/lexical fallback.")
         
         # 3. BM25 keyword search (if available)
         bm25_results = []
         if BM25_AVAILABLE:
-            bm25_path = ROOT / "faiss_index" / "bm25_index.pkl"
-            if not _bm25_index.bm25:
-                if bm25_path.exists():
-                    _bm25_index.load(str(bm25_path))
-                else:
-                    _bm25_index.build_from_metadata(metadata)
-                    _bm25_index.save(str(bm25_path))
+            if provider == "qdrant":
+                _bm25_index.build_from_metadata(metadata)
+            else:
+                bm25_path = ROOT / "faiss_index" / "bm25_index.pkl"
+                if not _bm25_index.bm25:
+                    if bm25_path.exists():
+                        _bm25_index.load(str(bm25_path))
+                    else:
+                        _bm25_index.build_from_metadata(metadata)
+                        _bm25_index.save(str(bm25_path))
             bm25_results = _bm25_index.search(query, top_k=30)
         
         # 4. RRF Fusion
@@ -1998,6 +2053,22 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
         INDEXING_STATUS["currentFile"] = "Checking cache..."
     
     param_cache_meta = CACHE_META.copy() # Read-only for threads
+    vector_provider = str(
+        (((load_settings().get("ingest", {}) or {}).get("vector_store", {}) or {}).get("provider", "faiss"))
+    ).lower()
+    vector_store = None
+    if vector_provider == "qdrant":
+        try:
+            vector_store = get_vector_store(
+                {"tenant_id": "default", "tenant_tier": "starter", "data_region": "in"}
+            )
+            mcp_log(
+                "INFO",
+                f"Qdrant sync enabled during reindex (collection={getattr(vector_store, 'collection', 'unknown')})",
+            )
+        except Exception as e:
+            mcp_log("WARN", f"Qdrant sync disabled: failed to initialize vector store ({e})")
+            vector_store = None
     
     # Thread-safe lock for incremental saves
     import threading
@@ -2085,6 +2156,29 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
                         except Exception as e:
                             mcp_log("WARN", f"Incremental save failed: {e}")
                         
+                        if vector_store is not None:
+                            try:
+                                vector_store.ensure_index(dimension=emb_dim)
+                                vector_store.delete_by_doc(rel_path, tenant_id="default")
+                                chunks = [
+                                    Chunk(
+                                        chunk_id=str(meta_entry.get("chunk_id")),
+                                        doc_id=str(rel_path),
+                                        text=str(meta_entry.get("chunk") or ""),
+                                        embedding=embedding.tolist() if hasattr(embedding, "tolist") else list(embedding),
+                                        tenant_id="default",
+                                        integration_id="rag_local",
+                                        source_uri=str(meta_entry.get("doc") or rel_path),
+                                        metadata=dict(meta_entry),
+                                    )
+                                    for embedding, meta_entry in zip(new_embs, new_meta)
+                                    if meta_entry.get("chunk_id")
+                                ]
+                                if chunks:
+                                    vector_store.upsert(chunks)
+                            except Exception as e:
+                                mcp_log("WARN", f"Qdrant sync failed for {rel_path}: {e}")
+
                         mcp_log("DONE", f"Indexed {rel_path} ({len(new_embs)} chunks)")
                         
                         # Update progress
