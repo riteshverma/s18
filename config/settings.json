@@ -28,6 +28,20 @@
       "batch_size": 8
     }
   },
+  "ingest": {
+    "vector_store": {
+      "provider": "qdrant",
+      "qdrant": {
+        "url": "http://127.0.0.1:6333",
+        "collection": "s18-rag-{namespace}",
+        "api_key_env": "QDRANT_API_KEY",
+        "distance": "Cosine",
+        "retry_attempts": 3,
+        "retry_backoff_seconds": 0.6,
+        "upsert_batch_size": 128
+      }
+    }
+  },
   "agent": {
     "model_provider": "ollama",
     "default_model": "gemma3:4b",

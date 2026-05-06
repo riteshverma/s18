@@ -197,9 +197,18 @@
       "tenant_overrides": {}
     },
     "vector_store": {
-      "provider": "faiss",
+      "provider": "qdrant",
       "faiss": {
         "index_dir": "mcp_servers/faiss_index"
+      },
+      "qdrant": {
+        "url": "http://127.0.0.1:6333",
+        "collection": "s18-rag-{namespace}",
+        "api_key_env": "QDRANT_API_KEY",
+        "distance": "Cosine",
+        "retry_attempts": 3,
+        "retry_backoff_seconds": 0.6,
+        "upsert_batch_size": 128
       },
       "azure_ai_search": {
         "endpoint": "",

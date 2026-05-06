@@ -11,7 +11,7 @@ from integrations.tenancy import storage_namespace_for_tenant
 from integrations.vectors.base import VectorStore
 
 _BACKEND_KEY = "vector_store"
-_DEFAULT_PROVIDER = "faiss"
+_DEFAULT_PROVIDER = "qdrant"
 
 
 def _resolve_provider(
@@ -48,6 +48,29 @@ def get_vector_store(tenant_context: Optional[Dict[str, str]] = None) -> VectorS
         if namespace and namespace != "shared":
             index_dir = index_dir / namespace
         return FaissLocalVectorStore(index_dir=index_dir)
+
+    if provider == "qdrant":
+        from integrations.vectors.qdrant_store import QdrantVectorStore
+
+        cfg = backend_cfg.get("qdrant", {}) or {}
+        url = os.getenv("QDRANT_URL") or cfg.get("url") or "http://127.0.0.1:6333"
+        api_key = os.getenv(cfg.get("api_key_env", "QDRANT_API_KEY")) or os.getenv(
+            "QDRANT_API_KEY", ""
+        )
+        base_collection = cfg.get("collection") or "s18-rag"
+        if "{namespace}" in base_collection:
+            collection = base_collection.format(namespace=namespace)
+        else:
+            collection = f"{base_collection}-{namespace}".replace("_", "-")
+        return QdrantVectorStore(
+            url=url,
+            collection=collection,
+            api_key=api_key,
+            distance=str(cfg.get("distance") or "Cosine"),
+            retry_attempts=int(cfg.get("retry_attempts") or 3),
+            retry_backoff_seconds=float(cfg.get("retry_backoff_seconds") or 0.6),
+            upsert_batch_size=int(cfg.get("upsert_batch_size") or 128),
+        )
 
     if provider == "azure_ai_search":
         from integrations.vectors.azure_ai_search import AzureAiSearchVectorStore
