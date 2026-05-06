@@ -27,9 +27,6 @@
     "rag-local-qdrant-reindex": [
       "When the corpus changes, local Qdrant should be reindexed so retrieval aligns with updated embeddings and chunks.\n[Source: docs/local-qdrant-reindex.md p1]"
     ],
-    "rag-growth-execution-tracker": [
-      "The growth execution tracker records milestones, owners, and checkpoint status for operational rollout.\n[Source: docs/operations/GROWTH_EXECUTION_TRACKER.md p1]"
-    ],
     "rag-gbrain-compatibility": [
       "GBRAIN compatibility notes describe boundaries and alignment points for S18 architecture interoperability.\n[Source: docs/architecture/GBRAIN_COMPATIBILITY.md p1]"
     ],

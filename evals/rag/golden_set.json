@@ -117,19 +117,6 @@
       ]
     },
     {
-      "id": "rag-growth-execution-tracker",
-      "question": "What execution checkpoints are tracked in the growth operations tracker?",
-      "expected_sources": [
-        "docs/operations/GROWTH_EXECUTION_TRACKER.md"
-      ],
-      "required_terms": [
-        "growth",
-        "tracker",
-        "execution",
-        "checkpoint"
-      ]
-    },
-    {
       "id": "rag-gbrain-compatibility",
       "question": "How does S18 document compatibility expectations with the GBRAIN architecture?",
       "expected_sources": [
