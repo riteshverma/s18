@@ -14,6 +14,33 @@
     ],
     "rag-quickstart-ollama": [
       "Default configs expect Ollama for embeddings and RAG tooling; without it, some RAG-heavy paths may warn.\n[Source: docs/QUICKSTART_5_MIN.md p1]"
+    ],
+    "rag-powerapps-rag-pipeline": [
+      "The PowerApps pipeline describes document ingestion, vector indexing, and grounded retrieval for downstream response generation.\n[Source: docs/architecture/POWERAPPS_RAG_PIPELINE.md p1]"
+    ],
+    "rag-powerapps-integration-contract": [
+      "The PowerApps integration README defines request handoff expectations and workflow metadata alignment with S18.\n[Source: docs/integrations/powerapps/README.md p1]"
+    ],
+    "rag-mcp-marketplace-integration": [
+      "Marketplace integration docs describe installation and wiring for MCP endpoints before tool usage.\n[Source: docs/mcp/MCP_MARKETPLACE_INTEGRATION.md p1]"
+    ],
+    "rag-local-qdrant-reindex": [
+      "When the corpus changes, local Qdrant should be reindexed so retrieval aligns with updated embeddings and chunks.\n[Source: docs/local-qdrant-reindex.md p1]"
+    ],
+    "rag-growth-execution-tracker": [
+      "The growth execution tracker records milestones, owners, and checkpoint status for operational rollout.\n[Source: docs/operations/GROWTH_EXECUTION_TRACKER.md p1]"
+    ],
+    "rag-gbrain-compatibility": [
+      "GBRAIN compatibility notes describe boundaries and alignment points for S18 architecture interoperability.\n[Source: docs/architecture/GBRAIN_COMPATIBILITY.md p1]"
+    ],
+    "rag-workflow-contract-fields": [
+      "Workflow-agnostic contracts require integration_id, workflow_id, and contract_version metadata for traceability.\n[Source: docs/architecture/S18_WORKFLOW_AGNOSTIC_TARGET.md p1]"
+    ],
+    "rag-quickstart-observability": [
+      "Quickstart references monitoring startup paths and observability posture for local environments.\n[Source: docs/QUICKSTART_5_MIN.md p1]"
+    ],
+    "rag-cdss-recommendation-flow": [
+      "The CDSS architecture captures recommendation flow boundaries between orchestration, retrieval context, and output shaping.\n[Source: docs/architecture/WISE_AI_CDSS_Architecture_2026-03.md p1]"
     ]
   },
   "answers": {

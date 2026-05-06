@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Seed golden set for S18 RAG retrieval evaluation. Expected sources are normalized paths from the indexed corpus.",
+  "description": "Expanded golden set for S18 RAG retrieval evaluation. Expected sources are normalized paths from the indexed corpus.",
   "queries": [
     {
       "id": "rag-architecture-cdss",
@@ -62,6 +62,123 @@
         "ollama",
         "rag",
         "embeddings"
+      ]
+    },
+    {
+      "id": "rag-powerapps-rag-pipeline",
+      "question": "What architecture does the PowerApps RAG pipeline document describe for document grounding?",
+      "expected_sources": [
+        "docs/architecture/POWERAPPS_RAG_PIPELINE.md"
+      ],
+      "required_terms": [
+        "powerapps",
+        "pipeline",
+        "rag",
+        "grounding"
+      ]
+    },
+    {
+      "id": "rag-powerapps-integration-contract",
+      "question": "What integration behavior is documented for PowerApps handoff into S18?",
+      "expected_sources": [
+        "docs/integrations/powerapps/README.md"
+      ],
+      "required_terms": [
+        "integration",
+        "powerapps",
+        "workflow",
+        "handoff"
+      ]
+    },
+    {
+      "id": "rag-mcp-marketplace-integration",
+      "question": "What does the MCP marketplace integration guide require for setup and usage?",
+      "expected_sources": [
+        "docs/mcp/MCP_MARKETPLACE_INTEGRATION.md"
+      ],
+      "required_terms": [
+        "mcp",
+        "marketplace",
+        "integration",
+        "setup"
+      ]
+    },
+    {
+      "id": "rag-local-qdrant-reindex",
+      "question": "How should local Qdrant reindexing be performed when the corpus changes?",
+      "expected_sources": [
+        "docs/local-qdrant-reindex.md"
+      ],
+      "required_terms": [
+        "qdrant",
+        "reindex",
+        "local",
+        "corpus"
+      ]
+    },
+    {
+      "id": "rag-growth-execution-tracker",
+      "question": "What execution checkpoints are tracked in the growth operations tracker?",
+      "expected_sources": [
+        "docs/operations/GROWTH_EXECUTION_TRACKER.md"
+      ],
+      "required_terms": [
+        "growth",
+        "tracker",
+        "execution",
+        "checkpoint"
+      ]
+    },
+    {
+      "id": "rag-gbrain-compatibility",
+      "question": "How does S18 document compatibility expectations with the GBRAIN architecture?",
+      "expected_sources": [
+        "docs/architecture/GBRAIN_COMPATIBILITY.md"
+      ],
+      "required_terms": [
+        "gbrain",
+        "compatibility",
+        "architecture",
+        "integration"
+      ]
+    },
+    {
+      "id": "rag-workflow-contract-fields",
+      "question": "Which metadata fields are mandatory for workflow-agnostic MCP contracts?",
+      "expected_sources": [
+        "docs/architecture/S18_WORKFLOW_AGNOSTIC_TARGET.md"
+      ],
+      "required_terms": [
+        "integration_id",
+        "workflow_id",
+        "contract_version",
+        "metadata"
+      ]
+    },
+    {
+      "id": "rag-quickstart-observability",
+      "question": "What does quickstart mention about observability and monitoring startup?",
+      "expected_sources": [
+        "docs/QUICKSTART_5_MIN.md"
+      ],
+      "required_terms": [
+        "monitoring",
+        "observability",
+        "startup",
+        "quickstart"
+      ]
+    },
+    {
+      "id": "rag-cdss-recommendation-flow",
+      "question": "Where does the CDSS architecture define recommendation flow boundaries?",
+      "expected_sources": [
+        "docs/architecture/WISE_AI_CDSS_Architecture_2026-03.md"
+      ],
+      "required_terms": [
+        "cdss",
+        "recommendation",
+        "flow",
+        "architecture"
       ]
     }
   ]

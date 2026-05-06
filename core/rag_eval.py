@@ -70,6 +70,33 @@ class RecallAtKResult:
 
 
 @dataclass(frozen=True)
+class RetrievalMetricsAtKResult:
+    k: int
+    total_queries: int
+    hit_count: int
+    hit_rate: float
+    recall_at_k: float
+    precision_at_k: float
+    mrr: float
+    misses: tuple[RecallMiss, ...]
+    query_metrics: tuple["QueryRetrievalMetrics", ...]
+
+
+@dataclass(frozen=True)
+class QueryRetrievalMetrics:
+    query_id: str
+    question: str
+    expected_sources: tuple[str, ...]
+    retrieved_sources: tuple[str, ...]
+    matched_sources: tuple[str, ...]
+    first_relevant_rank: int | None
+    reciprocal_rank: float
+    recall_at_k: float
+    precision_at_k: float
+    is_hit: bool
+
+
+@dataclass(frozen=True)
 class GroundednessResult:
     cited_sources: tuple[str, ...]
     retrieved_sources: tuple[str, ...]
@@ -164,37 +191,96 @@ def evaluate_recall_at_k(
     *,
     k: int = 5,
 ) -> RecallAtKResult:
-    """Compute source Recall@k where any expected source is a hit."""
+    """Compute legacy query-hit Recall@k for backwards compatibility."""
+
+    retrieval = evaluate_retrieval_at_k(golden_queries, retrieved_by_query_id, k=k)
+    return RecallAtKResult(
+        k=k,
+        total=retrieval.total_queries,
+        hits=retrieval.hit_count,
+        score=retrieval.hit_rate,
+        misses=retrieval.misses,
+    )
+
+
+def evaluate_retrieval_at_k(
+    golden_queries: Sequence[GoldenQuery],
+    retrieved_by_query_id: Mapping[str, Sequence[Any]],
+    *,
+    k: int = 5,
+) -> RetrievalMetricsAtKResult:
+    """Compute retrieval quality metrics at k for a golden set.
+
+    Metrics:
+    - hit_rate@k: share of queries with at least one expected source in top-k
+    - recall@k: average per-query recall over expected sources
+    - precision@k: average relevant-in-top-k divided by k
+    - mrr: mean reciprocal rank of the first relevant source
+    """
 
     if k <= 0:
         raise ValueError("k must be positive")
 
-    hits = 0
+    hit_count = 0
+    recall_sum = 0.0
+    precision_sum = 0.0
+    mrr_sum = 0.0
     misses: list[RecallMiss] = []
+    query_metrics: list[QueryRetrievalMetrics] = []
 
     for query in golden_queries:
-        retrieved_sources = _sources_for_top_k(retrieved_by_query_id.get(query.id, ()), k)
+        ranked_sources = _ranked_sources_for_top_k(retrieved_by_query_id.get(query.id, ()), k)
         expected = set(query.expected_sources)
-        if expected.intersection(retrieved_sources):
-            hits += 1
-            continue
+        matched_sources = tuple(source for source in ranked_sources if source in expected)
+        relevant_count = len(matched_sources)
+        expected_count = len(expected) or 1
+        first_relevant_rank = next((rank for rank, source in enumerate(ranked_sources, start=1) if source in expected), None)
+        reciprocal_rank = (1.0 / first_relevant_rank) if first_relevant_rank else 0.0
+        per_query_recall = relevant_count / expected_count
+        per_query_precision = relevant_count / k
 
-        misses.append(
-            RecallMiss(
+        if relevant_count:
+            hit_count += 1
+        else:
+            misses.append(
+                RecallMiss(
+                    query_id=query.id,
+                    question=query.question,
+                    expected_sources=query.expected_sources,
+                    retrieved_sources=ranked_sources,
+                )
+            )
+
+        query_metrics.append(
+            QueryRetrievalMetrics(
                 query_id=query.id,
                 question=query.question,
                 expected_sources=query.expected_sources,
-                retrieved_sources=tuple(retrieved_sources),
+                retrieved_sources=ranked_sources,
+                matched_sources=matched_sources,
+                first_relevant_rank=first_relevant_rank,
+                reciprocal_rank=reciprocal_rank,
+                recall_at_k=per_query_recall,
+                precision_at_k=per_query_precision,
+                is_hit=bool(relevant_count),
             )
         )
 
-    total = len(golden_queries)
-    return RecallAtKResult(
+        recall_sum += per_query_recall
+        precision_sum += per_query_precision
+        mrr_sum += reciprocal_rank
+
+    total_queries = len(golden_queries)
+    return RetrievalMetricsAtKResult(
         k=k,
-        total=total,
-        hits=hits,
-        score=(hits / total) if total else 0.0,
+        total_queries=total_queries,
+        hit_count=hit_count,
+        hit_rate=(hit_count / total_queries) if total_queries else 0.0,
+        recall_at_k=(recall_sum / total_queries) if total_queries else 0.0,
+        precision_at_k=(precision_sum / total_queries) if total_queries else 0.0,
+        mrr=(mrr_sum / total_queries) if total_queries else 0.0,
         misses=tuple(misses),
+        query_metrics=tuple(query_metrics),
     )
 
 
@@ -249,6 +335,17 @@ def _sources_for_top_k(results: Sequence[Any], k: int) -> set[str]:
     for item in results[:k]:
         sources.update(extract_sources(item))
     return sources
+
+
+def _ranked_sources_for_top_k(results: Sequence[Any], k: int) -> tuple[str, ...]:
+    ranked: list[str] = []
+    seen: set[str] = set()
+    for item in results[:k]:
+        for source in extract_sources(item):
+            if source and source not in seen:
+                ranked.append(source)
+                seen.add(source)
+    return tuple(ranked)
 
 
 def _content_tokens(text: str) -> set[str]:

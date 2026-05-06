@@ -3,6 +3,7 @@
 This MCP server manages a local Retrieval-Augmented Generation (RAG) system, allowing you to index documents, search them using semantic vectors (embeddings), and ask questions about them.
 
 ## Features
+
 - **Local Indexing**: Indexes documents from the `data/` directory using FAISS.
 - **Semantic Search**: Uses embeddings (Ollama) to find relevant chunks.
 - **Image Captioning**: Automatically captions images within documents using vision models.
@@ -10,38 +11,60 @@ This MCP server manages a local Retrieval-Augmented Generation (RAG) system, all
 
 ## Evaluation
 
-S18 includes a seed RAG golden set at `evals/rag/golden_set.json` plus deterministic
+S18 includes an expanded RAG golden set at `evals/rag/golden_set.json` plus deterministic
 metrics in `core/rag_eval.py`. Captured retrieval results can be checked in CI with:
 
 ```bash
 python scripts/evaluate_rag.py --results tests/fixtures/rag_eval_results.json
 ```
 
-The evaluator reports source Recall@k and lightweight groundedness checks for cited
-answers. It does not require Ollama or FAISS, so it can run as a regression gate.
+Export compact per-query retrieval metrics to CSV:
+
+```bash
+python scripts/evaluate_rag.py --results tests/fixtures/rag_eval_results.json --out-csv evals/rag/latest_metrics.csv
+```
+
+The evaluator reports retrieval metrics (Recall@k, Precision@k, HitRate@k, and MRR)
+plus lightweight groundedness checks for cited answers. It does not require Ollama
+or FAISS, so it can run as a regression gate.
+
+Use `--json` to emit machine-readable output that includes a per-query retrieval
+breakdown (matched sources, first relevant rank, reciprocal rank, recall, precision).
+Use `--out-csv` for a compact, spreadsheet-friendly per-query export.
 
 ## Tools
 
 ### `preview_document(path: str) -> MarkdownOutput`
+
 Preview a document using AI-enhanced extraction logic. Supports PDF, HTML, DOCX, and more.
+
 - **path**: Relative path to the document in the `data/` directory.
 
 ### `ask_document(query: str, doc_id: str, history: list = [], image: str = None) -> str`
+
 Ask a question about a specific document. Uses RAG to find relevant context before answering.
+
 - **query**: Your question.
 - **doc_id**: The path of the document to query (optional context filter).
 - **history**: Chat history for context.
 - **image**: Optional image to include in the query.
 
 ### `search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]`
+
 Search stored documents using vector similarity.
+
 - **query**: The search string.
 - **doc_path**: Optional filter to search only within a specific document.
 
 ### `keyword_search(query: str) -> list[str]`
+
 Search for exact keyword matches across all indexed document chunks.
+
 - **query**: The keyword to search for.
 
 ### `caption_image(img_url_or_path: str) -> str`
+
 Generate a description/caption for an image using a Vision LLM.
+
 - **img_url_or_path**: URL or relative path to the image.
+
