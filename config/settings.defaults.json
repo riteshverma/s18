@@ -47,12 +47,28 @@
             "TestAgent": {
                 "model_provider": "ollama",
                 "model": "gemma3:4b"
+            },
+            "PlannerAgent": {
+                "model_provider": "ollama",
+                "model": "gemma3:4b",
+                "_comment": "Active only when top-level model_provider is ollama/llama_cpp. Cloud deployments (gemini/azure_openai) ignore this override."
             }
         },
         "max_steps": 3,
         "max_lifelines_per_step": 3,
         "planning_mode": "conservative",
         "rate_limit_interval": 4.5
+    },
+    "response_cache": {
+        "enabled": true,
+        "backend": "redis",
+        "redis_db": 1,
+        "ttl_seconds": 3600,
+        "max_memory_entries": 500
+    },
+    "intent_classifier": {
+        "enabled": true,
+        "min_keyword_hits": 2
     },
     "mcp": {
         "tool_timeout_seconds": 45,

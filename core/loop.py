@@ -29,6 +29,7 @@ from integrations.policies.workflow_guards import (
     is_fast_mode,
     is_mental_health_task_query,
 )
+from core.intent_classifier import classify_intent, INTENT_HARDCODED_PLANS
 from ui.visualizer import ExecutionVisualizer
 from rich.live import Live
 from rich.console import Console
@@ -328,19 +329,28 @@ class AgentLoop4:
                     }
                     log_step("⚡ Skipped Planner for CBC payload query (fast mode)", symbol="⚡")
                 else:
-                    async def run_planner():
-                        return await self.agent_runner.run_agent(
-                            "PlannerAgent",
-                            {
-                                "original_query": query,
-                                "planning_strategy": self.strategy,
-                                "globals_schema": self.context.plan_graph.graph.get("globals_schema", {}),
-                                "file_manifest": file_manifest,
-                                "file_profiles": file_profiles,
-                                "memory_context": planner_memory_context
-                            }
-                        )
-                    plan_result = await self._track_task(retry_with_backoff(run_planner))
+                    # ⚡ TIER 2: Keyword intent classifier — skips planner for known query shapes
+                    intent = classify_intent(query)
+                    if intent and intent in INTENT_HARDCODED_PLANS:
+                        plan_result = {
+                            "success": True,
+                            "output": INTENT_HARDCODED_PLANS[intent],
+                        }
+                        log_step(f"⚡ Skipped Planner — intent classifier matched: {intent}", symbol="⚡")
+                    else:
+                        async def run_planner():
+                            return await self.agent_runner.run_agent(
+                                "PlannerAgent",
+                                {
+                                    "original_query": query,
+                                    "planning_strategy": self.strategy,
+                                    "globals_schema": self.context.plan_graph.graph.get("globals_schema", {}),
+                                    "file_manifest": file_manifest,
+                                    "file_profiles": file_profiles,
+                                    "memory_context": planner_memory_context
+                                }
+                            )
+                        plan_result = await self._track_task(retry_with_backoff(run_planner))
 
                 if self.context.stop_requested:
                     break
