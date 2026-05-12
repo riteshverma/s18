@@ -21,6 +21,20 @@ OLLAMA_TIMEOUT = get_timeout()
 LLAMA_CPP_TIMEOUT = get_llama_cpp_timeout()
 
 
+def _ollama_embed_options() -> dict:
+    """Return Ollama request options for the embedding model.
+
+    Reads ``ollama.embedding_num_ctx`` from settings so the context window
+    can be tuned per-deployment without touching code.  Falls back to the
+    model's own default when the setting is absent.
+    """
+    cfg = load_settings().get("ollama", {}) or {}
+    num_ctx = cfg.get("embedding_num_ctx")
+    if num_ctx is not None:
+        return {"num_ctx": int(num_ctx)}
+    return {}
+
+
 def _embedding_retry_config() -> tuple[int, float]:
     cfg = load_settings().get("models", {}) or {}
     attempts = int(cfg.get("embedding_retry_attempts") or 3)
@@ -309,11 +323,15 @@ def get_normalized_embedding(
         return _normalize_vector(vectors[0])
 
     last_error: Optional[Exception] = None
+    embed_options = _ollama_embed_options()
     embed_url = get_ollama_url("embed")
     try:
+        payload: dict[str, Any] = {"model": EMBED_MODEL, "input": full_text}
+        if embed_options:
+            payload["options"] = embed_options
         response = requests.post(
             embed_url,
-            json={"model": EMBED_MODEL, "input": full_text},
+            json=payload,
             timeout=request_timeout,
         )
         response.raise_for_status()
@@ -325,9 +343,12 @@ def get_normalized_embedding(
 
     embeddings_url = get_ollama_url("embeddings")
     try:
+        payload = {"model": EMBED_MODEL, "prompt": full_text}
+        if embed_options:
+            payload["options"] = embed_options
         response = requests.post(
             embeddings_url,
-            json={"model": EMBED_MODEL, "prompt": full_text},
+            json=payload,
             timeout=request_timeout,
         )
         response.raise_for_status()
@@ -371,9 +392,13 @@ def get_batch_normalized_embeddings(
         return [_normalize_vector(v) for v in vectors]
 
     embed_url = get_ollama_url("embed")
+    batch_payload: dict[str, Any] = {"model": EMBED_MODEL, "input": prepared}
+    embed_options = _ollama_embed_options()
+    if embed_options:
+        batch_payload["options"] = embed_options
     response = requests.post(
         embed_url,
-        json={"model": EMBED_MODEL, "input": prepared},
+        json=batch_payload,
         timeout=request_timeout,
     )
     response.raise_for_status()

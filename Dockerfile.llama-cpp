@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+# Compile for AVX2, disable AVX-512 to maximise compatibility
+ENV CMAKE_ARGS="-DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_AVX512=OFF -DGGML_F16C=ON -DGGML_FMA=ON"
+ENV FORCE_CMAKE=1
+
+RUN pip install --upgrade pip && \
+    pip install "llama-cpp-python[server]"
+
+EXPOSE 8080
+
+ENTRYPOINT ["python", "-m", "llama_cpp.server"]

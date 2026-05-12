@@ -2,7 +2,8 @@
     "run_poll_timeout_seconds": 900,
     "ollama": {
         "base_url": "http://127.0.0.1:11434",
-        "timeout": 360
+        "timeout": 360,
+        "embedding_num_ctx": 2048
     },
     "llama_cpp": {
         "base_url": "http://127.0.0.1:8080",
