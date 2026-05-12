@@ -77,13 +77,12 @@ services:
   llama_cpp:
     profiles:
       - llama_cpp
-    image: samueltallet/alpine-llama-cpp-server:latest
+    image: ghcr.io/ggerganov/llama.cpp:server
     container_name: s18share-llama-cpp
     restart: unless-stopped
     ports:
       - "8080:8080"
     command:
-      - "/opt/llama.cpp/llama-server"
       - "-m"
       - "/models/${LLAMA_CPP_MODEL_FILE:-model.gguf}"
       - "--host"

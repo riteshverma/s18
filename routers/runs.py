@@ -27,6 +27,7 @@ from core.supabase_logging import (
 from core.event_bus import event_bus
 from core.run_store import get_run_store
 from core.run_executor import execute_resume, execute_run, is_celery_enabled
+from core.response_cache import get_response_cache
 from remme.utils import get_embedding
 from config.settings_loader import settings, get_run_poll_timeout
 from integrations.contracts import CanonicalRunRequest
@@ -357,9 +358,17 @@ async def process_run(
         }
     )
     try:
+        # 0. RESPONSE CACHE CHECK (Tier 1 optimization)
+        # Return instantly for queries seen before — zero model calls
+        query = canonical_request.query
+        _response_cache = get_response_cache()
+        cached_result = _response_cache.get(query)
+        if cached_result is not None:
+            print(f"[{run_id}] Response cache HIT — returning cached output")
+            return cached_result
+
         # 1. RETRIEVE MEMORIES (Remme)
         # Search for past relevant facts to injecting into this run
-        query = canonical_request.query
         memory_context, results = await _build_memory_context(run_id, query)
 
         # Execute the loop
@@ -427,7 +436,16 @@ async def process_run(
                         final_output += f"{node_id} Output: {str(node['output'])}\n"
 
             history = [{"role": "assistant", "content": final_output}]
-            
+
+            # RESPONSE CACHE STORE — only cache completed, non-empty runs
+            if (
+                final_output
+                and context
+                and context.plan_graph.graph.get("status") == "completed"
+            ):
+                cache_payload = {"output": final_output, "run_id": run_id}
+                await _response_cache.async_set(query, cache_payload)
+
             print(f" Remme: Extracting facts from run {run_id}...")
             # Pass existing memories from earlier search to context-aware extractor
             # ⚡ RUN IN THREAD TO AVOID BLOCKING EVENT LOOP
