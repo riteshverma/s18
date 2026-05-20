@@ -90,6 +90,15 @@ async def _start_mcp_with_timeout(timeout_seconds: Optional[float] = None) -> No
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("API starting up...")
+    boot_settings = reload_settings()
+    agent_cfg = boot_settings.get("agent", {})
+    print(
+        "[S18 boot] "
+        f"model_provider={agent_cfg.get('model_provider')} "
+        f"default_model={agent_cfg.get('default_model')} "
+        f"ollama_base={boot_settings.get('ollama', {}).get('base_url')} "
+        f"gemini_configured={bool(os.environ.get('GEMINI_API_KEY', '').strip())}"
+    )
     scheduler_service.initialize()
     scheduler_service.register_morning_briefing()
     persistence_manager.load_snapshot()

@@ -333,7 +333,7 @@ def load_settings() -> dict:
             _settings_cache["agent"]["model_provider"] = env_force_provider
             if env_force_provider == "gemini":
                 _apply_gemini_agent_defaults(_settings_cache)
-        _apply_railway_hosted_overrides(_settings_cache)
+        _apply_hosted_gemini_overrides(_settings_cache)
     return _settings_cache
 
 
@@ -350,23 +350,83 @@ def _is_railway_deploy() -> bool:
     """True when running on Railway (system env injected on every deploy)."""
     return bool(
         os.getenv("RAILWAY_ENVIRONMENT_NAME")
+        or os.getenv("RAILWAY_ENVIRONMENT_ID")
         or os.getenv("RAILWAY_SERVICE_ID")
+        or os.getenv("RAILWAY_REPLICA_ID")
         or os.getenv("RAILWAY_PUBLIC_DOMAIN")
+        or os.getenv("RAILWAY_PROJECT_ID")
     )
 
 
-def _apply_railway_hosted_overrides(settings_dict: dict) -> None:
-    """
-    Hosted S18 must not use dev settings.json ollama@127.0.0.1:11434.
-    When GEMINI_API_KEY is set on Railway, force Gemini for agent inference.
-    """
-    if not _is_railway_deploy():
-        return
+def _ollama_points_at_loopback(settings_dict: dict) -> bool:
+    base = str((settings_dict.get("ollama") or {}).get("base_url", "")).strip().lower()
+    if not base:
+        return True
+    return any(token in base for token in ("127.0.0.1", "localhost", "[::1]", "::1"))
+
+
+def _is_local_ollama_profile_active() -> bool:
+    """True when operator explicitly selected a local Ollama profile (not Railway)."""
+    if _is_railway_deploy():
+        return False
+    profile = (os.getenv("S18_PROFILE") or "").strip().lower()
+    return profile in {
+        "local-laptop-gemma",
+        "local-laptop-gemma-docker",
+        "local-laptop-qwen",
+        "privacy-first",
+    }
+
+
+def _should_force_gemini_for_hosted(settings_dict: dict) -> bool:
     if not os.getenv("GEMINI_API_KEY", "").strip():
+        return False
+    if _is_local_ollama_profile_active():
+        return False
+    force_flag = os.getenv("S18_FORCE_GEMINI", "").strip().lower()
+    if force_flag in {"1", "true", "yes", "on"}:
+        return True
+    if _is_railway_deploy():
+        return True
+    explicit = (os.getenv("S18_MODEL_PROVIDER") or os.getenv("AGENT_MODEL_PROVIDER") or "").strip().lower()
+    if explicit == "gemini":
+        return True
+    # Persisted dev settings on a cloud container (common Railway failure mode).
+    return _ollama_points_at_loopback(settings_dict)
+
+
+def _apply_hosted_gemini_overrides(settings_dict: dict) -> None:
+    """
+    Cloud/Railway must not call Ollama at localhost:11434 when Gemini is configured.
+    Overrides dev settings.json and per-agent ollama overrides (e.g. TestAgent).
+    """
+    if not _should_force_gemini_for_hosted(settings_dict):
         return
     settings_dict.setdefault("agent", {})
     settings_dict["agent"]["model_provider"] = "gemini"
     _apply_gemini_agent_defaults(settings_dict)
+    overrides = settings_dict["agent"].get("overrides")
+    if isinstance(overrides, dict):
+        for _agent_name, cfg in overrides.items():
+            if not isinstance(cfg, dict):
+                continue
+            if str(cfg.get("model_provider", "")).strip().lower() == "ollama":
+                cfg["model_provider"] = "gemini"
+                model = str(cfg.get("model", ""))
+                if not model.lower().startswith("gemini"):
+                    cfg["model"] = "gemini-2.5-flash"
+    if _ollama_points_at_loopback(settings_dict):
+        settings_dict.setdefault("models", {})
+        if str(settings_dict["models"].get("embedding_provider", "")).strip().lower() == "ollama":
+            settings_dict["models"]["embedding_provider"] = "sentence_transformers"
+        for key in ("semantic_chunking", "image_captioning", "memory_extraction"):
+            model_name = str(settings_dict["models"].get(key, ""))
+            if model_name and not model_name.lower().startswith("gemini"):
+                settings_dict["models"][key] = "gemini-2.5-flash"
+
+
+# Backward-compatible alias for callers/tests.
+_apply_railway_hosted_overrides = _apply_hosted_gemini_overrides
 
 def save_settings() -> None:
     """Save current settings to file."""
@@ -384,9 +444,11 @@ def reset_settings() -> dict:
 
 def reload_settings() -> dict:
     """Force reload settings from disk (useful after external changes)."""
-    global _settings_cache
+    global _settings_cache, settings
     _settings_cache = None
-    return load_settings()
+    loaded = load_settings()
+    settings = loaded
+    return loaded
 
 # --- Convenience Accessors ---
 # These provide direct access to commonly used settings

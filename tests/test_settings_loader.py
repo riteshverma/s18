@@ -191,6 +191,19 @@ class ProfileSettingsTests(unittest.TestCase):
                 str(loaded.get("agent", {}).get("default_model", "")).lower().startswith("gemini")
             )
 
+    def test_loopback_ollama_with_gemini_key_forces_gemini_without_railway_env(self):
+        with patch.dict(
+            "os.environ",
+            {"GEMINI_API_KEY": "test-key"},
+            clear=False,
+        ):
+            loaded = reload_settings()
+            self.assertEqual(loaded.get("agent", {}).get("model_provider"), "gemini")
+            self.assertEqual(
+                str(loaded.get("models", {}).get("embedding_provider", "")).lower(),
+                "sentence_transformers",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

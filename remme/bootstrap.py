@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from config.settings_loader import get_model
+from config.settings_loader import get_model, load_settings
 from core.model_manager import ModelManager
 
 
@@ -105,8 +105,12 @@ async def extract_from_memories(memories: List[Dict]) -> Dict[str, Any]:
     prompt = EXTRACTION_PROMPT.format(memories=memory_text)
     
     # Use extraction model
+    runtime = load_settings()
     model_name = get_model("memory_extraction")
-    model = ModelManager(model_name, provider="ollama")
+    provider = str(runtime.get("agent", {}).get("model_provider", "gemini")).strip().lower()
+    if provider not in {"gemini", "ollama", "llama_cpp", "azure_openai"}:
+        provider = "gemini"
+    model = ModelManager(model_name, provider=provider)
     
     try:
         response = await model.generate_text(prompt)

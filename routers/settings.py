@@ -19,6 +19,7 @@ from config.settings_loader import (
     validate_llama_cpp_base_url,
     load_settings,
     _is_railway_deploy,
+    _should_force_gemini_for_hosted,
 )
 from shared.state import settings
 
@@ -40,6 +41,7 @@ async def get_runtime_settings():
         "insights_provider": loaded.get("models", {}).get("insights_provider"),
         "railway_detected": _is_railway_deploy(),
         "gemini_configured": bool(os.getenv("GEMINI_API_KEY", "").strip()),
+        "hosted_gemini_forced": _should_force_gemini_for_hosted(loaded),
     }
 
 
@@ -329,15 +331,24 @@ async def get_llama_cpp_status():
 
 @router.get("/gemini/status")
 async def get_gemini_status():
-    """Check if Gemini API key is configured via environment variable"""
+    """Check if Gemini API key is configured via environment variable."""
     try:
-        import os
         api_key = os.environ.get("GEMINI_API_KEY", "")
-        return {
+        configured = bool(api_key.strip())
+        payload = {
             "status": "success",
-            "configured": bool(api_key),
-            "key_preview": f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else None
+            "configured": configured,
         }
+        # Never expose key material on hosted/Railway unless explicitly enabled.
+        expose_preview = os.getenv("GEMINI_STATUS_EXPOSE_KEY_PREVIEW", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if configured and (expose_preview or not _is_railway_deploy()):
+            payload["key_preview"] = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else None
+        return payload
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
