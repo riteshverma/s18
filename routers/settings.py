@@ -18,6 +18,7 @@ from config.settings_loader import (
     validate_ollama_base_url,
     validate_llama_cpp_base_url,
     load_settings,
+    _is_railway_deploy,
 )
 from shared.state import settings
 
@@ -25,6 +26,22 @@ router = APIRouter()
 
 
 # === SETTINGS API ENDPOINTS ===
+
+@router.get("/settings/runtime")
+async def get_runtime_settings():
+    """Effective settings after env/Railway/profile overrides (use for hosted debugging)."""
+    loaded = load_settings()
+    agent = loaded.get("agent", {})
+    return {
+        "status": "success",
+        "model_provider": agent.get("model_provider"),
+        "default_model": agent.get("default_model"),
+        "ollama_base_url": loaded.get("ollama", {}).get("base_url"),
+        "insights_provider": loaded.get("models", {}).get("insights_provider"),
+        "railway_detected": _is_railway_deploy(),
+        "gemini_configured": bool(os.getenv("GEMINI_API_KEY", "").strip()),
+    }
+
 
 @router.get("/settings")
 async def get_settings():
@@ -178,7 +195,7 @@ async def get_ollama_models():
             
             # Vision/multimodal models - check for explicit vision families or name patterns
             vision_families = ["clip", "qwen3vl", "llava"]
-            vision_names = ["vl", "vision", "llava", "moondream", "gemma3"]  # gemma3 supports vision
+            vision_names = ["vl", "vision", "llava", "moondream", "gemma3", "gemma4"]
             
             if any(f in families for f in vision_families) or any(v in name_lower for v in vision_names):
                 capabilities.add("text")
