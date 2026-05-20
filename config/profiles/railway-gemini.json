@@ -1,0 +1,20 @@
+{
+  "agent": {
+    "model_provider": "gemini",
+    "default_model": "gemini-2.5-flash",
+    "max_steps": 3,
+    "planning_mode": "conservative"
+  },
+  "models": {
+    "insights_provider": "gemini",
+    "embedding_provider": "sentence_transformers",
+    "semantic_chunking": "gemini-2.5-flash",
+    "memory_extraction": "gemini-2.5-flash"
+  },
+  "mcp": {
+    "mode": "legacy",
+    "required_servers": [],
+    "startup_timeout_seconds": 10
+  },
+  "run_poll_timeout_seconds": 900
+}

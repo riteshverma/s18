@@ -323,12 +323,50 @@ def load_settings() -> dict:
         elif os.getenv("GEMINI_API_KEY", "").strip() and _explicit_provider not in {"ollama", "azure_openai", "llama_cpp"}:
             _settings_cache.setdefault("agent", {})
             _settings_cache["agent"]["model_provider"] = "gemini"
-            dm = str(_settings_cache["agent"].get("default_model") or "")
-            if not dm.lower().startswith("gemini"):
-                _settings_cache["agent"]["default_model"] = "gemini-2.5-flash"
-            _settings_cache.setdefault("models", {})
-            _settings_cache["models"]["insights_provider"] = "gemini"
+            _apply_gemini_agent_defaults(_settings_cache)
+        # Railway / hosted: allow env to override a dev settings.json that pins ollama@localhost.
+        env_force_provider = (
+            os.getenv("S18_MODEL_PROVIDER") or os.getenv("AGENT_MODEL_PROVIDER") or ""
+        ).strip().lower()
+        if env_force_provider in {"gemini", "ollama", "azure_openai", "llama_cpp"}:
+            _settings_cache.setdefault("agent", {})
+            _settings_cache["agent"]["model_provider"] = env_force_provider
+            if env_force_provider == "gemini":
+                _apply_gemini_agent_defaults(_settings_cache)
+        _apply_railway_hosted_overrides(_settings_cache)
     return _settings_cache
+
+
+def _apply_gemini_agent_defaults(settings_dict: dict) -> None:
+    settings_dict.setdefault("agent", {})
+    dm = str(settings_dict["agent"].get("default_model") or "")
+    if not dm.lower().startswith("gemini"):
+        settings_dict["agent"]["default_model"] = "gemini-2.5-flash"
+    settings_dict.setdefault("models", {})
+    settings_dict["models"]["insights_provider"] = "gemini"
+
+
+def _is_railway_deploy() -> bool:
+    """True when running on Railway (system env injected on every deploy)."""
+    return bool(
+        os.getenv("RAILWAY_ENVIRONMENT_NAME")
+        or os.getenv("RAILWAY_SERVICE_ID")
+        or os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    )
+
+
+def _apply_railway_hosted_overrides(settings_dict: dict) -> None:
+    """
+    Hosted S18 must not use dev settings.json ollama@127.0.0.1:11434.
+    When GEMINI_API_KEY is set on Railway, force Gemini for agent inference.
+    """
+    if not _is_railway_deploy():
+        return
+    if not os.getenv("GEMINI_API_KEY", "").strip():
+        return
+    settings_dict.setdefault("agent", {})
+    settings_dict["agent"]["model_provider"] = "gemini"
+    _apply_gemini_agent_defaults(settings_dict)
 
 def save_settings() -> None:
     """Save current settings to file."""
@@ -394,7 +432,7 @@ def get_llama_cpp_url(endpoint: str = "chat_completions") -> str:
 
 def get_model(purpose: str) -> str:
     """Get model name for a specific purpose."""
-    return load_settings()["models"].get(purpose, "gemma3:4b")
+    return load_settings()["models"].get(purpose, "gemma4:e4b")
 
 
 def get_embedding_provider() -> str:

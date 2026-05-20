@@ -146,7 +146,7 @@ class ProfileSettingsTests(unittest.TestCase):
     def test_profile_overrides_defaults(self):
         with patch.dict("os.environ", {"S18_PROFILE": "local-laptop-gemma"}, clear=False):
             reload_settings()
-            self.assertEqual(get_model("semantic_chunking"), "gemma3:4b")
+            self.assertEqual(get_model("semantic_chunking"), "gemma4:e4b")
 
     def test_privacy_first_profile_enables_strict_mcp_mode(self):
         with patch.dict("os.environ", {"S18_PROFILE": "privacy-first"}, clear=False):
@@ -174,6 +174,22 @@ class ProfileSettingsTests(unittest.TestCase):
             loaded = reload_settings()
             self.assertEqual(loaded.get("llama_cpp", {}).get("base_url"), "http://llama-cpp:8080")
             self.assertEqual(loaded.get("llama_cpp", {}).get("timeout"), 420)
+
+    def test_railway_forces_gemini_over_ollama_profile(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "RAILWAY_ENVIRONMENT_NAME": "production",
+                "GEMINI_API_KEY": "test-key",
+                "S18_PROFILE": "local-laptop-gemma",
+            },
+            clear=False,
+        ):
+            loaded = reload_settings()
+            self.assertEqual(loaded.get("agent", {}).get("model_provider"), "gemini")
+            self.assertTrue(
+                str(loaded.get("agent", {}).get("default_model", "")).lower().startswith("gemini")
+            )
 
 
 if __name__ == "__main__":
