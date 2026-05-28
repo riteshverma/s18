@@ -61,6 +61,24 @@ class SettingsRouterValidationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("must start with '/'", response.json().get("detail", ""))
 
+    def test_get_settings_redacts_secret_values(self):
+        with patch(
+            "routers.settings.reload_settings",
+            return_value={
+                "auth": {"supabase_anon_key": "anon-secret"},
+                "supabase_logging": {"service_role_key": "service-role-secret"},
+            },
+        ):
+            response = self.client.get("/settings")
+
+        self.assertEqual(response.status_code, 200)
+        returned_settings = response.json()["settings"]
+        self.assertEqual(returned_settings["auth"]["supabase_anon_key"], "[redacted]")
+        self.assertEqual(
+            returned_settings["supabase_logging"]["service_role_key"],
+            "[redacted]",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

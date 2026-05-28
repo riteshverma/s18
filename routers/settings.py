@@ -18,6 +18,7 @@ from config.settings_loader import (
     validate_ollama_base_url,
     validate_llama_cpp_base_url,
     load_settings,
+    redact_settings_for_client,
     _is_railway_deploy,
     _should_force_gemini_for_hosted,
 )
@@ -51,7 +52,7 @@ async def get_settings():
     try:
         # Force reload to get latest from disk
         current_settings = reload_settings()
-        return {"status": "success", "settings": current_settings}
+        return {"status": "success", "settings": redact_settings_for_client(current_settings)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load settings: {str(e)}")
 

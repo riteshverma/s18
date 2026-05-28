@@ -18,6 +18,7 @@ Usage:
     reset_settings()
 """
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -39,6 +40,15 @@ _ALLOWED_MCP_MODES = {"legacy", "strict"}
 _DEFAULT_MCP_MODE = "legacy"
 _DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS = 5
 _DEFAULT_MCP_STDIO_CONNECT_TIMEOUT_SECONDS = 120
+_REDACTED_SECRET_VALUE = "[redacted]"
+_SECRET_SETTING_PATHS = (
+    ("auth", "supabase_anon_key"),
+    ("supabase_logging", "service_role_key"),
+)
+_ENV_SECRET_SETTING_PATHS = (
+    ("SUPABASE_ANON_KEY", ("auth", "supabase_anon_key")),
+    ("SUPABASE_SERVICE_ROLE_KEY", ("supabase_logging", "service_role_key")),
+)
 
 
 def _normalize_local_http_base_url(
@@ -150,6 +160,61 @@ def _deep_merge_dict(base: dict, overlay: dict) -> dict:
         else:
             merged[key] = value
     return merged
+
+
+def _get_nested_value(settings_dict: dict, path: tuple[str, ...]):
+    current = settings_dict
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
+def _set_nested_value(settings_dict: dict, path: tuple[str, ...], value) -> None:
+    current = settings_dict
+    for key in path[:-1]:
+        current = current.setdefault(key, {})
+        if not isinstance(current, dict):
+            return
+    current[path[-1]] = value
+
+
+def _load_settings_file_raw() -> dict:
+    """Read persisted settings without applying runtime environment overlays."""
+    if SETTINGS_FILE.exists():
+        return json.loads(SETTINGS_FILE.read_text())
+    if DEFAULTS_FILE.exists():
+        return json.loads(DEFAULTS_FILE.read_text())
+    return {}
+
+
+def redact_settings_for_client(settings_dict: dict) -> dict:
+    """Return a copy of settings safe to send through API responses."""
+    redacted = copy.deepcopy(settings_dict)
+    for path in _SECRET_SETTING_PATHS:
+        if _get_nested_value(redacted, path):
+            _set_nested_value(redacted, path, _REDACTED_SECRET_VALUE)
+    return redacted
+
+
+def _strip_env_secrets_for_persistence(settings_dict: dict) -> dict:
+    """
+    Remove credentials sourced from environment variables before writing settings.json.
+
+    Runtime settings may need the concrete values, but persisted config should not
+    capture deployment secrets just because a settings-writing endpoint was called.
+    """
+    sanitized = copy.deepcopy(settings_dict)
+    persisted = _load_settings_file_raw()
+    for env_name, path in _ENV_SECRET_SETTING_PATHS:
+        env_value = os.getenv(env_name, "")
+        if not env_value:
+            continue
+        if _get_nested_value(sanitized, path) == env_value:
+            original_value = _get_nested_value(persisted, path)
+            _set_nested_value(sanitized, path, original_value or "")
+    return sanitized
 
 
 def _load_profile_settings(profile_name: str) -> dict:
@@ -432,7 +497,9 @@ def save_settings() -> None:
     """Save current settings to file."""
     global _settings_cache
     if _settings_cache is not None:
-        SETTINGS_FILE.write_text(json.dumps(_settings_cache, indent=2))
+        SETTINGS_FILE.write_text(
+            json.dumps(_strip_env_secrets_for_persistence(_settings_cache), indent=2)
+        )
 
 def reset_settings() -> dict:
     """Reset settings to defaults."""
