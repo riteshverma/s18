@@ -1,11 +1,16 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+from config import settings_loader
 from config.settings_loader import (
     get_model,
     get_mcp_mode,
     get_mcp_required_servers,
     get_mcp_startup_timeout,
+    save_settings,
     normalize_runtime_llama_cpp_base_url,
     normalize_runtime_ollama_base_url,
     reload_settings,
@@ -201,8 +206,73 @@ class ProfileSettingsTests(unittest.TestCase):
             self.assertEqual(loaded.get("agent", {}).get("model_provider"), "gemini")
             self.assertEqual(
                 str(loaded.get("models", {}).get("embedding_provider", "")).lower(),
-                "sentence_transformers",
+                "gemini",
             )
+            self.assertEqual(loaded.get("models", {}).get("embedding"), "gemini-embedding-001")
+
+    def test_explicit_env_ollama_provider_is_not_forced_to_gemini(self):
+        with patch.dict(
+            "os.environ",
+            {"GEMINI_API_KEY": "test-key", "S18_MODEL_PROVIDER": "ollama"},
+            clear=False,
+        ):
+            loaded = reload_settings()
+            self.assertEqual(loaded.get("agent", {}).get("model_provider"), "ollama")
+
+    def test_runtime_hosted_overrides_and_env_secrets_are_not_persisted(self):
+        base_settings = {
+            "ollama": {"base_url": "http://127.0.0.1:11434", "timeout": 360},
+            "models": {
+                "embedding": "nomic-embed-text",
+                "embedding_provider": "ollama",
+                "semantic_chunking": "gemma3:4b",
+                "image_captioning": "gemma3:4b",
+                "memory_extraction": "gemma3:4b",
+                "insights_provider": "ollama",
+            },
+            "agent": {
+                "model_provider": "ollama",
+                "default_model": "gemma3:4b",
+                "overrides": {
+                    "TestAgent": {
+                        "model_provider": "ollama",
+                        "model": "gemma3:4b",
+                    }
+                },
+            },
+            "auth": {"supabase_anon_key": ""},
+            "supabase_logging": {"service_role_key": ""},
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_file = Path(tmpdir) / "settings.json"
+            defaults_file = Path(tmpdir) / "settings.defaults.json"
+            settings_file.write_text(json.dumps(base_settings))
+            defaults_file.write_text(json.dumps(base_settings))
+            with patch.object(settings_loader, "SETTINGS_FILE", settings_file), patch.object(
+                settings_loader, "DEFAULTS_FILE", defaults_file
+            ), patch.dict(
+                "os.environ",
+                {
+                    "RAILWAY_ENVIRONMENT_NAME": "production",
+                    "GEMINI_API_KEY": "test-key",
+                    "SUPABASE_ANON_KEY": "anon-secret",
+                    "SUPABASE_SERVICE_ROLE_KEY": "service-secret",
+                },
+                clear=False,
+            ):
+                loaded = reload_settings()
+                self.assertEqual(loaded.get("agent", {}).get("model_provider"), "gemini")
+                self.assertEqual(loaded.get("models", {}).get("embedding_provider"), "gemini")
+
+                loaded.setdefault("remme", {})["enabled"] = True
+                save_settings()
+
+                persisted = json.loads(settings_file.read_text())
+                self.assertEqual(persisted["agent"]["model_provider"], "ollama")
+                self.assertEqual(persisted["models"]["embedding_provider"], "ollama")
+                self.assertEqual(persisted["auth"]["supabase_anon_key"], "")
+                self.assertEqual(persisted["supabase_logging"]["service_role_key"], "")
+                self.assertTrue(persisted["remme"]["enabled"])
 
 
 if __name__ == "__main__":

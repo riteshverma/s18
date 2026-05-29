@@ -1,5 +1,5 @@
 # Settings Router - Manages system configuration and dependencies (Ollama)
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import requests
@@ -18,12 +18,14 @@ from config.settings_loader import (
     validate_ollama_base_url,
     validate_llama_cpp_base_url,
     load_settings,
+    redact_settings_for_client,
     _is_railway_deploy,
     _should_force_gemini_for_hosted,
 )
+from core.supabase_auth import require_supabase_user
 from shared.state import settings
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_supabase_user)])
 
 
 # === SETTINGS API ENDPOINTS ===
@@ -51,7 +53,7 @@ async def get_settings():
     try:
         # Force reload to get latest from disk
         current_settings = reload_settings()
-        return {"status": "success", "settings": current_settings}
+        return {"status": "success", "settings": redact_settings_for_client(current_settings)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load settings: {str(e)}")
 

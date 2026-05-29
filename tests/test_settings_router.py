@@ -4,6 +4,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.supabase_auth import require_supabase_user
 from routers import settings as settings_router
 
 
@@ -11,6 +12,7 @@ class SettingsRouterValidationTests(unittest.TestCase):
     def setUp(self):
         self.app = FastAPI()
         self.app.include_router(settings_router.router)
+        self.app.dependency_overrides[require_supabase_user] = lambda: {"sub": "test-user"}
         self.client = TestClient(self.app)
 
     def test_put_settings_rejects_unsafe_ollama_base_url(self):
@@ -60,6 +62,21 @@ class SettingsRouterValidationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("must start with '/'", response.json().get("detail", ""))
+
+    def test_get_settings_redacts_supabase_secrets(self):
+        with patch(
+            "routers.settings.reload_settings",
+            return_value={
+                "auth": {"supabase_anon_key": "anon-secret"},
+                "supabase_logging": {"service_role_key": "service-secret"},
+            },
+        ):
+            response = self.client.get("/settings")
+
+        self.assertEqual(response.status_code, 200)
+        settings = response.json()["settings"]
+        self.assertEqual(settings["auth"]["supabase_anon_key"], "[redacted]")
+        self.assertEqual(settings["supabase_logging"]["service_role_key"], "[redacted]")
 
 
 if __name__ == "__main__":

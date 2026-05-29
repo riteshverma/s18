@@ -7,7 +7,8 @@
   },
   "models": {
     "insights_provider": "gemini",
-    "embedding_provider": "sentence_transformers",
+    "embedding_provider": "gemini",
+    "embedding": "gemini-embedding-001",
     "semantic_chunking": "gemini-2.5-flash",
     "memory_extraction": "gemini-2.5-flash"
   },

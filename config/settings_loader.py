@@ -18,6 +18,7 @@ Usage:
     reset_settings()
 """
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,7 @@ PROFILES_DIR = CONFIG_DIR / "profiles"
 
 # --- Settings Cache ---
 _settings_cache = None
+_persisted_settings_cache = None
 
 _ALLOWED_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _DEFAULT_OLLAMA_PORT = 11434
@@ -152,6 +154,86 @@ def _deep_merge_dict(base: dict, overlay: dict) -> dict:
     return merged
 
 
+def _deepcopy_settings(settings_dict: dict) -> dict:
+    return copy.deepcopy(settings_dict)
+
+
+def _restore_path_from_persisted(target: dict, persisted: dict, path: tuple[str, ...]) -> None:
+    """Restore a runtime-only path to its persisted value before writing settings."""
+    if not path:
+        return
+    target_parent = target
+    persisted_parent = persisted
+    for key in path[:-1]:
+        target_parent = target_parent.get(key)
+        persisted_parent = persisted_parent.get(key) if isinstance(persisted_parent, dict) else None
+        if not isinstance(target_parent, dict):
+            return
+    leaf = path[-1]
+    if isinstance(persisted_parent, dict) and leaf in persisted_parent:
+        target_parent[leaf] = _deepcopy_settings(persisted_parent[leaf])
+    else:
+        target_parent.pop(leaf, None)
+
+
+def _strip_env_supabase_secrets_for_disk(settings_dict: dict, persisted: dict) -> None:
+    """Do not persist Supabase secrets injected from process environment."""
+    env_secret_paths = []
+    if os.getenv("SUPABASE_ANON_KEY"):
+        env_secret_paths.append(("auth", "supabase_anon_key"))
+    if os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+        env_secret_paths.append(("supabase_logging", "service_role_key"))
+    for path in env_secret_paths:
+        _restore_path_from_persisted(settings_dict, persisted, path)
+
+
+def _strip_hosted_runtime_overrides_for_disk(settings_dict: dict, persisted: dict) -> None:
+    """Keep hosted provider rewrites as runtime-only overlays."""
+    if not _should_force_gemini_for_hosted(settings_dict):
+        return
+    for path in (
+        ("agent", "model_provider"),
+        ("agent", "default_model"),
+        ("agent", "overrides"),
+        ("models", "insights_provider"),
+        ("models", "embedding"),
+        ("models", "embedding_provider"),
+        ("models", "semantic_chunking"),
+        ("models", "image_captioning"),
+        ("models", "memory_extraction"),
+    ):
+        _restore_path_from_persisted(settings_dict, persisted, path)
+
+
+def settings_for_disk(settings_dict: dict) -> dict:
+    """Return a copy of effective settings with runtime-only overlays removed."""
+    persisted = _persisted_settings_cache or {}
+    disk_settings = _deepcopy_settings(settings_dict)
+    _strip_env_supabase_secrets_for_disk(disk_settings, persisted)
+    _strip_hosted_runtime_overrides_for_disk(disk_settings, persisted)
+    return disk_settings
+
+
+_REDACTED_SECRET = "[redacted]"
+
+
+def redact_settings_for_client(settings_dict: dict) -> dict:
+    """Redact secret-bearing settings before returning configuration to clients."""
+    redacted = _deepcopy_settings(settings_dict)
+    for path in (
+        ("auth", "supabase_anon_key"),
+        ("supabase_logging", "service_role_key"),
+    ):
+        parent = redacted
+        for key in path[:-1]:
+            parent = parent.get(key) if isinstance(parent, dict) else None
+            if parent is None:
+                break
+        if isinstance(parent, dict) and parent.get(path[-1]):
+            parent[path[-1]] = _REDACTED_SECRET
+    return redacted
+
+
 def _load_profile_settings(profile_name: str) -> dict:
     """Load a JSON profile from config/profiles."""
     candidate = PROFILES_DIR / f"{profile_name}.json"
@@ -164,16 +246,19 @@ def _load_profile_settings(profile_name: str) -> dict:
 
 def load_settings() -> dict:
     """Load settings from file. Uses cache if already loaded."""
-    global _settings_cache
+    global _settings_cache, _persisted_settings_cache
     if _settings_cache is None:
         if SETTINGS_FILE.exists():
-            _settings_cache = json.loads(SETTINGS_FILE.read_text())
+            persisted_settings = json.loads(SETTINGS_FILE.read_text())
         elif DEFAULTS_FILE.exists():
             # Fall back to defaults if settings.json doesn't exist
-            _settings_cache = json.loads(DEFAULTS_FILE.read_text())
+            persisted_settings = json.loads(DEFAULTS_FILE.read_text())
+            _settings_cache = _deepcopy_settings(persisted_settings)
             save_settings()  # Create settings.json from defaults
         else:
             raise FileNotFoundError(f"No settings files found in {CONFIG_DIR}")
+        _persisted_settings_cache = _deepcopy_settings(persisted_settings)
+        _settings_cache = _deepcopy_settings(persisted_settings)
         env_profile = os.getenv("S18_PROFILE")
         if env_profile:
             profile_settings = _load_profile_settings(env_profile.strip())
@@ -346,6 +431,14 @@ def _apply_gemini_agent_defaults(settings_dict: dict) -> None:
     settings_dict["models"]["insights_provider"] = "gemini"
 
 
+def _apply_gemini_embedding_defaults(settings_dict: dict) -> None:
+    settings_dict.setdefault("models", {})
+    settings_dict["models"]["embedding_provider"] = "gemini"
+    embedding_model = str(settings_dict["models"].get("embedding", ""))
+    if not embedding_model.lower().startswith(("gemini", "text-embedding")):
+        settings_dict["models"]["embedding"] = "gemini-embedding-001"
+
+
 def _is_railway_deploy() -> bool:
     """True when running on Railway (system env injected on every deploy)."""
     return bool(
@@ -381,15 +474,17 @@ def _is_local_ollama_profile_active() -> bool:
 def _should_force_gemini_for_hosted(settings_dict: dict) -> bool:
     if not os.getenv("GEMINI_API_KEY", "").strip():
         return False
-    if _is_local_ollama_profile_active():
-        return False
     force_flag = os.getenv("S18_FORCE_GEMINI", "").strip().lower()
     if force_flag in {"1", "true", "yes", "on"}:
         return True
-    if _is_railway_deploy():
-        return True
     explicit = (os.getenv("S18_MODEL_PROVIDER") or os.getenv("AGENT_MODEL_PROVIDER") or "").strip().lower()
     if explicit == "gemini":
+        return True
+    if explicit in {"ollama", "azure_openai", "llama_cpp"}:
+        return False
+    if _is_local_ollama_profile_active():
+        return False
+    if _is_railway_deploy():
         return True
     # Persisted dev settings on a cloud container (common Railway failure mode).
     return _ollama_points_at_loopback(settings_dict)
@@ -418,7 +513,7 @@ def _apply_hosted_gemini_overrides(settings_dict: dict) -> None:
     if _ollama_points_at_loopback(settings_dict):
         settings_dict.setdefault("models", {})
         if str(settings_dict["models"].get("embedding_provider", "")).strip().lower() == "ollama":
-            settings_dict["models"]["embedding_provider"] = "sentence_transformers"
+            _apply_gemini_embedding_defaults(settings_dict)
         for key in ("semantic_chunking", "image_captioning", "memory_extraction"):
             model_name = str(settings_dict["models"].get(key, ""))
             if model_name and not model_name.lower().startswith("gemini"):
@@ -430,15 +525,18 @@ _apply_railway_hosted_overrides = _apply_hosted_gemini_overrides
 
 def save_settings() -> None:
     """Save current settings to file."""
-    global _settings_cache
+    global _settings_cache, _persisted_settings_cache
     if _settings_cache is not None:
-        SETTINGS_FILE.write_text(json.dumps(_settings_cache, indent=2))
+        disk_settings = settings_for_disk(_settings_cache)
+        SETTINGS_FILE.write_text(json.dumps(disk_settings, indent=2))
+        _persisted_settings_cache = _deepcopy_settings(disk_settings)
 
 def reset_settings() -> dict:
     """Reset settings to defaults."""
-    global _settings_cache
+    global _settings_cache, _persisted_settings_cache
     if DEFAULTS_FILE.exists():
         _settings_cache = json.loads(DEFAULTS_FILE.read_text())
+        _persisted_settings_cache = _deepcopy_settings(_settings_cache)
         save_settings()
     return _settings_cache
 
