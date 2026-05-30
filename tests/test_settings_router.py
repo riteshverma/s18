@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 
@@ -60,6 +61,60 @@ class SettingsRouterValidationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("must start with '/'", response.json().get("detail", ""))
+
+    def test_get_settings_redacts_secret_values(self):
+        with patch(
+            "routers.settings.reload_settings",
+            return_value={
+                "auth": {"supabase_anon_key": "anon-secret"},
+                "supabase_logging": {"service_role_key": "service-role-secret"},
+            },
+        ):
+            response = self.client.get("/settings")
+
+        self.assertEqual(response.status_code, 200)
+        returned_settings = response.json()["settings"]
+        self.assertEqual(returned_settings["auth"]["supabase_anon_key"], "[redacted]")
+        self.assertEqual(
+            returned_settings["supabase_logging"]["service_role_key"],
+            "[redacted]",
+        )
+
+    def test_put_settings_preserves_redacted_secret_placeholders(self):
+        current_settings = {
+            "auth": {"supabase_anon_key": "anon-secret"},
+            "supabase_logging": {"service_role_key": "service-role-secret"},
+        }
+
+        with patch("routers.settings.reload_settings", return_value=current_settings), patch(
+            "routers.settings.save_settings"
+        ):
+            response = self.client.put(
+                "/settings",
+                json={
+                    "settings": {
+                        "auth": {"supabase_anon_key": "[redacted]"},
+                        "supabase_logging": {"service_role_key": "[redacted]"},
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(settings_router.settings["auth"]["supabase_anon_key"], "anon-secret")
+        self.assertEqual(
+            settings_router.settings["supabase_logging"]["service_role_key"],
+            "service-role-secret",
+        )
+
+    def test_settings_routes_require_auth_when_enabled(self):
+        with patch.dict(
+            os.environ,
+            {"AUTH_ENABLED": "true", "SUPABASE_URL": "https://demo.supabase.co"},
+            clear=False,
+        ):
+            response = self.client.get("/settings")
+
+        self.assertEqual(response.status_code, 401)
 
 
 if __name__ == "__main__":

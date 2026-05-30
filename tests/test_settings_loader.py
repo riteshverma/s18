@@ -1,6 +1,10 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+import config.settings_loader as settings_loader
 from config.settings_loader import (
     get_model,
     get_mcp_mode,
@@ -8,7 +12,9 @@ from config.settings_loader import (
     get_mcp_startup_timeout,
     normalize_runtime_llama_cpp_base_url,
     normalize_runtime_ollama_base_url,
+    redact_settings_for_client,
     reload_settings,
+    restore_redacted_settings_for_update,
     reset_settings,
     validate_llama_cpp_base_url,
     validate_ollama_base_url,
@@ -203,6 +209,84 @@ class ProfileSettingsTests(unittest.TestCase):
                 str(loaded.get("models", {}).get("embedding_provider", "")).lower(),
                 "sentence_transformers",
             )
+
+
+class SettingsSecretHandlingTests(unittest.TestCase):
+    def tearDown(self):
+        settings_loader._settings_cache = None
+        reload_settings()
+
+    def test_redact_settings_for_client_hides_secret_values(self):
+        redacted = redact_settings_for_client(
+            {
+                "auth": {
+                    "supabase_url": "https://example.supabase.co",
+                    "supabase_anon_key": "anon-secret",
+                },
+                "supabase_logging": {
+                    "service_role_key": "service-role-secret",
+                },
+            }
+        )
+
+        self.assertEqual(redacted["auth"]["supabase_url"], "https://example.supabase.co")
+        self.assertEqual(redacted["auth"]["supabase_anon_key"], "[redacted]")
+        self.assertEqual(redacted["supabase_logging"]["service_role_key"], "[redacted]")
+
+    def test_restore_redacted_settings_for_update_preserves_current_secret_values(self):
+        restored = restore_redacted_settings_for_update(
+            {
+                "auth": {"supabase_anon_key": "[redacted]"},
+                "supabase_logging": {"service_role_key": "[redacted]"},
+            },
+            {
+                "auth": {"supabase_anon_key": "anon-secret"},
+                "supabase_logging": {"service_role_key": "service-role-secret"},
+            },
+        )
+
+        self.assertEqual(restored["auth"]["supabase_anon_key"], "anon-secret")
+        self.assertEqual(
+            restored["supabase_logging"]["service_role_key"],
+            "service-role-secret",
+        )
+
+    def test_save_settings_does_not_persist_env_secret_values(self):
+        initial_settings = {
+            "auth": {"supabase_anon_key": ""},
+            "supabase_logging": {"service_role_key": ""},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_path = Path(tmpdir) / "settings.json"
+            defaults_path = Path(tmpdir) / "settings.defaults.json"
+            settings_path.write_text(json.dumps(initial_settings))
+            defaults_path.write_text(json.dumps(initial_settings))
+
+            with patch.object(settings_loader, "SETTINGS_FILE", settings_path), patch.object(
+                settings_loader, "DEFAULTS_FILE", defaults_path
+            ), patch.dict(
+                "os.environ",
+                {
+                    "SUPABASE_ANON_KEY": "anon-secret",
+                    "SUPABASE_SERVICE_ROLE_KEY": "service-role-secret",
+                },
+                clear=True,
+            ):
+                settings_loader._settings_cache = None
+                loaded = settings_loader.reload_settings()
+                self.assertEqual(loaded["auth"]["supabase_anon_key"], "anon-secret")
+                self.assertEqual(
+                    loaded["supabase_logging"]["service_role_key"],
+                    "service-role-secret",
+                )
+
+                settings_loader.save_settings()
+
+            written = json.loads(settings_path.read_text())
+
+        self.assertEqual(written["auth"]["supabase_anon_key"], "")
+        self.assertEqual(written["supabase_logging"]["service_role_key"], "")
 
 
 if __name__ == "__main__":
