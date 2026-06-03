@@ -2,7 +2,8 @@
     "run_poll_timeout_seconds": 900,
     "ollama": {
         "base_url": "http://127.0.0.1:11434",
-        "timeout": 360
+        "timeout": 360,
+        "options": {}
     },
     "llama_cpp": {
         "base_url": "http://127.0.0.1:8080",
@@ -19,8 +20,8 @@
         "embedding_provider": "ollama",
         "embedding_retry_attempts": 3,
         "embedding_retry_backoff_seconds": 0.6,
-        "semantic_chunking": "gemma3:4b",
-        "image_captioning": "gemma3:4b",
+        "semantic_chunking": "gemma4:e4b",
+        "image_captioning": "gemma4:e4b",
         "memory_extraction": "qwen3-vl:8b",
         "insights_provider": "ollama"
     },
@@ -46,7 +47,7 @@
         "overrides": {
             "TestAgent": {
                 "model_provider": "ollama",
-                "model": "gemma3:4b"
+                "model": "gemma4:e4b"
             }
         },
         "max_steps": 3,
@@ -199,7 +200,10 @@
     "vector_store": {
       "provider": "faiss",
       "faiss": {
-        "index_dir": "mcp_servers/faiss_index"
+        "index_dir": "mcp_servers/faiss_index",
+        "use_gpu": false,
+        "gpu_device": 0,
+        "gpu_min_vectors": 0
       },
       "azure_ai_search": {
         "endpoint": "",
