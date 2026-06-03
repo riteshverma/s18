@@ -238,7 +238,7 @@ you can run `llama-server` natively for better CPU/GPU performance than Docker.
 
 Available profiles under `config/profiles/`:
 
-- `local-laptop-gemma` - Ollama mode with `gemma3:4b`
+- `local-laptop-gemma` - Ollama mode with `gemma4:e4b`
 - `local-laptop-qwen` - Ollama mode with Qwen models
 - `local-llama-cpp` - llama.cpp mode for chat and embeddings
 - `privacy-first` - Ollama-first private local profile
@@ -538,7 +538,7 @@ Before running production-like sessions after switching providers:
 Checks include:
 - required containers up (`s18share-api`, `s18share-redis`, provider container)
 - provider endpoint reachable from `s18share-api`
-- Ollama model readiness (`gemma3:4b`, `nomic-embed-text`)
+- Ollama model readiness (`gemma4:e4b`, `nomic-embed-text`)
 - optional Wise→S18 health check when `wiseai-backend-1` is running
 
 ### 5. Verify (Docker mapping)

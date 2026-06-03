@@ -7,7 +7,7 @@
   },
   "agent": {
     "model_provider": "ollama",
-    "default_model": "gemma3:4b"
+    "default_model": "gemma4:e4b"
   },
   "models": {
     "insights_provider": "ollama"
