@@ -69,7 +69,7 @@ def test_model_manager_ollama_generate_uses_api_generate(monkeypatch):
     )
     monkeypatch.setattr(settings_loader, "get_timeout", lambda: 360)
 
-    manager = ModelManager("gemma3:4b", provider="ollama")
+    manager = ModelManager("gemma4:e4b", provider="ollama")
 
     captured = {}
 
@@ -111,6 +111,6 @@ def test_model_manager_ollama_generate_uses_api_generate(monkeypatch):
     result = asyncio.run(manager.generate_text("ping"))
     assert result == "ok-from-ollama"
     assert captured["url"] == "http://127.0.0.1:11434/api/generate"
-    assert captured["json"]["model"] == "gemma3:4b"
+    assert captured["json"]["model"] == "gemma4:e4b"
     assert captured["json"]["prompt"] == "ping"
     assert captured["json"]["stream"] is False

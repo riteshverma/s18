@@ -256,7 +256,7 @@ class ModelManager:
             if provider == "gemini":
                 model_name = agent_settings.get("default_model", "gemini-2.5-flash")
             elif provider == "ollama":
-                model_name = self._settings.get("models", {}).get("semantic_chunking", "gemma3:4b")
+                model_name = self._settings.get("models", {}).get("semantic_chunking", "gemma4:e4b")
             else:
                 model_name = self._settings.get("agent", {}).get("default_model", "Llama-3.2-3B-Instruct")
         try:
@@ -345,6 +345,36 @@ class ModelManager:
             # Text-only fallback
             return await self._ollama_generate(prompt)
 
+    def _ollama_options(self) -> dict:
+        cfg = self._settings.get("ollama", {}) if isinstance(self._settings, dict) else {}
+        opts = cfg.get("options", {})
+        return dict(opts) if isinstance(opts, dict) else {}
+
+    def _ollama_generate_payload(self, **fields) -> dict:
+        payload = {
+            "model": self.model_info["model"],
+            "stream": False,
+            **fields,
+        }
+        opts = self._ollama_options()
+        if opts:
+            payload["options"] = opts
+        return payload
+
+    @staticmethod
+    async def _raise_ollama_http_error(response, label: str) -> None:
+        detail = ""
+        try:
+            body = (await response.text()).strip()
+            if body:
+                detail = f"; ollama={body[:500]}"
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"{label}: {response.status}, message={response.reason!r}, "
+            f"url={response.url!r}{detail}"
+        )
+
     async def _ollama_generate_with_images(self, prompt: str, images: list) -> str:
         """Generate with Ollama using images (for multimodal models)."""
         try:
@@ -353,16 +383,19 @@ class ModelManager:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     self.model_info["url"]["generate"],
-                    json={
-                        "model": self.model_info["model"],
-                        "prompt": prompt,
-                        "images": images,  # Base64 encoded images
-                        "stream": False
-                    }
+                    json=self._ollama_generate_payload(
+                        prompt=prompt,
+                        images=images,
+                    ),
                 ) as response:
-                    response.raise_for_status()
+                    if response.status >= 400:
+                        await ModelManager._raise_ollama_http_error(
+                            response, "Ollama multimodal generation failed"
+                        )
                     result = await response.json()
                     return result["response"].strip()
+        except RuntimeError:
+            raise
         except Exception as e:
             raise RuntimeError(f"Ollama multimodal generation failed: {str(e)}")
 
@@ -426,11 +459,16 @@ class ModelManager:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     self.model_info["url"]["generate"],
-                    json = {"model": self.model_info["model"], "prompt": prompt, "stream": False}
+                    json=self._ollama_generate_payload(prompt=prompt),
                 ) as response:
-                    response.raise_for_status()
+                    if response.status >= 400:
+                        await ModelManager._raise_ollama_http_error(
+                            response, "Ollama generation failed"
+                        )
                     result = await response.json()
                     return result["response"].strip()
+        except RuntimeError:
+            raise
         except Exception as e:
             raise RuntimeError(f"Ollama generation failed: {str(e)}")
 
