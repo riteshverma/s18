@@ -74,8 +74,15 @@ def test_model_manager_ollama_generate_uses_api_generate(monkeypatch):
     captured = {}
 
     class FakeResponse:
+        status = 200
+        reason = "OK"
+        url = "http://127.0.0.1:11434/api/generate"
+
         async def json(self):
             return {"response": "ok-from-ollama"}
+
+        async def text(self):
+            return ""
 
         def raise_for_status(self):
             return None
