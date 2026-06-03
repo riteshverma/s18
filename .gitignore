@@ -57,6 +57,8 @@ config/mcp_cache.json
 data/inbox/*.db
 data/system/snapshot.json
 data/system/agent_runs.sqlite
+data/system/agent_runs.sqlite-shm
+data/system/agent_runs.sqlite-wal
 
 # RAG / FAISS / BM25 artifacts (rebuild via indexing; large binaries)
 mcp_servers/faiss_index/
@@ -89,3 +91,6 @@ gbrain/
 # Local-only rehearsal/playbook notes
 docs/EAGV2_S18_FLOW_REHEARSAL.md
 docs/S18_POSITIONING_PLAYBOOK.md
+
+# Clinical reference PDFs (copyright; keep locally — copy from partner docs if needed)
+data/wise/**/*.pdf
