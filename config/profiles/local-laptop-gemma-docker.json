@@ -1,0 +1,35 @@
+{
+  "agent": {
+    "model_provider": "ollama",
+    "default_model": "gemma3:4b",
+    "planning_mode": "conservative",
+    "max_steps": 3
+  },
+  "models": {
+    "embedding": "nomic-embed-text",
+    "semantic_chunking": "gemma3:4b",
+    "image_captioning": "gemma3:4b",
+    "memory_extraction": "gemma3:4b",
+    "insights_provider": "ollama"
+  },
+  "ollama": {
+    "base_url": "http://127.0.0.1:11434",
+    "timeout": 360,
+    "options": {
+      "num_ctx": 4096
+    }
+  },
+  "llama_cpp": {
+    "base_url": "http://127.0.0.1:8080",
+    "timeout": 360,
+    "endpoints": {
+      "chat_completions": "/v1/chat/completions",
+      "embeddings": "/v1/embeddings",
+      "models": "/v1/models",
+      "health": "/health"
+    }
+  },
+  "mcp": {
+    "mode": "legacy"
+  }
+}

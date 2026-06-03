@@ -45,11 +45,14 @@ import requests
 base='http://ollama:11434'
 tags=requests.get(base+'/api/tags', timeout=15).json()
 names={m.get('name','') for m in tags.get('models',[])}
-required=['gemma3:4b','nomic-embed-text']
+import os
+profile=os.environ.get('S18_PROFILE','')
+chat='gemma3:4b' if 'docker' in profile else 'gemma4:e4b'
+required=[chat,'nomic-embed-text']
 for model in required:
     if model not in names and (model+':latest') not in names:
         raise SystemExit(f'missing_model:{model}')
-g=requests.post(base+'/api/generate', json={'model':'gemma3:4b','prompt':'OK','stream':False}, timeout=60)
+g=requests.post(base+'/api/generate', json={'model':chat,'prompt':'OK','stream':False}, timeout=60)
 print('generate', g.status_code)
 g.raise_for_status()
 e=requests.post(base+'/api/embeddings', json={'model':'nomic-embed-text','prompt':'hello'}, timeout=30)
