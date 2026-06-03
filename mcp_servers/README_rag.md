@@ -3,7 +3,7 @@
 This MCP server manages a local Retrieval-Augmented Generation (RAG) system, allowing you to index documents, search them using semantic vectors (embeddings), and ask questions about them.
 
 ## Features
-- **Local Indexing**: Indexes documents from the `data/` directory using FAISS.
+- **Local Indexing**: Indexes documents from the `data/` directory using FAISS (CPU by default; optional CUDA via `faiss-gpu` and `S18_FAISS_USE_GPU=1`).
 - **Semantic Search**: Uses embeddings (Ollama) to find relevant chunks.
 - **Image Captioning**: Automatically captions images within documents using vision models.
 - **Semantic Chunking**: Smartly splits text based on topic shifts.

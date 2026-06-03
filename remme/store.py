@@ -1,6 +1,6 @@
 import json
-import faiss
 import numpy as np
+from core.faiss_runtime import create_index_flat_l2, read_index, write_index
 from pathlib import Path
 from datetime import datetime, timedelta
 import uuid
@@ -293,12 +293,12 @@ class RemmeStore:
         """Load index and metadata from disk."""
         if self.index_path.exists():
             try:
-                self.index = faiss.read_index(str(self.index_path))
+                self.index = read_index(self.index_path)
             except Exception as e:
                 print(f"Failed to load FAISS index: {e}", file=sys.stderr)
-                self.index = faiss.IndexFlatL2(self.dimension)
+                self.index = create_index_flat_l2(self.dimension)
         else:
-            self.index = faiss.IndexFlatL2(self.dimension)
+            self.index = create_index_flat_l2(self.dimension)
 
         if self.metadata_path.exists():
             try:
@@ -321,7 +321,7 @@ class RemmeStore:
     def save(self):
         """Save index and metadata to disk."""
         if self.index:
-            faiss.write_index(self.index, str(self.index_path))
+            write_index(self.index, self.index_path)
         
         self.metadata_path.write_text(json.dumps(self.memories, indent=2))
         self.scanned_runs_path.write_text(json.dumps(list(self.scanned_run_ids), indent=2))
@@ -350,7 +350,7 @@ class RemmeStore:
 
         if self.index is None:
             self.dimension = len(embedding)
-            self.index = faiss.IndexFlatL2(self.dimension)
+            self.index = create_index_flat_l2(self.dimension)
             
         # DEDUPLICATION CHECK
         # Search for exact or very similar matches
@@ -762,7 +762,7 @@ class RemmeStore:
         self.memories = [m for m in self.memories if m["id"] != memory_id]
         
         # Rebuild Index
-        new_index = faiss.IndexFlatL2(self.dimension)
+        new_index = create_index_flat_l2(self.dimension)
         if self.memories:
             # We need embeddings to rebuild. 
             # OPTION 1: Store embeddings in a separate .npy file (Better for large scale)

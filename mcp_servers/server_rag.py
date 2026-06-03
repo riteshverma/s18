@@ -50,7 +50,14 @@ def suppress_stdout():
         sys.stdout = old_stdout
 
 with suppress_stdout():
-    import faiss
+    from core.faiss_runtime import (
+        create_index_flat_l2,
+        get_faiss,
+        read_index as faiss_read_index,
+        write_index as faiss_write_index,
+    )
+
+    faiss = get_faiss()
     import numpy as np
     import requests
     from markitdown import MarkItDown
@@ -838,7 +845,7 @@ def search_stored_documents_rag(query: str, doc_path: str = None) -> list[str]:
 
         if index_path.exists() and allow_faiss:
             try:
-                index = faiss.read_index(str(index_path))
+                index = faiss_read_index(index_path)
                 query_vec = get_embedding(query).reshape(1, -1)
                 query_dim = int(query_vec.shape[1])
                 index_dim = int(getattr(index, "d", query_dim))
@@ -1916,7 +1923,7 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
 
     mcp_log("INFO", f"Loaded cache with {len(CACHE_META)} files, ledger with {len(ledger_data.get('files', {}))} files")
 
-    index = faiss.read_index(str(INDEX_FILE)) if INDEX_FILE.exists() else None
+    index = faiss_read_index(INDEX_FILE) if INDEX_FILE.exists() else None
     runtime_sig = _current_embedding_signature()
     manifest = _load_index_manifest(INDEX_CACHE)
     if index is not None and manifest:
@@ -2035,7 +2042,7 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
                         # 2. Add new
                         emb_dim = len(new_embs[0])
                         if index is None:
-                            index = faiss.IndexFlatL2(emb_dim)
+                            index = create_index_flat_l2(emb_dim)
                         elif int(getattr(index, "d", emb_dim)) != emb_dim:
                             mismatch_msg = (
                                 f"Embedding dimension mismatch for {rel_path}: "
@@ -2078,7 +2085,7 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
                         try:
                             CACHE_FILE.write_text(json.dumps(CACHE_META, indent=2))
                             METADATA_FILE.write_text(json.dumps(metadata, indent=2))
-                            faiss.write_index(index, str(INDEX_FILE))
+                            faiss_write_index(index, INDEX_FILE)
                             _save_index_manifest(INDEX_CACHE, int(getattr(index, "d", emb_dim)))
                             # Also save ledger
                             LEDGER_FILE.write_text(json.dumps(ledger_data, indent=2))
@@ -2211,7 +2218,7 @@ async def index_images() -> str:
 
     captions_ledger = json.loads(CAPTIONS_FILE.read_text()) if CAPTIONS_FILE.exists() else {}
     metadata = json.loads(METADATA_FILE.read_text()) if METADATA_FILE.exists() else []
-    index = faiss.read_index(str(INDEX_FILE)) if INDEX_FILE.exists() else None
+    index = faiss_read_index(INDEX_FILE) if INDEX_FILE.exists() else None
 
     # Find pending images
     all_images = list(IMG_DIR.glob("*.png")) + list(IMG_DIR.glob("*.jpg"))
@@ -2269,13 +2276,13 @@ async def index_images() -> str:
     # Save Updates
     if new_embeddings:
         if index is None:
-            index = faiss.IndexFlatL2(len(new_embeddings[0]))
+            index = create_index_flat_l2(len(new_embeddings[0]))
         index.add(np.stack(new_embeddings))
         metadata.extend(new_meta)
         
         CAPTIONS_FILE.write_text(json.dumps(captions_ledger, indent=2))
         METADATA_FILE.write_text(json.dumps(metadata, indent=2))
-        faiss.write_index(index, str(INDEX_FILE))
+        faiss_write_index(index, INDEX_FILE)
         
         return f"Successfully processed {len(new_embeddings)} images. Index updated."
     
@@ -2399,7 +2406,7 @@ def start_background_services():
             METADATA_FILE = INDEX_CACHE / "metadata.json"
             
             metadata = json.loads(METADATA_FILE.read_text()) if METADATA_FILE.exists() else []
-            index = faiss.read_index(str(INDEX_FILE)) if INDEX_FILE.exists() else None
+            index = faiss_read_index(INDEX_FILE) if INDEX_FILE.exists() else None
             manifest = _load_index_manifest(INDEX_CACHE)
             runtime_sig = _current_embedding_signature()
             if index is not None and manifest:
@@ -2431,7 +2438,7 @@ def start_background_services():
                 if new_embs:
                     emb_dim = len(new_embs[0])
                     if index is None:
-                        index = faiss.IndexFlatL2(emb_dim)
+                        index = create_index_flat_l2(emb_dim)
                     elif int(getattr(index, "d", emb_dim)) != emb_dim:
                         mcp_log(
                             "WARN",
@@ -2447,7 +2454,7 @@ def start_background_services():
                     
                     # Save atomically
                     METADATA_FILE.write_text(json.dumps(metadata, indent=2))
-                    faiss.write_index(index, str(INDEX_FILE))
+                    faiss_write_index(index, INDEX_FILE)
                     _save_index_manifest(INDEX_CACHE, int(getattr(index, "d", emb_dim)))
                     
                     # Rebuild BM25 index

@@ -14,6 +14,12 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from core.faiss_runtime import (
+    create_index_flat_ip,
+    read_index,
+    runtime_info,
+    write_index,
+)
 from integrations.vectors.base import Chunk, SearchHit, VectorStore
 
 
@@ -33,16 +39,6 @@ class FaissLocalVectorStore(VectorStore):
         self._dimension: Optional[int] = None
         self._load()
 
-    def _faiss(self):
-        try:
-            import faiss  # type: ignore[reportMissingImports]
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
-                "faiss must be installed for the local FAISS vector store. "
-                "Install: `pip install faiss-cpu`"
-            ) from exc
-        return faiss
-
     def _load(self) -> None:
         if self.metadata_path.exists():
             try:
@@ -54,14 +50,14 @@ class FaissLocalVectorStore(VectorStore):
 
         if self.index_path.exists():
             try:
-                self._index = self._faiss().read_index(str(self.index_path))
+                self._index = read_index(self.index_path)
                 self._dimension = self._index.d
             except Exception:
                 self._index = None
 
     def _save(self) -> None:
         if self._index is not None:
-            self._faiss().write_index(self._index, str(self.index_path))
+            write_index(self._index, self.index_path)
         self.metadata_path.write_text(json.dumps(self._metadata, indent=2))
 
     def ensure_index(self, *, dimension: int, metric: str = "cosine") -> None:
@@ -69,7 +65,7 @@ class FaissLocalVectorStore(VectorStore):
         with self._lock:
             if self._index is None:
                 # Inner product on L2-normalized vectors == cosine similarity.
-                self._index = self._faiss().IndexFlatIP(dimension)
+                self._index = create_index_flat_ip(dimension)
                 self._dimension = dimension
             elif self._dimension is not None and self._dimension != dimension:
                 raise ValueError(
@@ -179,6 +175,7 @@ class FaissLocalVectorStore(VectorStore):
             "dimension": self._dimension,
             "metadata_count": len(self._metadata),
             "index_dir": str(self.index_dir),
+            "faiss": runtime_info(),
         }
 
 
