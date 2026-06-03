@@ -223,8 +223,12 @@ class IndexLedger:
             entry = self._data["files"].get(rel_path)
             if not entry:
                 return True  # New file
-            if entry.get("status") in ("pending", "error"):
+            st = entry.get("status") or ""
+            if st in ("pending", "error"):
                 return True  # Previously failed or pending
+            # Orphan "indexing" after API/worker restart (never reached complete/error).
+            if st == "indexing":
+                return True
             if entry.get("hash") != current_hash:
                 return True  # Content changed
             return False
@@ -408,6 +412,19 @@ class IndexScheduler:
         
         # Start reconciler thread
         self._start_reconciler()
+
+        # One-shot reconcile shortly after startup so ledger rows stuck at
+        # "indexing" (e.g. API restart mid-job) get re-queued without waiting
+        # RECONCILE_INTERVAL / the first reconcile sleep cycle.
+        def _bootstrap_reconcile():
+            try:
+                time.sleep(2)
+                _log("[Reconciler] Bootstrap reconciliation after startup...")
+                self._reconcile()
+            except Exception as e:
+                _log(f"[Reconciler] Bootstrap reconcile failed: {e}")
+
+        threading.Thread(target=_bootstrap_reconcile, daemon=True, name="ReconcileBootstrap").start()
         
         _log("[Scheduler] All services started")
     
@@ -528,6 +545,20 @@ class IndexScheduler:
         self.reconciler_thread.start()
         _log(f"[Scheduler] Reconciler started (every {self.RECONCILE_INTERVAL}s)")
     
+    def enqueue_index_immediate(self, rel_path: str, priority: int = 8):
+        """Queue an index job without debouncing (crash / orphan ledger recovery).
+
+        Clears any debounce deadline for ``rel_path`` so we do not double-queue
+        when the debouncer fires later.
+        """
+        if not rel_path or rel_path.endswith("/"):
+            return
+        with self._debounce_lock:
+            self.pending_debounce.pop(rel_path, None)
+        self.ledger.mark_pending(rel_path)
+        self.queue.put(IndexJob(priority=priority, path=rel_path, action="index"))
+        _log(f"[Scheduler] Immediate index queued (no debounce): {rel_path}")
+
     def enqueue(self, rel_path: str, action: str, priority: int = 5):
         """
         Add a file to the indexing queue.
@@ -700,7 +731,15 @@ class IndexScheduler:
                 if abs_path.exists():
                     current_hash = self._compute_hash(abs_path)
                     if self.ledger.needs_indexing(f, current_hash):
-                        self.enqueue(f, "index", priority=8)
+                        stuck = False
+                        ent = self.ledger.get(f)
+                        if ent is not None and getattr(ent, "status", "") == "indexing":
+                            stuck = True
+                        # Orphans stuck at "indexing" must not wait DEBOUNCE_SECONDS
+                        if stuck:
+                            self.enqueue_index_immediate(f, priority=8)
+                        else:
+                            self.enqueue(f, "index", priority=8)
                         queued += 1
             
             self.ledger.update_reconcile_time()
