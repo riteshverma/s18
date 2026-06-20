@@ -78,6 +78,37 @@ class SettingsRouterValidationTests(unittest.TestCase):
         self.assertEqual(settings["auth"]["supabase_anon_key"], "[redacted]")
         self.assertEqual(settings["supabase_logging"]["service_role_key"], "[redacted]")
 
+    def test_put_settings_preserves_redacted_supabase_secrets(self):
+        current_settings = {
+            "auth": {"supabase_anon_key": "anon-secret"},
+            "supabase_logging": {"service_role_key": "service-secret"},
+            "rag": {"top_k": 5},
+        }
+
+        with patch(
+            "routers.settings.reload_settings",
+            return_value=current_settings,
+        ), patch("routers.settings.save_settings") as save_settings:
+            response = self.client.put(
+                "/settings",
+                json={
+                    "settings": {
+                        "auth": {"supabase_anon_key": "[redacted]"},
+                        "supabase_logging": {"service_role_key": "[redacted]"},
+                        "rag": {"top_k": 9},
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        save_settings.assert_called_once()
+        self.assertEqual(current_settings["auth"]["supabase_anon_key"], "anon-secret")
+        self.assertEqual(
+            current_settings["supabase_logging"]["service_role_key"],
+            "service-secret",
+        )
+        self.assertEqual(current_settings["rag"]["top_k"], 9)
+
 
 if __name__ == "__main__":
     unittest.main()

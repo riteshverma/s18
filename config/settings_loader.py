@@ -234,6 +234,49 @@ def redact_settings_for_client(settings_dict: dict) -> dict:
     return redacted
 
 
+def _get_path_value(settings_dict: dict, path: tuple[str, ...]):
+    parent = settings_dict
+    for key in path:
+        if not isinstance(parent, dict) or key not in parent:
+            return None
+        parent = parent[key]
+    return parent
+
+
+def _remove_path(target: dict, path: tuple[str, ...]) -> None:
+    parent = target
+    for key in path[:-1]:
+        parent = parent.get(key) if isinstance(parent, dict) else None
+        if not isinstance(parent, dict):
+            return
+    parent.pop(path[-1], None)
+
+
+def restore_redacted_settings_for_update(
+    update_dict: dict, current_settings: dict | None = None
+) -> dict:
+    """Replace client redaction placeholders with the current secret values.
+
+    The settings UI fetches redacted values and may submit the whole settings
+    object back after changing an unrelated field. Treat the placeholder as
+    "unchanged" so it does not overwrite real credentials on disk.
+    """
+    restored = _deepcopy_settings(update_dict)
+    source = current_settings if current_settings is not None else load_settings()
+    for path in (
+        ("auth", "supabase_anon_key"),
+        ("supabase_logging", "service_role_key"),
+    ):
+        if _get_path_value(restored, path) != _REDACTED_SECRET:
+            continue
+        existing_value = _get_path_value(source, path)
+        if existing_value and existing_value != _REDACTED_SECRET:
+            _restore_path_from_persisted(restored, source, path)
+        else:
+            _remove_path(restored, path)
+    return restored
+
+
 def _load_profile_settings(profile_name: str) -> dict:
     """Load a JSON profile from config/profiles."""
     candidate = PROFILES_DIR / f"{profile_name}.json"
