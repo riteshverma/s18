@@ -210,3 +210,76 @@ def test_execute_dag_skips_dependents_after_terminal_step_failure(monkeypatch, t
     assert context.plan_graph.nodes["T002"]["status"] == "skipped"
     assert context.plan_graph.nodes["T002"]["skip_reason"] == "upstream_failed:T001"
     assert context.plan_graph.graph["status"] == "failed"
+
+
+def test_run_finished_event_reports_failed_after_terminal_step_failure(monkeypatch):
+    monkeypatch.setattr(ExecutionContextManager, "_save_session", lambda self: None)
+    events = []
+
+    async def capture_publish(event_type, source, data):
+        events.append({"type": event_type, "source": source, "data": data})
+
+    monkeypatch.setattr("core.loop.event_bus.publish", capture_publish)
+
+    class FakeAgentRunner:
+        async def run_agent(self, agent_name, _payload):
+            assert agent_name == "PlannerAgent"
+            return {
+                "success": True,
+                "output": {
+                    "plan_graph": {
+                        "nodes": [
+                            {
+                                "id": "T001",
+                                "agent": "ThinkerAgent",
+                                "description": "Failing upstream step",
+                                "reads": ["original_query"],
+                                "writes": ["analysis"],
+                                "status": "pending",
+                            },
+                            {
+                                "id": "T002",
+                                "agent": "FormatterAgent",
+                                "description": "Dependent step",
+                                "reads": ["analysis"],
+                                "writes": ["response"],
+                                "status": "pending",
+                            },
+                        ],
+                        "edges": [
+                            {"source": "Query", "target": "T001"},
+                            {"source": "T001", "target": "T002"},
+                        ],
+                    },
+                    "next_step_id": "T001",
+                    "interpretation_confidence": 1.0,
+                    "ambiguity_notes": [],
+                },
+            }
+
+    async def run_case():
+        loop = AgentLoop4(MagicMock())
+        loop.agent_runner = FakeAgentRunner()
+
+        async def fail_step(step_id, _context):
+            assert step_id == "T001"
+            return {"success": False, "error": "provider unavailable"}
+
+        monkeypatch.setattr(loop, "_execute_step", fail_step)
+        return await loop.run(
+            "test query",
+            file_manifest=[],
+            globals_schema={},
+            uploaded_files=[],
+            session_id="run-failure-event-test",
+        )
+
+    context = asyncio.run(run_case())
+
+    run_finished_events = [event for event in events if event["type"] == "run_finished"]
+    assert run_finished_events
+    assert run_finished_events[-1]["data"]["status"] == "failed"
+    assert "provider unavailable" in run_finished_events[-1]["data"]["error"]
+    assert context.plan_graph.graph["status"] == "failed"
+    assert context.plan_graph.nodes["T001"]["status"] == "failed"
+    assert context.plan_graph.nodes["T002"]["status"] == "skipped"

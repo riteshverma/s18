@@ -727,6 +727,20 @@ class AgentLoop4:
                     if self.context.stop_requested:
                         break
 
+                    dag_status = self.context.plan_graph.graph.get("status")
+                    failed_nodes = [
+                        (node_id, node.get("error"))
+                        for node_id, node in self.context.plan_graph.nodes(data=True)
+                        if node.get("status") == "failed"
+                    ]
+                    if failed_nodes or dag_status in {"failed", "cost_exceeded", "token_budget_exceeded"}:
+                        final_status = "failed"
+                        failed_node_id, failed_error = failed_nodes[0] if failed_nodes else (None, None)
+                        final_error = failed_error or dag_status or "DAG execution failed"
+                        if failed_node_id and not str(final_error).startswith(failed_node_id):
+                            final_error = f"{failed_node_id}: {final_error}"
+                        return self.context
+
                     # Phase 5: Check for Adaptive Re-Planning (Dead End Discovery)
                     if self._should_replan():
                         log_step("♻️ Adaptive Re-planning: Clarification resolved, formulating next steps...", symbol="🔄")
