@@ -2219,8 +2219,6 @@ async def index_images() -> str:
         return "No images directory found."
 
     captions_ledger = json.loads(CAPTIONS_FILE.read_text()) if CAPTIONS_FILE.exists() else {}
-    metadata = json.loads(METADATA_FILE.read_text()) if METADATA_FILE.exists() else []
-    index = faiss_read_index(INDEX_FILE) if INDEX_FILE.exists() else None
 
     # Find pending images
     all_images = list(IMG_DIR.glob("*.png")) + list(IMG_DIR.glob("*.jpg"))
@@ -2277,14 +2275,27 @@ async def index_images() -> str:
 
     # Save Updates
     if new_embeddings:
-        if index is None:
-            index = create_index_flat_l2(len(new_embeddings[0]))
-        index.add(np.stack(new_embeddings))
-        metadata.extend(new_meta)
-        
-        CAPTIONS_FILE.write_text(json.dumps(captions_ledger, indent=2))
-        METADATA_FILE.write_text(json.dumps(metadata, indent=2))
-        faiss_write_index(index, INDEX_FILE)
+        with RAG_INDEX_LOCK:
+            metadata = json.loads(METADATA_FILE.read_text()) if METADATA_FILE.exists() else []
+            index = faiss_read_index(INDEX_FILE) if INDEX_FILE.exists() else None
+
+            emb_dim = len(new_embeddings[0])
+            if index is None:
+                index = create_index_flat_l2(emb_dim)
+            elif int(getattr(index, "d", emb_dim)) != emb_dim:
+                return (
+                    f"Image indexing skipped: embedding dimension mismatch "
+                    f"(new={emb_dim}, index={int(getattr(index, 'd', -1))}). "
+                    "Run force reindex to rebuild index for the current embedding model."
+                )
+
+            index.add(np.stack(new_embeddings))
+            metadata.extend(new_meta)
+
+            CAPTIONS_FILE.write_text(json.dumps(captions_ledger, indent=2))
+            METADATA_FILE.write_text(json.dumps(metadata, indent=2))
+            faiss_write_index(index, INDEX_FILE)
+            _save_index_manifest(INDEX_CACHE, int(getattr(index, "d", emb_dim)))
         
         return f"Successfully processed {len(new_embeddings)} images. Index updated."
     
