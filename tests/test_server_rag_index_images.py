@@ -81,7 +81,11 @@ def _install_server_rag_import_stubs(monkeypatch):
             ),
         ),
     )
-    monkeypatch.setitem(sys.modules, "numpy", _module("numpy", stack=lambda values: list(values)))
+    monkeypatch.setitem(
+        sys.modules,
+        "numpy",
+        _module("numpy", ndarray=object, stack=lambda values: list(values)),
+    )
     monkeypatch.setitem(sys.modules, "pymupdf4llm", _module("pymupdf4llm"))
     monkeypatch.setitem(sys.modules, "trafilatura", _module("trafilatura"))
     monkeypatch.setitem(sys.modules, "tqdm", _module("tqdm", tqdm=lambda iterable, **_kwargs: iterable))
