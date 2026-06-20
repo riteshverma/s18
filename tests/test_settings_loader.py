@@ -151,7 +151,7 @@ class ProfileSettingsTests(unittest.TestCase):
     def test_profile_overrides_defaults(self):
         with patch.dict("os.environ", {"S18_PROFILE": "local-laptop-gemma"}, clear=False):
             reload_settings()
-            self.assertEqual(get_model("semantic_chunking"), "gemma3:4b")
+            self.assertEqual(get_model("semantic_chunking"), "gemma4:e4b")
 
     def test_privacy_first_profile_enables_strict_mcp_mode(self):
         with patch.dict("os.environ", {"S18_PROFILE": "privacy-first"}, clear=False):
