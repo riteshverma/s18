@@ -138,6 +138,7 @@ INDEXING_STATUS = {
 }
 INDEXING_LOCK = threading.Lock()
 REINDEX_BUSY_LOCK = threading.Lock()
+RAG_INDEX_LOCK = threading.RLock()
 INDEX_MANIFEST_NAME = "manifest.json"
 INDEX_MANIFEST_VERSION = 1
 
@@ -1892,6 +1893,11 @@ def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
 
 
 def process_documents(target_path: str = None, specific_files: list[Path] = None):
+    with RAG_INDEX_LOCK:
+        return _process_documents_unlocked(target_path=target_path, specific_files=specific_files)
+
+
+def _process_documents_unlocked(target_path: str = None, specific_files: list[Path] = None):
     """Process documents and create FAISS index using Parallel Processing (ThreadPoolExecutor)."""
     mcp_log("INFO", f"Indexing documents... {'(Target: ' + target_path + ')' if target_path else ''}")
     ROOT = Path(__file__).parent.resolve()
@@ -2006,10 +2012,6 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
     
     param_cache_meta = CACHE_META.copy() # Read-only for threads
     
-    # Thread-safe lock for incremental saves
-    import threading
-    index_lock = threading.Lock()
-    
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # Map futures
         futures = {executor.submit(process_single_file, f, DOC_PATH, param_cache_meta): f for f in files_to_process}
@@ -2033,8 +2035,8 @@ def process_documents(target_path: str = None, specific_files: list[Path] = None
                 new_meta = result.get("metadata")
                 
                 if new_embs:
-                    # Thread-safe index update and save
-                    with index_lock:
+                    # Serialize all FAISS/metadata read-modify-write paths.
+                    with RAG_INDEX_LOCK:
                         # 1. Cleanup old entries if exist
                         if rel_path in CACHE_META:
                             metadata = [m for m in metadata if m.get("doc") != rel_path]
@@ -2405,50 +2407,64 @@ def start_background_services():
             INDEX_FILE = INDEX_CACHE / "index.bin"
             METADATA_FILE = INDEX_CACHE / "metadata.json"
             
-            metadata = json.loads(METADATA_FILE.read_text()) if METADATA_FILE.exists() else []
-            index = faiss_read_index(INDEX_FILE) if INDEX_FILE.exists() else None
-            manifest = _load_index_manifest(INDEX_CACHE)
-            runtime_sig = _current_embedding_signature()
-            if index is not None and manifest:
-                manifest_ok, manifest_reason = _validate_manifest_compatibility(
-                    manifest,
-                    provider=runtime_sig["provider"],
-                    model=runtime_sig["model"],
-                )
-                if not manifest_ok:
-                    mcp_log(
-                        "WARN",
-                        (
-                            f"Skipping scheduler update for {rel_path}: index compatibility guard "
-                            f"({manifest_reason}). Run force reindex to rebuild vectors."
-                        ),
-                    )
-                    return {"chunk_count": 0}
-            
-            # Remove old entries for this file
-            metadata = [m for m in metadata if m.get("doc") != rel_path]
-            
             # Process the file
             result = process_single_file(abs_path, BASE_DATA_DIR, {})
-            
+            result_status = result.get("status")
+            if result_status == "ERROR":
+                return {
+                    "status": "error",
+                    "message": result.get("message") or "file processing failed",
+                    "chunk_count": 0,
+                }
+            if result_status == "WARN":
+                return {"chunk_count": 0}
+
             if result.get("status") == "SUCCESS":
                 new_embs = result.get("embeddings", [])
                 new_meta = result.get("metadata", [])
-                
-                if new_embs:
+
+                if not new_embs:
+                    return {
+                        "status": "error",
+                        "message": "No embeddings generated for file",
+                        "chunk_count": 0,
+                    }
+
+                # Serialize against manual/full reindex so file updates cannot
+                # overwrite each other's FAISS index.bin or metadata.json.
+                with RAG_INDEX_LOCK:
+                    metadata = json.loads(METADATA_FILE.read_text()) if METADATA_FILE.exists() else []
+                    index = faiss_read_index(INDEX_FILE) if INDEX_FILE.exists() else None
+                    manifest = _load_index_manifest(INDEX_CACHE)
+                    runtime_sig = _current_embedding_signature()
+                    if index is not None and manifest:
+                        manifest_ok, manifest_reason = _validate_manifest_compatibility(
+                            manifest,
+                            provider=runtime_sig["provider"],
+                            model=runtime_sig["model"],
+                        )
+                        if not manifest_ok:
+                            message = (
+                                f"Index compatibility guard triggered ({manifest_reason}). "
+                                "Run force reindex to rebuild vectors."
+                            )
+                            mcp_log("WARN", f"Skipping scheduler update for {rel_path}: {message}")
+                            return {"status": "error", "message": message, "chunk_count": 0}
+
+                    # Remove old entries for this file
+                    metadata = [m for m in metadata if m.get("doc") != rel_path]
+
                     emb_dim = len(new_embs[0])
                     if index is None:
                         index = create_index_flat_l2(emb_dim)
                     elif int(getattr(index, "d", emb_dim)) != emb_dim:
-                        mcp_log(
-                            "WARN",
-                            (
-                                f"Skipping scheduler update for {rel_path}: "
-                                f"embedding dim {emb_dim} != index dim {int(getattr(index, 'd', -1))}. "
-                                "Run force reindex to rebuild index for the current embedding model."
-                            ),
+                        message = (
+                            f"Embedding dimension mismatch: new={emb_dim}, "
+                            f"index={int(getattr(index, 'd', -1))}. "
+                            "Run force reindex to rebuild index for the current embedding model."
                         )
-                        return {"chunk_count": 0}
+                        mcp_log("WARN", f"Skipping scheduler update for {rel_path}: {message}")
+                        return {"status": "error", "message": message, "chunk_count": 0}
                     index.add(np.stack(new_embs))
                     metadata.extend(new_meta)
                     
@@ -2461,9 +2477,8 @@ def start_background_services():
                     if BM25_AVAILABLE:
                         _bm25_index.build_from_metadata(metadata)
                         _bm25_index.save(str(INDEX_CACHE / "bm25_index.pkl"))
-                    
-                    return {"chunk_count": len(new_embs)}
-            
+                return {"chunk_count": len(new_embs)}
+
             return {"chunk_count": 0}
         except Exception as e:
             detail = str(e).strip() or repr(e)
@@ -2475,18 +2490,19 @@ def start_background_services():
         try:
             METADATA_FILE = INDEX_CACHE / "metadata.json"
             
-            if METADATA_FILE.exists():
-                metadata = json.loads(METADATA_FILE.read_text())
-                new_metadata = [m for m in metadata if m.get("doc") != rel_path]
-                
-                if len(new_metadata) != len(metadata):
-                    METADATA_FILE.write_text(json.dumps(new_metadata, indent=2))
-                    mcp_log("INFO", f"Removed {rel_path} from metadata ({len(metadata) - len(new_metadata)} chunks)")
+            with RAG_INDEX_LOCK:
+                if METADATA_FILE.exists():
+                    metadata = json.loads(METADATA_FILE.read_text())
+                    new_metadata = [m for m in metadata if m.get("doc") != rel_path]
                     
-                    # Rebuild BM25
-                    if BM25_AVAILABLE:
-                        _bm25_index.build_from_metadata(new_metadata)
-                        _bm25_index.save(str(INDEX_CACHE / "bm25_index.pkl"))
+                    if len(new_metadata) != len(metadata):
+                        METADATA_FILE.write_text(json.dumps(new_metadata, indent=2))
+                        mcp_log("INFO", f"Removed {rel_path} from metadata ({len(metadata) - len(new_metadata)} chunks)")
+                        
+                        # Rebuild BM25
+                        if BM25_AVAILABLE:
+                            _bm25_index.build_from_metadata(new_metadata)
+                            _bm25_index.save(str(INDEX_CACHE / "bm25_index.pkl"))
         except Exception as e:
             mcp_log("ERROR", f"Delete callback failed for {rel_path}: {e}")
     
