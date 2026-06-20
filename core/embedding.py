@@ -247,6 +247,64 @@ def _azure_embed_request(inputs: list[str], timeout: int) -> list[list[float]]:
     return vectors
 
 
+def _gemini_embed_request(inputs: list[str], timeout: int, task_type: Optional[str]) -> list[list[float]]:
+    del timeout
+    try:
+        from google import genai  # type: ignore[reportMissingImports]
+        from google.genai import types  # type: ignore[reportMissingImports]
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "google-genai must be installed for the gemini embedding provider."
+        ) from exc
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Gemini embedding is selected but GEMINI_API_KEY is not configured.")
+
+    model_name = os.getenv("GEMINI_EMBEDDING_MODEL") or get_model("embedding")
+    if not model_name.lower().startswith(("gemini", "text-embedding")):
+        model_name = "gemini-embedding-001"
+    cfg = load_settings().get("gemini", {}) or {}
+    output_dimensionality = int(
+        os.getenv("GEMINI_EMBEDDING_DIMENSION")
+        or cfg.get("embedding_dimension")
+        or 768
+    )
+    task_map = {
+        "search_query": "RETRIEVAL_QUERY",
+        "query": "RETRIEVAL_QUERY",
+        "search_document": "RETRIEVAL_DOCUMENT",
+        "document": "RETRIEVAL_DOCUMENT",
+    }
+    mapped_task_type = task_map.get((task_type or "").strip().lower())
+
+    config_kwargs: dict[str, Any] = {"output_dimensionality": output_dimensionality}
+    if mapped_task_type:
+        config_kwargs["task_type"] = mapped_task_type
+
+    client = genai.Client(api_key=api_key)
+    attempts, backoff = _embedding_retry_config()
+
+    def _call():
+        return client.models.embed_content(
+            model=model_name,
+            contents=inputs,
+            config=types.EmbedContentConfig(**config_kwargs),
+        )
+
+    result = _retry_call(
+        _call,
+        retryable=lambda exc: "429" in str(exc) or "503" in str(exc) or "timeout" in str(exc).lower(),
+        attempts=attempts,
+        backoff=backoff,
+    )
+    embeddings = getattr(result, "embeddings", None) or []
+    vectors = [list(embedding.values) for embedding in embeddings if getattr(embedding, "values", None)]
+    if not vectors:
+        raise RuntimeError("Gemini returned no embedding vectors.")
+    return vectors
+
+
 def _llama_cpp_embed_request(inputs: list[str], timeout: int) -> list[list[float]]:
     model_name = get_model("embedding")
     url = get_llama_cpp_url("embeddings")
@@ -294,6 +352,10 @@ def get_normalized_embedding(
 
     if _embedding_provider() == "azure_openai":
         vectors = _azure_embed_request([full_text], request_timeout)
+        return _normalize_vector(vectors[0])
+
+    if _embedding_provider() == "gemini":
+        vectors = _gemini_embed_request([full_text], request_timeout, task_type)
         return _normalize_vector(vectors[0])
 
     if _embedding_provider() == "bedrock":
@@ -356,6 +418,10 @@ def get_batch_normalized_embeddings(
 
     if _embedding_provider() == "azure_openai":
         vectors = _azure_embed_request(prepared, request_timeout)
+        return [_normalize_vector(v) for v in vectors]
+
+    if _embedding_provider() == "gemini":
+        vectors = _gemini_embed_request(prepared, request_timeout, task_type)
         return [_normalize_vector(v) for v in vectors]
 
     if _embedding_provider() == "bedrock":
