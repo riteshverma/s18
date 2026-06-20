@@ -509,6 +509,13 @@ class MultiMCP:
         integration_id = trace_context.get("integration_id", "default")
         workflow_id = trace_context.get("workflow_id", "generic")
         contract_version = trace_context.get("contract_version", "v1")
+
+        if trace_context.get("workspace") and tool_name in {
+            "read_workspace_file",
+            "write_workspace_file",
+        }:
+            arguments = dict(arguments or {})
+            arguments.setdefault("workspace_root", trace_context["workspace"])
         
         # Get or create circuit breaker for this tool
         breaker = get_breaker(tool_name, failure_threshold=5, recovery_timeout=60.0)
