@@ -14,6 +14,7 @@ from config.settings_loader import (
     normalize_runtime_llama_cpp_base_url,
     normalize_runtime_ollama_base_url,
     reload_settings,
+    restore_redacted_settings_for_update,
     reset_settings,
     validate_llama_cpp_base_url,
     validate_ollama_base_url,
@@ -58,6 +59,41 @@ class ValidateOllamaBaseUrlTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "must use http or https"):
             validate_ollama_base_url("file://127.0.0.1:11434")
+
+
+class SettingsRedactionUpdateTests(unittest.TestCase):
+    def test_restore_redacted_placeholders_preserves_current_secrets(self):
+        current = {
+            "auth": {"supabase_anon_key": "anon-secret"},
+            "supabase_logging": {"service_role_key": "service-secret"},
+        }
+        update = {
+            "auth": {"supabase_anon_key": "[redacted]"},
+            "supabase_logging": {"service_role_key": "[redacted]"},
+            "rag": {"top_k": 7},
+        }
+
+        restored = restore_redacted_settings_for_update(update, current_settings=current)
+
+        self.assertEqual(restored["auth"]["supabase_anon_key"], "anon-secret")
+        self.assertEqual(restored["supabase_logging"]["service_role_key"], "service-secret")
+        self.assertEqual(restored["rag"]["top_k"], 7)
+        self.assertEqual(update["auth"]["supabase_anon_key"], "[redacted]")
+
+    def test_restore_redacted_placeholders_allows_explicit_secret_changes(self):
+        current = {
+            "auth": {"supabase_anon_key": "old-anon-secret"},
+            "supabase_logging": {"service_role_key": "old-service-secret"},
+        }
+        update = {
+            "auth": {"supabase_anon_key": ""},
+            "supabase_logging": {"service_role_key": "new-service-secret"},
+        }
+
+        restored = restore_redacted_settings_for_update(update, current_settings=current)
+
+        self.assertEqual(restored["auth"]["supabase_anon_key"], "")
+        self.assertEqual(restored["supabase_logging"]["service_role_key"], "new-service-secret")
 
 
 class NormalizeRuntimeOllamaBaseUrlTests(unittest.TestCase):
