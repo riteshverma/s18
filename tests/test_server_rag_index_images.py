@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import io
 import json
 import sys
 import threading
@@ -167,6 +168,10 @@ def _install_server_rag_import_stubs(monkeypatch):
 
 def _import_server_rag(monkeypatch):
     _install_server_rag_import_stubs(monkeypatch)
+    # server_rag swaps stdout->stderr while importing heavy deps; pytest's
+    # EncodedFile capture wrappers break that redirect on CI.
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    monkeypatch.setattr(sys, "stderr", io.StringIO())
     sys.modules.pop("mcp_servers.server_rag", None)
     return importlib.import_module("mcp_servers.server_rag")
 
