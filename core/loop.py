@@ -5,6 +5,7 @@ import asyncio
 import time
 import ast
 import json
+import re
 from pathlib import Path
 from memory.context import ExecutionContextManager
 from agents.base_agent import AgentRunner
@@ -13,7 +14,7 @@ from core.event_bus import event_bus
 from core.graph_adapter import nx_to_reactflow
 from core.schemas.clinical import extract_request_payload_from_query, validate_cbc_payload
 from core.model_manager import ModelManager
-from config.settings_loader import get_timeout
+from config.settings_loader import get_timeout, reload_settings
 from core.prometheus_metrics import (
     ORCHESTRATOR_RUNS_TOTAL,
     ORCHESTRATOR_RUN_LATENCY_MS,
@@ -29,6 +30,7 @@ from integrations.policies.workflow_guards import (
     is_fast_mode,
     is_mental_health_task_query,
 )
+from core.verification_gate import evaluate_verification_gate
 from ui.visualizer import ExecutionVisualizer
 from rich.live import Live
 from rich.console import Console
@@ -169,6 +171,193 @@ class AgentLoop4:
         context._save_session()
         return context
 
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        if not isinstance(text, str) or not text.strip():
+            return 0
+        return int(len(text.split()) * 1.35)
+
+    @staticmethod
+    def _top_memory_lines(memory_context: str, top_k: int = 5) -> list[str]:
+        lines = [line.strip() for line in (memory_context or "").splitlines() if line.strip().startswith("-")]
+        if len(lines) <= top_k:
+            return lines
+
+        scored = []
+        for idx, line in enumerate(lines):
+            match = re.search(r"confidence:\s*([0-9.]+)", line, flags=re.IGNORECASE)
+            conf = float(match.group(1)) if match else 0.0
+            recency_boost = 1.0 / (idx + 1)
+            scored.append((conf + recency_boost, line))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [line for _, line in scored[:top_k]]
+
+    async def _compress_memory_context(self, query: str, memory_context: str) -> str:
+        if not isinstance(memory_context, str) or not memory_context.strip():
+            return memory_context
+
+        agent_cfg = reload_settings().get("agent", {})
+        token_budget = int(agent_cfg.get("memory_context_token_budget", 1800) or 1800)
+        top_k = int(agent_cfg.get("memory_top_k", 5) or 5)
+        estimated_tokens = self._estimate_tokens(memory_context)
+        if estimated_tokens <= token_budget:
+            return memory_context
+
+        top_lines = self._top_memory_lines(memory_context, top_k=max(5, top_k))
+        distilled_summary = ""
+        try:
+            distilled = await self.agent_runner.run_agent(
+                "DistillerAgent",
+                {
+                    "task": "compress_memory_context",
+                    "original_query": query,
+                    "memory_lines": top_lines[:20],
+                    "instruction": (
+                        "Summarize the memory lines into a compact planning context. "
+                        "Prioritize clinical relevance and concrete facts."
+                    ),
+                },
+            )
+            if distilled.get("success"):
+                out = distilled.get("output", {})
+                if isinstance(out, dict):
+                    distilled_summary = (
+                        out.get("summary")
+                        or out.get("response")
+                        or out.get("final_answer")
+                        or ""
+                    )
+                elif isinstance(out, str):
+                    distilled_summary = out
+        except Exception as e:
+            log_error(f"Memory compression distillation failed: {e}")
+
+        compact_parts = []
+        if distilled_summary:
+            compact_parts.append("MEMORY SUMMARY:\n" + distilled_summary.strip())
+        if top_lines:
+            compact_parts.append("TOP MEMORIES:\n" + "\n".join(top_lines[:top_k]))
+        compact = "\n\n".join(part for part in compact_parts if part).strip()
+        if not compact:
+            compact = "\n".join(top_lines[:top_k])
+        log_step(
+            f"🧠 Compressed memory context from ~{estimated_tokens} tokens to ~{self._estimate_tokens(compact)}",
+            symbol="🧠",
+        )
+        return compact
+
+    @staticmethod
+    def _prune_duplicate_retriever_steps(plan_graph: dict) -> int:
+        if not isinstance(plan_graph, dict):
+            return 0
+        nodes = plan_graph.get("nodes", [])
+        edges = plan_graph.get("edges", [])
+        if not isinstance(nodes, list) or not isinstance(edges, list):
+            return 0
+
+        signature_to_primary: dict[tuple, str] = {}
+        replacement: dict[str, str] = {}
+        kept_nodes = []
+        removed = 0
+
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            node_id = node.get("id")
+            if not node_id:
+                continue
+            agent = str(node.get("agent", "")).strip()
+            if agent != "RetrieverAgent":
+                kept_nodes.append(node)
+                continue
+            reads = tuple(sorted(sanitize_io_keys_list(node.get("reads", []))))
+            desc = " ".join(str(node.get("description", "")).split()).lower()[:160]
+            signature = (agent, reads, desc)
+            primary = signature_to_primary.get(signature)
+            if primary:
+                replacement[node_id] = primary
+                removed += 1
+                continue
+            signature_to_primary[signature] = node_id
+            kept_nodes.append(node)
+
+        if removed == 0:
+            return 0
+
+        rewritten_edges = []
+        seen_edges = set()
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            source = replacement.get(edge.get("source"), edge.get("source"))
+            target = replacement.get(edge.get("target"), edge.get("target"))
+            if not source or not target or source == target:
+                continue
+            key = (source, target)
+            if key in seen_edges:
+                continue
+            seen_edges.add(key)
+            rewritten_edges.append({"source": source, "target": target})
+
+        plan_graph["nodes"] = kept_nodes
+        plan_graph["edges"] = rewritten_edges
+        return removed
+
+    @staticmethod
+    def _compute_budget_spend(context) -> dict:
+        total_cost = 0.0
+        total_tokens = 0
+        for node_id in context.plan_graph.nodes:
+            if node_id == "ROOT":
+                continue
+            node = context.plan_graph.nodes[node_id]
+            if node.get("status") != "completed":
+                continue
+            total_cost += float(node.get("cost", 0.0) or 0.0)
+            total_tokens += int(node.get("total_tokens", 0) or 0)
+        return {"total_cost": total_cost, "total_tokens": total_tokens}
+
+    def _apply_budget_downgrade_if_needed(self, context, budget_cfg: dict, spend: dict) -> None:
+        max_cost = float(budget_cfg.get("max_cost_per_run", 0.5) or 0.5)
+        max_tokens = int(budget_cfg.get("max_tokens_per_run", 50000) or 50000)
+        remaining_cost = max(0.0, max_cost - spend["total_cost"])
+        remaining_tokens = max(0, max_tokens - spend["total_tokens"])
+        cost_threshold = float(budget_cfg.get("downgrade_at_remaining_usd", 0.1) or 0.1)
+        token_threshold = int(budget_cfg.get("downgrade_at_remaining_tokens", 5000) or 5000)
+
+        should_downgrade = remaining_cost <= cost_threshold or remaining_tokens <= token_threshold
+        if not should_downgrade:
+            return
+
+        fallback_provider = budget_cfg.get("budget_fallback_provider", "ollama")
+        fallback_model = budget_cfg.get("budget_fallback_model")
+        if not fallback_model:
+            fallback_model = (
+                reload_settings().get("models", {}).get("semantic_chunking", "gemma4:e4b")
+                if fallback_provider == "ollama"
+                else "gemini-2.5-flash"
+            )
+
+        override = {"provider": fallback_provider, "model": fallback_model}
+        existing = context.plan_graph.graph.get("runtime_model_override")
+        if existing == override:
+            return
+        context.plan_graph.graph["runtime_model_override"] = override
+        context.plan_graph.graph["budget_downgrade_active"] = True
+        log_step(
+            f"💸 Budget downgrade active -> {fallback_provider}:{fallback_model} "
+            f"(remaining ${remaining_cost:.4f}, {remaining_tokens} tokens)",
+            symbol="💸",
+        )
+
+    def _remaining_budget_ratio(self, context, budget_cfg: dict) -> float:
+        spend = self._compute_budget_spend(context)
+        max_cost = float(budget_cfg.get("max_cost_per_run", 0.5) or 0.5)
+        max_tokens = int(budget_cfg.get("max_tokens_per_run", 50000) or 50000)
+        cost_ratio = 1.0 if max_cost <= 0 else max(0.0, min(1.0, (max_cost - spend["total_cost"]) / max_cost))
+        token_ratio = 1.0 if max_tokens <= 0 else max(0.0, min(1.0, (max_tokens - spend["total_tokens"]) / max_tokens))
+        return min(cost_ratio, token_ratio)
+
     async def resume(self, session_file, memory_context=None):
         context = ExecutionContextManager.load_session(Path(session_file))
         self.context = self._prepare_resumed_context(context, memory_context=memory_context)
@@ -303,6 +492,19 @@ class AgentLoop4:
 
                 planner_memory_context = self._filter_memory_context_for_cbc(query, memory_context)
                 planner_memory_context = self._filter_memory_context_for_mental_health(query, planner_memory_context)
+                planner_memory_context = await self._compress_memory_context(query, planner_memory_context)
+                self.context.plan_graph.graph.setdefault("globals_schema", {})["compressed_memory_context"] = planner_memory_context
+                budget_cfg = reload_settings().get("agent", {})
+                spend = self._compute_budget_spend(self.context)
+                planner_budget_context = {
+                    "remaining_budget_usd": max(0.0, float(budget_cfg.get("max_cost_per_run", 0.5) or 0.5) - spend["total_cost"]),
+                    "remaining_budget_tokens": max(0, int(budget_cfg.get("max_tokens_per_run", 50000) or 50000) - spend["total_tokens"]),
+                    "estimated_step_costs": {
+                        "RetrieverAgent_tokens": 2200,
+                        "ThinkerAgent_tokens": 4000,
+                        "FormatterAgent_tokens": 1400,
+                    },
+                }
 
                 if self._is_cbc_payload_query(query) and self._is_fast_mode(query):
                     plan_result = {
@@ -337,7 +539,8 @@ class AgentLoop4:
                                 "globals_schema": self.context.plan_graph.graph.get("globals_schema", {}),
                                 "file_manifest": file_manifest,
                                 "file_profiles": file_profiles,
-                                "memory_context": planner_memory_context
+                                "memory_context": planner_memory_context,
+                                "planner_budget_context": planner_budget_context,
                             }
                         )
                     plan_result = await self._track_task(retry_with_backoff(run_planner))
@@ -428,11 +631,25 @@ class AgentLoop4:
                     # can expose this in API/debug flags without parsing full graphs.
                     out["mental_health_plan_guard_applied"] = True
                 pg = out["plan_graph"]
+                deduped = self._prune_duplicate_retriever_steps(pg)
+                if deduped:
+                    log_step(f"Pruned {deduped} duplicate RetrieverAgent steps", symbol="🪙")
 
-                # ===== AUTO-CLARIFICATION CHECK =====
-                AUTO_CLARYFY_THRESHOLD = 0.7
+                # ===== VERIFICATION GATE + AUTO-CLARIFICATION =====
                 confidence = plan_result["output"].get("interpretation_confidence", 1.0)
+                try:
+                    planner_confidence = float(confidence)
+                except (TypeError, ValueError):
+                    planner_confidence = 1.0
                 ambiguity_notes = plan_result["output"].get("ambiguity_notes", [])
+                verification_gate = evaluate_verification_gate(
+                    confidence=planner_confidence,
+                    risk_level="Moderate",
+                    remaining_budget_ratio=self._remaining_budget_ratio(self.context, budget_cfg),
+                    evidence_count=0,
+                    ambiguity_count=len(ambiguity_notes) if isinstance(ambiguity_notes, list) else 0,
+                )
+                plan_result["output"]["verification_gate"] = verification_gate
                 
                 # Check if Planner already added a ClarificationAgent (avoid duplicates)
                 plan_nodes = plan_result["output"]["plan_graph"].get("nodes", [])
@@ -440,7 +657,7 @@ class AgentLoop4:
                     n.get("agent") == "ClarificationAgent" for n in plan_nodes
                 )
                 
-                if confidence < AUTO_CLARYFY_THRESHOLD and ambiguity_notes and not has_clarification_agent:
+                if verification_gate.get("needs_clarification") and ambiguity_notes and not has_clarification_agent:
                     log_step(f"Low confidence ({confidence:.2f}), auto-triggering clarification", symbol="❓")
                     
                     # Get the first step ID from the plan
@@ -870,12 +1087,15 @@ class AgentLoop4:
         max_iterations = 20
         iteration = 0
         
-        # ===== COST THRESHOLD ENFORCEMENT =====
-        from config.settings_loader import reload_settings
+        # ===== COST/TOKEN BUDGET ENFORCEMENT =====
         settings = reload_settings()
-        max_cost = settings.get("agent", {}).get("max_cost_per_run", 0.50)
-        warn_cost = settings.get("agent", {}).get("warn_at_cost", 0.25)
+        budget_cfg = settings.get("agent", {})
+        max_cost = float(budget_cfg.get("max_cost_per_run", 0.50) or 0.50)
+        warn_cost = float(budget_cfg.get("warn_at_cost", 0.25) or 0.25)
+        max_tokens = int(budget_cfg.get("max_tokens_per_run", 50000) or 50000)
+        warn_tokens = int(budget_cfg.get("warn_at_tokens", int(max_tokens * 0.8)) or int(max_tokens * 0.8))
         cost_warning_shown = False
+        token_warning_shown = False
 
         while not context.all_done():
             if context.stop_requested:
@@ -1032,23 +1252,35 @@ class AgentLoop4:
                         )
                         log_error(f"❌ Failed {step_id} after {MAX_STEP_RETRIES} retries: {result['error']}")
 
-            # ===== COST THRESHOLD CHECK =====
-            accumulated_cost = sum(
-                context.plan_graph.nodes[n].get('cost', 0) 
-                for n in context.plan_graph.nodes
-                if context.plan_graph.nodes[n].get('status') == 'completed'
-            )
+            # ===== BUDGET THRESHOLD CHECK =====
+            spend = self._compute_budget_spend(context)
+            accumulated_cost = spend["total_cost"]
+            accumulated_tokens = spend["total_tokens"]
             
             # Warning threshold
             if not cost_warning_shown and accumulated_cost >= warn_cost:
                 log_step(f"⚠️ Cost Warning: ${accumulated_cost:.4f} (threshold: ${warn_cost:.2f})", symbol="💰")
                 cost_warning_shown = True
+
+            if not token_warning_shown and accumulated_tokens >= warn_tokens:
+                log_step(
+                    f"⚠️ Token Warning: {accumulated_tokens} tokens (threshold: {warn_tokens})",
+                    symbol="🧮",
+                )
+                token_warning_shown = True
+
+            self._apply_budget_downgrade_if_needed(context, budget_cfg, spend)
             
             # Hard stop threshold
             if accumulated_cost >= max_cost:
                 log_error(f"🛑 Cost Exceeded: ${accumulated_cost:.4f} > ${max_cost:.2f}")
                 context.plan_graph.graph['status'] = 'cost_exceeded'
                 context.plan_graph.graph['final_cost'] = accumulated_cost
+                break
+            if accumulated_tokens >= max_tokens:
+                log_error(f"🛑 Token Budget Exceeded: {accumulated_tokens} > {max_tokens}")
+                context.plan_graph.graph['status'] = 'token_budget_exceeded'
+                context.plan_graph.graph['final_tokens'] = accumulated_tokens
                 break
 
         # Final state
@@ -1129,6 +1361,7 @@ class AgentLoop4:
                     "integration_meta": integration_meta,
                 },
                 "integration_meta": integration_meta,
+                "runtime_model_override": context.plan_graph.graph.get("runtime_model_override"),
                 **({"previous_output": previous_output} if previous_output else {}),
                 **({"iteration_context": iteration_context} if iteration_context else {})
             }
@@ -1330,6 +1563,44 @@ class AgentLoop4:
                 if context._has_executable_code(output):
                     execution_result = await context._auto_execute_code(step_id, output)
                     iterations_data[-1]["execution_result"] = execution_result
+
+                if isinstance(output, dict):
+                    budget_cfg = reload_settings().get("agent", {})
+                    evidence_count = 0
+                    if isinstance(output.get("flags"), list):
+                        evidence_count += len(output.get("flags", []))
+                    if isinstance(output.get("evidence_citations"), list):
+                        evidence_count += len(output.get("evidence_citations", []))
+                    verification_gate = evaluate_verification_gate(
+                        confidence=float(output.get("confidence", 0.5) or 0.5)
+                        if str(output.get("confidence", "")).replace(".", "", 1).isdigit()
+                        else 0.5,
+                        risk_level=str(output.get("risk_level", "Moderate")),
+                        remaining_budget_ratio=self._remaining_budget_ratio(context, budget_cfg),
+                        evidence_count=evidence_count,
+                        ambiguity_count=0,
+                    )
+                    output["verification_gate"] = verification_gate
+                    if (
+                        verification_gate.get("mode") == "full_reflect"
+                        and turn < max_turns
+                        and not output.get("verification_reflection_applied")
+                    ):
+                        reflection_input = build_agent_input(
+                            instruction=(
+                                "Perform a brief self-check on your previous output. "
+                                "Fix contradictions, tighten confidence calibration, and return the corrected JSON."
+                            ),
+                            previous_output=output,
+                            iteration_context={"verification_mode": "full_reflect"},
+                        )
+                        reflection_result = await self.agent_runner.run_agent(agent_type, reflection_input)
+                        if reflection_result.get("success") and isinstance(reflection_result.get("output"), dict):
+                            output = reflection_result["output"]
+                            output["verification_reflection_applied"] = True
+                            output["verification_gate"] = verification_gate
+                            iterations_data.append({"iteration": turn + 1, "output": output, "verification_reflection": True})
+                result["output"] = output
                 return result
         
         # If loop finishes without returning (max turns reached): Return PARTIAL SUCCESS to allow graph continuation

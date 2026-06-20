@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 from rich.panel import Panel
 from rich.text import Text
+from core.usage_ledger import append_usage_event
 
 
 def sanitize_io_keys_list(keys):
@@ -539,6 +540,22 @@ class ExecutionContextManager:
             node_data['execution_time'] = (end - start).total_seconds()
         
         print(f"✅ {step_id} completed successfully")
+        append_usage_event(
+            {
+                "event_type": "step_completed",
+                "run_id": self.plan_graph.graph.get("session_id"),
+                "step_id": step_id,
+                "agent": node_data.get("agent"),
+                "model": (output or {}).get("executed_model") if isinstance(output, dict) else None,
+                "input_tokens": node_data.get("input_tokens", 0),
+                "output_tokens": node_data.get("output_tokens", 0),
+                "total_tokens": node_data.get("total_tokens", 0),
+                "cost_usd": float(node_data.get("cost", 0.0) or 0.0),
+                "latency_seconds": float(node_data.get("execution_time", 0.0) or 0.0),
+                "metering_source": (output or {}).get("metering_source") if isinstance(output, dict) else None,
+                "integration_meta": self.plan_graph.graph.get("globals_schema", {}).get("_integration_meta", {}),
+            }
+        )
         self._auto_save()
 
     def mark_failed(self, step_id, error=None):
@@ -652,7 +669,7 @@ class ExecutionContextManager:
             if key in globals_schema:
                 final_outputs[key] = globals_schema[key]
 
-        return {
+        summary = {
             "session_id": self.plan_graph.graph['session_id'],
             "original_query": self.plan_graph.graph['original_query'],
             "completed_steps": completed,
@@ -666,6 +683,21 @@ class ExecutionContextManager:
             "final_outputs": final_outputs,
             "globals_schema": globals_schema
         }
+        append_usage_event(
+            {
+                "event_type": "run_summary",
+                "run_id": summary["session_id"],
+                "status": self.plan_graph.graph.get("status"),
+                "total_cost_usd": summary["total_cost"],
+                "total_input_tokens": summary["total_input_tokens"],
+                "total_output_tokens": summary["total_output_tokens"],
+                "total_tokens": summary["total_tokens"],
+                "completed_steps": summary["completed_steps"],
+                "failed_steps": summary["failed_steps"],
+                "integration_meta": self.plan_graph.graph.get("globals_schema", {}).get("_integration_meta", {}),
+            }
+        )
+        return summary
 
     def set_file_profiles(self, file_profiles):
         """Store file profiles in graph attributes"""

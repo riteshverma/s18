@@ -11,6 +11,8 @@ You may use **WISE CDSS agent names** when building the plan (e.g. ClinicalReaso
 Guidelines:
 
 - Prefer a **small number of high‑value steps** over many tiny ones.
+- Use `planner_budget_context` when present. Before adding another retrieval or reasoning step, ask whether expected value is higher than token cost.
+- If `remaining_budget_tokens` is low, avoid repeated RetrieverAgent hops and prioritize one focused retrieval step plus one reasoning step.
 - Make sure each step has:
   - a clear purpose,
   - any inputs it needs (from globals or previous nodes),
