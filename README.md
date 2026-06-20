@@ -9,7 +9,15 @@ Open-source agent runtime and orchestration framework for AI systems.
 ![Docker CI](https://img.shields.io/badge/CI-Docker%20%2B%20Tests-success)
 
 - **Python:** 3.11+
-- **Version:** 0.9
+- **Version:** 0.9.1
+
+## Recent updates (Jun 2026)
+
+- **Run budget controls (S19):** per-run USD and token budgets with warn/stop thresholds, automatic downgrade to a budget fallback model, prompt-cache defaults, and JSONL usage logging under `memory/usage_ledger/`.
+- **RAG indexing reliability:** scheduler callbacks mark compatibility/processing failures as retryable ledger errors; document and image index writes share `RAG_INDEX_LOCK` to prevent stale FAISS/metadata overwrites.
+- **Settings API hardening:** `GET /settings` redacts Supabase secrets; `PUT /settings` preserves `[redacted]` placeholders instead of persisting them; settings routes require Supabase auth when enabled.
+- **DAG execution:** when a step fails terminally, pending downstream nodes are marked skipped so runs do not hang waiting on unreachable dependents.
+- **Hosted Gemini fixes:** Gemini embedding support for Railway/hosted profiles, env provider pins honored, and hosted overrides kept out of persisted `settings.json`.
 
 ## The magic moment (under 30 seconds)
 
@@ -25,9 +33,9 @@ Most agent prototypes start as fragile scripts: prompts, tools, memory, schedule
 
 ## Core capabilities
 
-- **Agent runtime:** multi-step planning and execution through FastAPI routes and a reusable `s18_engine` import surface.
+- **Agent runtime:** multi-step planning and execution through FastAPI routes and a reusable `s18_engine` import surface, with per-run cost/token budgets and DAG failure propagation.
 - **Workflow-agnostic contracts:** normalize product-specific payloads into canonical `/runs` requests via integration adapters.
-- **Memory and retrieval:** REMME user memory plus RAG document indexing/search.
+- **Memory and retrieval:** REMME user memory plus RAG document indexing/search with scheduler ledger retry semantics and serialized index artifact writes.
 - **MCP hub:** built-in RAG/browser/sandbox servers plus configurable external MCP servers.
 - **Scheduling and automation:** cron-style jobs, skills, inbox flows, and trusted CLI harness jobs.
 - **Local-first or cloud models:** profile overlays for local models alongside cloud model providers.
@@ -140,6 +148,7 @@ Primary files:
 
 ## Document Map
 
+- [Recent updates (Jun 2026)](#recent-updates-jun-2026)
 - [The magic moment (under 30 seconds)](#the-magic-moment-under-30-seconds)
 - [Why it exists](#why-it-exists)
 - [Core capabilities](#core-capabilities)
@@ -303,16 +312,17 @@ python benchmarks/local_vs_cloud/benchmark_runs.py \
 
 ## Features
 
-- **Agent loop** – Multi-step planning and execution with retries and circuit breakers
+- **Agent loop** – Multi-step planning and execution with retries, circuit breakers, verification gates, and downstream skip-on-failure for DAG plans
+- **Run budgets (S19)** – Per-run USD/token limits, warn thresholds, budget fallback model downgrade, and append-only LLM usage ledger (`memory/usage_ledger/llm_usage.jsonl`)
 - **REMME (Remember Me)** – User memory and preferences: extraction, staging, normalizer, belief updates, and hubs (Preferences, Operating Context, Soft Identity). See [remme/ARCHITECTURE.md](remme/ARCHITECTURE.md).
 - **GBrain memory bridge (optional)** – Interop layer that can mirror REMME memories/hubs into GBrain pages (dual-write) and optionally cut reads over to the bridge. See `docs/architecture/GBRAIN_COMPATIBILITY.md`.
-- **RAG** – Document indexing and search (FAISS + optional BM25), chunking, and ingestion
+- **RAG** – Document indexing and search (FAISS + optional BM25), chunking, ingestion, scheduler ledger with retryable errors, and locked read-modify-write for document/image index artifacts
 - **MCP servers** – RAG, browser, sandbox, and configurable external servers
 - **Scheduler** – Cron-style jobs with skill routing (e.g. Market Analyst, System Monitor, Web Clipper) and inbox integration
 - **Skills** – Pluggable skills with intent matching and run/success hooks
 - **Streaming** – SSE endpoint for real-time events from the event bus
 - **Harness jobs** – Auth-protected background jobs that run trusted local CLIs (`codex`, `claude`, `gemini`) with persisted state and SSE output events
-- **Config** – Centralized settings in `config/` (Ollama, llama.cpp, models, RAG, agent, REMME)
+- **Config** – Centralized settings in `config/` (Ollama, llama.cpp, models, RAG, agent budgets, REMME)
 
 ---
 
@@ -411,6 +421,7 @@ Optional:
 - Optional persistence can write to two Supabase tables:
   - `ehr_request_log` (inbound request/audit trail)
   - `ehr_clinical_result` (normalized RAC/CBC/ABDM/FHIR-aligned outcome)
+- **Settings routes** (`GET/PUT /settings`) require Supabase auth when `AUTH_ENABLED=true`. Responses redact `auth.supabase_anon_key` and `supabase_logging.service_role_key`; round-trip updates treat `[redacted]` as unchanged so secrets are not wiped on save.
 - Reference SQL schema: `docs/supabase_ehr_schema.sql`
 - Quick environment/table readiness check:
 
@@ -633,7 +644,7 @@ The CI target uses pinned dependencies from `requirements-ci.txt` (exported from
 | Path | Description |
 | ---- | ----------- |
 | `api.py` | FastAPI app, lifespan, CORS, router includes |
-| `core/` | Agent loop, scheduler, event bus, circuit breaker, persistence, model manager, skills |
+| `core/` | Agent loop, scheduler, event bus, circuit breaker, persistence, model manager, skills, usage ledger, verification gate |
 | `harness/` | Trusted CLI harness drivers, runtime, models, and JSON-backed store for harness jobs |
 | `remme/` | Memory and preferences pipeline (extractor, store, hubs, normalizer) |
 | `routers/` | API routes: RAG, remme, agent, chat, runs, stream, harness, cron, skills, inbox, etc. |
@@ -651,6 +662,7 @@ The CI target uses pinned dependencies from `requirements-ci.txt` (exported from
 
 - **Main settings:** `config/settings.json` (created from `config/settings.defaults.json` if missing).
 - **Override policy:** keep stable defaults in `config/settings.defaults.json`, keep environment-specific values in `config/settings.json`, and prefer env vars for runtime overrides (`AUTH_ENABLED`, `SUPABASE_*`, `TENANCY_*`, `RUN_POLL_TIMEOUT_SECONDS`).
+- **Agent run budgets:** under `agent` in settings — `max_cost_per_run`, `warn_at_cost`, `max_tokens_per_run`, `warn_at_tokens`, `downgrade_at_remaining_usd`, `downgrade_at_remaining_tokens`, `budget_fallback_provider`, `budget_fallback_model`, and optional `prompt_cache` (`enabled`, `ttl_seconds`, `max_entries`).
 - **Agent prompts and MCP:** `config/agent_config.yaml`.
 - **REMME extraction prompt and options:** under `remme` in settings.
 - **GBrain bridge flags:** under `remme.gbrain` in `config/settings.defaults.json`:
@@ -696,6 +708,7 @@ Use LangGraph, CrewAI, AutoGen, or similar libraries directly when your main nee
 - Continue hardening MCP marketplace integration and server lifecycle controls.
 - Improve A2A / AG-UI interoperability for structured agent events and UI streaming.
 - Broaden production-readiness docs around auth, observability, deployment, and tenancy.
+- Extend run-budget telemetry dashboards and operator playbooks for token/cost guardrails.
 
 ---
 
