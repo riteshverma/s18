@@ -53,7 +53,20 @@
         "max_steps": 3,
         "max_lifelines_per_step": 3,
         "planning_mode": "conservative",
-        "rate_limit_interval": 4.5
+        "rate_limit_interval": 4.5,
+        "max_cost_per_run": 0.5,
+        "warn_at_cost": 0.25,
+        "max_tokens_per_run": 50000,
+        "warn_at_tokens": 40000,
+        "downgrade_at_remaining_usd": 0.1,
+        "downgrade_at_remaining_tokens": 5000,
+        "budget_fallback_provider": "ollama",
+        "budget_fallback_model": "gemma4:e4b",
+        "prompt_cache": {
+            "enabled": true,
+            "ttl_seconds": 3600,
+            "max_entries": 250
+        }
     },
     "mcp": {
         "tool_timeout_seconds": 45,

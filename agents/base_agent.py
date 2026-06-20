@@ -51,29 +51,48 @@ class AgentRunner:
 
         self._agent_aliases = AGENT_ALIASES
     
-    def calculate_cost(self, input_text: str, output_text: str) -> dict:
-        """Calculate cost and token usage"""
-        # Approximate tokens = words * 1.5
-        input_words = len(input_text.split()) if input_text else 0
-        output_words = len(output_text.split()) if output_text else 0
-        
-        input_tokens = int(input_words * 1.5)
-        output_tokens = int(output_words * 1.5)
-        
-        # Cost per million tokens
-        input_cost_per_million = 0.1  # $0.1 per 1M input tokens
-        output_cost_per_million = 0.4  # $0.4 per 1M output tokens
-        
-        input_cost = (input_tokens / 1_000_000) * input_cost_per_million
-        output_cost = (output_tokens / 1_000_000) * output_cost_per_million
-        
+    def calculate_cost(
+        self,
+        input_text: str,
+        output_text: str,
+        *,
+        usage: Optional[dict] = None,
+        provider: str = "gemini",
+        model_name: str = "",
+    ) -> dict:
+        """Calculate cost and token usage from provider metadata when available."""
+        usage = usage or {}
+        input_tokens = int(usage.get("input_tokens", 0) or 0)
+        output_tokens = int(usage.get("output_tokens", 0) or 0)
+        metering_source = usage.get("source", "heuristic_word_count")
+
+        if input_tokens <= 0 and output_tokens <= 0:
+            input_words = len(input_text.split()) if input_text else 0
+            output_words = len(output_text.split()) if output_text else 0
+            input_tokens = int(input_words * 1.5)
+            output_tokens = int(output_words * 1.5)
+            metering_source = "heuristic_word_count"
+
+        provider = (provider or "").strip().lower()
+        pricing = {
+            "gemini": {"input": 0.15, "output": 0.60},
+            "azure_openai": {"input": 0.25, "output": 1.00},
+            "ollama": {"input": 0.0, "output": 0.0},
+            "llama_cpp": {"input": 0.0, "output": 0.0},
+        }
+        rates = pricing.get(provider, {"input": 0.15, "output": 0.60})
+        input_cost = (input_tokens / 1_000_000) * rates["input"]
+        output_cost = (output_tokens / 1_000_000) * rates["output"]
         total_cost = input_cost + output_cost
-        
+
         return {
             "cost": total_cost,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens
+            "total_tokens": input_tokens + output_tokens,
+            "metering_source": metering_source,
+            "metering_provider": provider,
+            "metering_model": model_name,
         }
 
     def _ensure_planner_plan_graph(self, output, raw_response: str) -> dict:
@@ -207,9 +226,17 @@ class AgentRunner:
             fresh_settings = reload_settings()
             agent_settings = fresh_settings.get("agent", {})
             
+            runtime_override = input_data.get("runtime_model_override", {})
+            if not isinstance(runtime_override, dict):
+                runtime_override = {}
+
             # Check for per-agent overrides
             overrides = agent_settings.get("overrides", {})
-            if agent_type in overrides:
+            if runtime_override.get("provider") and runtime_override.get("model"):
+                model_provider = runtime_override.get("provider", "gemini")
+                model_name = runtime_override.get("model", "gemini-2.5-flash")
+                log_step(f"💸 Budget override for {agent_type}: {model_provider}:{model_name}", symbol="💸")
+            elif agent_type in overrides:
                 override = overrides[agent_type]
                 model_provider = override.get("model_provider", "gemini")
                 model_name = override.get("model", "gemini-2.5-flash")
@@ -266,12 +293,21 @@ class AgentRunner:
             output_text = str(output)
             
             # Calculate cost and tokens
-            cost_data = self.calculate_cost(input_text, output_text)
+            usage_data = model_manager.last_usage if isinstance(model_manager.last_usage, dict) else {}
+            cost_data = self.calculate_cost(
+                input_text,
+                output_text,
+                usage=usage_data,
+                provider=model_provider,
+                model_name=model_name,
+            )
             
             # Add cost data and model info to result
             if isinstance(output, dict):
                 output.update(cost_data)
                 output["executed_model"] = f"{model_provider}:{model_name}"
+                output["model_usage"] = usage_data
+                output["cache_hit"] = bool(getattr(model_manager, "last_cache_hit", False))
             
             return {
                 "success": True,

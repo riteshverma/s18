@@ -3,8 +3,9 @@ import time
 import asyncio
 import json
 import yaml
+import hashlib
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -31,6 +32,8 @@ def _is_server_error(exc: Exception) -> bool:
     return _server_error_type is not None and isinstance(exc, _server_error_type)
 
 class ModelManager:
+    _prompt_cache: dict[str, dict[str, Any]] = {}
+
     def __init__(self, model_name: str = None, provider: str = None):
         """
         Initialize ModelManager with flexible model specification.
@@ -46,6 +49,8 @@ class ModelManager:
         self.profile = yaml.safe_load(PROFILE_YAML.read_text())
         self._azure_fallback_provider: Optional[str] = None
         self._azure_fallback_model: Optional[str] = None
+        self.last_usage: dict[str, Any] = {}
+        self.last_cache_hit: bool = False
 
         # Load settings for local model endpoints
         try:
@@ -187,25 +192,99 @@ class ModelManager:
             except Exception:
                 self._llama_cpp_timeout_seconds = 300
 
+    def _token_usage_dict(self, input_tokens: int = 0, output_tokens: int = 0, *, source: str = "unknown", raw: dict | None = None) -> dict:
+        total_tokens = int(input_tokens or 0) + int(output_tokens or 0)
+        payload = {
+            "input_tokens": int(input_tokens or 0),
+            "output_tokens": int(output_tokens or 0),
+            "total_tokens": total_tokens,
+            "source": source,
+            "provider": self.model_type,
+            "model": self.model_info.get("model", self.text_model_key),
+        }
+        if raw:
+            payload["raw_usage"] = raw
+        return payload
+
+    def _set_last_usage(self, usage: dict | None) -> None:
+        self.last_usage = usage or self._token_usage_dict(source="missing")
+
+    def _cache_config(self) -> dict:
+        agent_settings = self._settings.get("agent", {}) if isinstance(self._settings, dict) else {}
+        cache_settings = agent_settings.get("prompt_cache", {})
+        if not isinstance(cache_settings, dict):
+            cache_settings = {}
+        enabled = bool(cache_settings.get("enabled", False))
+        max_entries = int(cache_settings.get("max_entries", 250) or 250)
+        ttl_seconds = int(cache_settings.get("ttl_seconds", 3600) or 3600)
+        return {"enabled": enabled, "max_entries": max(25, max_entries), "ttl_seconds": max(30, ttl_seconds)}
+
+    def _build_cache_key(self, prompt: str) -> str:
+        digest = hashlib.sha256(prompt.encode("utf-8", errors="ignore")).hexdigest()
+        provider = self.model_type
+        model_name = self.model_info.get("model", self.text_model_key)
+        return f"{provider}:{model_name}:{digest}"
+
+    def _get_cached_response(self, cache_key: str) -> Optional[str]:
+        cfg = self._cache_config()
+        if not cfg["enabled"]:
+            return None
+        entry = ModelManager._prompt_cache.get(cache_key)
+        if not entry:
+            return None
+        if (time.time() - float(entry.get("created_at", 0))) > cfg["ttl_seconds"]:
+            ModelManager._prompt_cache.pop(cache_key, None)
+            return None
+        cached_text = str(entry.get("text", "") or "")
+        if not cached_text:
+            return None
+        self.last_cache_hit = True
+        self._set_last_usage(self._token_usage_dict(source="local_prompt_cache"))
+        return cached_text
+
+    def _store_cached_response(self, cache_key: str, text: str) -> None:
+        cfg = self._cache_config()
+        if not cfg["enabled"] or not text:
+            return
+        if len(ModelManager._prompt_cache) >= cfg["max_entries"]:
+            oldest_key = min(
+                ModelManager._prompt_cache.items(),
+                key=lambda item: float(item[1].get("created_at", 0)),
+            )[0]
+            ModelManager._prompt_cache.pop(oldest_key, None)
+        ModelManager._prompt_cache[cache_key] = {"text": text, "created_at": time.time()}
+
     async def generate_text(self, prompt: str) -> str:
+        self.last_cache_hit = False
+        cache_key = self._build_cache_key(prompt)
+        cached = self._get_cached_response(cache_key)
+        if cached is not None:
+            return cached
+
+        text = ""
         if self.model_type == "gemini":
-            return await self._gemini_generate(prompt)
+            text = await self._gemini_generate(prompt)
 
         elif self.model_type == "ollama":
-            return await self._ollama_generate(prompt)
+            text = await self._ollama_generate(prompt)
         elif self.model_type == "llama_cpp":
-            return await self._llama_cpp_generate(prompt)
+            text = await self._llama_cpp_generate(prompt)
         elif self.model_type == "azure_openai":
             try:
-                return await self._azure_generate(prompt)
+                text = await self._azure_generate(prompt)
             except Exception as e:
                 fallback_manager = self._build_azure_fallback_manager()
                 if fallback_manager is None:
                     raise RuntimeError(f"Azure OpenAI generation failed: {str(e)}")
                 print(f"[ModelManager] Azure generation failed; falling back to {fallback_manager.model_type}. Error: {e}")
-                return await fallback_manager.generate_text(prompt)
+                text = await fallback_manager.generate_text(prompt)
+                self._set_last_usage(fallback_manager.last_usage)
 
-        raise NotImplementedError(f"Unsupported model type: {self.model_type}")
+        else:
+            raise NotImplementedError(f"Unsupported model type: {self.model_type}")
+
+        self._store_cached_response(cache_key, text)
+        return text
 
     async def generate_content(self, contents: list) -> str:
         """Generate content with support for text and images.
@@ -293,6 +372,15 @@ class ModelManager:
                 if response.status >= 400:
                     raise RuntimeError(f"Azure OpenAI HTTP {response.status}: {body[:500]}")
                 data = json.loads(body)
+                usage = data.get("usage", {}) if isinstance(data, dict) else {}
+                self._set_last_usage(
+                    self._token_usage_dict(
+                        input_tokens=usage.get("prompt_tokens", 0),
+                        output_tokens=usage.get("completion_tokens", 0),
+                        source="azure_usage",
+                        raw=usage if isinstance(usage, dict) else None,
+                    )
+                )
                 choices = data.get("choices", [])
                 if not choices:
                     raise RuntimeError("Azure OpenAI returned no choices.")
@@ -424,6 +512,22 @@ class ModelManager:
                 model=self.model_info["model"],
                 contents=prompt
             )
+            usage_obj = getattr(response, "usage_metadata", None)
+            usage_data = usage_obj.to_dict() if hasattr(usage_obj, "to_dict") else {}
+            if not usage_data and usage_obj:
+                usage_data = {
+                    "prompt_token_count": getattr(usage_obj, "prompt_token_count", 0),
+                    "candidates_token_count": getattr(usage_obj, "candidates_token_count", 0),
+                    "total_token_count": getattr(usage_obj, "total_token_count", 0),
+                }
+            self._set_last_usage(
+                self._token_usage_dict(
+                    input_tokens=usage_data.get("prompt_token_count", 0),
+                    output_tokens=usage_data.get("candidates_token_count", 0),
+                    source="gemini_usage",
+                    raw=usage_data if isinstance(usage_data, dict) else None,
+                )
+            )
             return response.text.strip()
 
         except Exception as e:
@@ -441,6 +545,22 @@ class ModelManager:
                 self.client.models.generate_content,
                 model=self.model_info["model"],
                 contents=contents
+            )
+            usage_obj = getattr(response, "usage_metadata", None)
+            usage_data = usage_obj.to_dict() if hasattr(usage_obj, "to_dict") else {}
+            if not usage_data and usage_obj:
+                usage_data = {
+                    "prompt_token_count": getattr(usage_obj, "prompt_token_count", 0),
+                    "candidates_token_count": getattr(usage_obj, "candidates_token_count", 0),
+                    "total_token_count": getattr(usage_obj, "total_token_count", 0),
+                }
+            self._set_last_usage(
+                self._token_usage_dict(
+                    input_tokens=usage_data.get("prompt_token_count", 0),
+                    output_tokens=usage_data.get("candidates_token_count", 0),
+                    source="gemini_usage",
+                    raw=usage_data if isinstance(usage_data, dict) else None,
+                )
             )
             return response.text.strip()
 
@@ -466,6 +586,17 @@ class ModelManager:
                             response, "Ollama generation failed"
                         )
                     result = await response.json()
+                    self._set_last_usage(
+                        self._token_usage_dict(
+                            input_tokens=result.get("prompt_eval_count", 0),
+                            output_tokens=result.get("eval_count", 0),
+                            source="ollama_usage",
+                            raw={
+                                "prompt_eval_count": result.get("prompt_eval_count", 0),
+                                "eval_count": result.get("eval_count", 0),
+                            },
+                        )
+                    )
                     return result["response"].strip()
         except RuntimeError:
             raise
@@ -491,6 +622,15 @@ class ModelManager:
                 ) as response:
                     response.raise_for_status()
                     result = await response.json()
+                    usage = result.get("usage", {}) if isinstance(result, dict) else {}
+                    self._set_last_usage(
+                        self._token_usage_dict(
+                            input_tokens=usage.get("prompt_tokens", 0),
+                            output_tokens=usage.get("completion_tokens", 0),
+                            source="llama_cpp_usage",
+                            raw=usage if isinstance(usage, dict) else None,
+                        )
+                    )
                     choices = result.get("choices", [])
                     if not choices:
                         raise RuntimeError("llama.cpp returned no choices.")
