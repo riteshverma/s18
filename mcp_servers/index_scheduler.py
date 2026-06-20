@@ -694,8 +694,11 @@ class IndexScheduler:
                 return
             
             if self.process_callback:
-                result = self.process_callback(abs_path, rel_path)
-                chunk_count = result.get("chunk_count", 0) if result else 0
+                result = self.process_callback(abs_path, rel_path) or {}
+                result_status = str(result.get("status", "")).strip().lower()
+                if result_status in {"error", "failed"}:
+                    raise RuntimeError(result.get("message") or "indexing callback failed")
+                chunk_count = result.get("chunk_count", 0)
             else:
                 chunk_count = 0
             
