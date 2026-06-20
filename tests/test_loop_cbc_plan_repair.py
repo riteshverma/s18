@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -7,6 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.loop import AgentLoop4
+from memory.context import ExecutionContextManager
 
 
 def test_repair_cbc_plan_dependencies_wires_summary_after_ehr():
@@ -154,3 +156,57 @@ def test_enforce_mental_health_plan_guard_rewrites_cbc_agents():
     assert nodes[0]["agent"] == "ThinkerAgent"
     assert out["next_step_id"] == "T001"
     assert out["plan_graph"]["edges"] == [{"source": "Query", "target": "T001"}]
+
+
+def test_execute_dag_skips_dependents_after_terminal_step_failure(monkeypatch, tmp_path):
+    context = ExecutionContextManager(
+        {
+            "nodes": [
+                {
+                    "id": "Query",
+                    "agent": "PlannerAgent",
+                    "status": "completed",
+                    "writes": ["plan_graph"],
+                },
+                {
+                    "id": "T001",
+                    "agent": "ThinkerAgent",
+                    "description": "Failing upstream step",
+                    "reads": ["original_query"],
+                    "writes": ["analysis"],
+                    "status": "pending",
+                },
+                {
+                    "id": "T002",
+                    "agent": "FormatterAgent",
+                    "description": "Dependent step",
+                    "reads": ["analysis"],
+                    "writes": ["response"],
+                    "status": "pending",
+                },
+            ],
+            "edges": [
+                {"source": "ROOT", "target": "Query"},
+                {"source": "Query", "target": "T001"},
+                {"source": "T001", "target": "T002"},
+            ],
+        },
+        session_id="dag-failure-test",
+        original_query="test query",
+    )
+    context.session_file = tmp_path / "session.json"
+
+    loop = AgentLoop4(MagicMock())
+
+    async def fail_step(step_id, _context):
+        assert step_id == "T001"
+        return {"success": False, "error": "provider unavailable"}
+
+    monkeypatch.setattr(loop, "_execute_step", fail_step)
+
+    asyncio.run(loop._execute_dag(context))
+
+    assert context.plan_graph.nodes["T001"]["status"] == "failed"
+    assert context.plan_graph.nodes["T002"]["status"] == "skipped"
+    assert context.plan_graph.nodes["T002"]["skip_reason"] == "upstream_failed:T001"
+    assert context.plan_graph.graph["status"] == "failed"
