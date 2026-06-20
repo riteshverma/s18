@@ -1200,6 +1200,7 @@ class AgentLoop4:
                     else:
                         visualizer.mark_failed(step_id, result)
                         context.mark_failed(step_id, str(result))
+                        context.skip_pending_descendants(step_id)
                         await event_bus.publish(
                             "step_update",
                             "AgentLoop4",
@@ -1238,6 +1239,7 @@ class AgentLoop4:
                     else:
                         visualizer.mark_failed(step_id, result["error"])
                         context.mark_failed(step_id, result["error"])
+                        context.skip_pending_descendants(step_id)
                         await event_bus.publish(
                             "step_update",
                             "AgentLoop4",
