@@ -19,6 +19,7 @@ from config.settings_loader import (
     validate_llama_cpp_base_url,
     load_settings,
     redact_settings_for_client,
+    restore_redacted_settings_for_update,
     _is_railway_deploy,
     _should_force_gemini_for_hosted,
 )
@@ -111,7 +112,10 @@ async def update_settings(request: UpdateSettingsRequest):
         
         # Reload potentially stale global settings just in case
         settings = reload_settings()
-        deep_merge(settings, request.settings)
+        request_settings = restore_redacted_settings_for_update(
+            request.settings, current_settings=settings
+        )
+        deep_merge(settings, request_settings)
         save_settings()
         
         # Identify settings that require action
