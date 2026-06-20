@@ -1,8 +1,7 @@
+import asyncio
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
-
-import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -159,8 +158,7 @@ def test_enforce_mental_health_plan_guard_rewrites_cbc_agents():
     assert out["plan_graph"]["edges"] == [{"source": "Query", "target": "T001"}]
 
 
-@pytest.mark.asyncio
-async def test_execute_dag_skips_dependents_after_terminal_step_failure(monkeypatch, tmp_path):
+def test_execute_dag_skips_dependents_after_terminal_step_failure(monkeypatch, tmp_path):
     context = ExecutionContextManager(
         {
             "nodes": [
@@ -206,7 +204,7 @@ async def test_execute_dag_skips_dependents_after_terminal_step_failure(monkeypa
 
     monkeypatch.setattr(loop, "_execute_step", fail_step)
 
-    await loop._execute_dag(context)
+    asyncio.run(loop._execute_dag(context))
 
     assert context.plan_graph.nodes["T001"]["status"] == "failed"
     assert context.plan_graph.nodes["T002"]["status"] == "skipped"
