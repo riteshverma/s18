@@ -214,19 +214,52 @@ async def _ensure_ollama_available() -> None:
     )
 
 
-async def _warm_ollama_model(model: str = "gemma3:4b") -> None:
-    """Load the model into Ollama before the benchmark run."""
+async def _warm_ollama_model(model: str = "gemma3:4b") -> bool:
+    """Load the model into Ollama before the benchmark run.
+
+    Ollama frequently drops the first ``/api/generate`` connection while the
+    model is still loading (common on Windows/Docker, where load can also OOM).
+    A single attempt that hard-aborts the whole benchmark is too brittle, so we
+    retry with backoff and, if warm-up still can't be confirmed, degrade to a
+    warning and let the agent's first real call load the model. Returns True if
+    warm-up succeeded.
+    """
     import aiohttp
 
     base = _ollama_base_url()
+    attempts = int(os.environ.get("CLAWBENCH_OLLAMA_WARMUP_ATTEMPTS", "3"))
     timeout = aiohttp.ClientTimeout(total=600)
     payload = {"model": model, "prompt": "ping", "stream": False}
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(f"{base}/api/generate", json=payload) as response:
-            if response.status >= 400:
-                body = await response.text()
-                raise RuntimeError(f"Ollama warm-up failed HTTP {response.status}: {body[:300]}")
-            await response.json()
+
+    last_error: Exception | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(f"{base}/api/generate", json=payload) as response:
+                    if response.status >= 400:
+                        body = await response.text()
+                        raise RuntimeError(
+                            f"Ollama warm-up failed HTTP {response.status}: {body[:300]}"
+                        )
+                    await response.json()
+            return True
+        except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
+            last_error = exc
+            if attempt < max(1, attempts):
+                backoff = min(15, 3 * attempt)
+                print(
+                    f"[clawbench] Ollama warm-up attempt {attempt}/{attempts} failed "
+                    f"({type(exc).__name__}); retrying in {backoff}s ...",
+                    flush=True,
+                )
+                await asyncio.sleep(backoff)
+
+    print(
+        f"[clawbench] WARNING: Ollama warm-up did not complete after {attempts} attempts "
+        f"({last_error}). Continuing; the model will load on the first agent call.",
+        flush=True,
+    )
+    return False
 
 
 def _setup_workspace(task, workspace: Path, assets_dir: Path) -> None:
@@ -269,14 +302,41 @@ def _create_workspace(task, run_index: int, results_root: Path) -> Path:
     return workspace
 
 
-def _workspace_prompt_prefix(workspace: Path) -> str:
+_CODE_FAMILIES = {"coding", "repo"}
+
+
+def _workspace_prompt_prefix(workspace: Path, task=None) -> str:
     resolved = workspace.resolve()
     notes_path = resolved / "notes.md"
-    return (
+    family = ""
+    if task is not None:
+        family = str(getattr(getattr(task, "family", None), "value", getattr(task, "family", ""))).lower()
+
+    header = (
         "You are executing a ClawBench evaluation task inside an isolated workspace.\n"
         f"Workspace directory: {resolved}\n"
-        "Use the sandbox MCP tools `write_workspace_file(path, content)` and "
-        "`read_workspace_file(path)` for all file deliverables. "
+        "Use the sandbox MCP tools `read_workspace_file(path)` and "
+        "`write_workspace_file(path, content)` for all file access and deliverables.\n"
+    )
+
+    if family in _CODE_FAMILIES:
+        # Coding/repo tasks are graded by running the existing tests, so the fix
+        # must land in the actual source files, not in a notes file.
+        return (
+            header
+            + "This is a code task. First call `read_workspace_file` on the relevant "
+            "source and test files to understand the code. Then FIX THE BUG DIRECTLY "
+            "IN THE EXISTING SOURCE FILES by calling `write_workspace_file` with the "
+            "SAME path and the COMPLETE corrected file contents "
+            "(for example: write_workspace_file(path=\"pricing.py\", content=\"<full fixed file>\")).\n"
+            "Do NOT put the fix only in a notes file — the graders run the existing "
+            "tests against the source files. After editing, run the tests with the "
+            "workspace directory as the working directory to verify your fix.\n\n"
+        )
+
+    return (
+        header
+        + "Write file deliverables with `write_workspace_file`. "
         f"For example: write_workspace_file(path=\"notes.md\", content=\"...\") "
         f"or an absolute path like `{notes_path}`.\n"
         "Format notes as a bullet or numbered list, not a paragraph. "
@@ -607,6 +667,125 @@ async def _run_s18_turn(
     return context, assistant_text, collector
 
 
+async def _windows_run_execution_check(spec, *, workspace, runtime_values):
+    """Windows-correct reimplementation of ClawBench's execution check.
+
+    ClawBench's upstream ``run_execution_check`` joins ``PATH``/``PYTHONPATH``
+    with ``":"`` which is invalid on Windows: the separator is ``";"`` and ``":"``
+    also appears in drive letters (e.g. ``C:``). That mangles ``PYTHONPATH`` so
+    the workspace never lands on ``sys.path``, breaking project-local imports
+    like ``from cart import ...`` during pytest verification. This reimplements
+    the check with ``os.pathsep`` and the ``python3`` -> ``sys.executable`` shim,
+    reusing ClawBench's own helpers for everything else so behavior stays in sync
+    with the upstream scorer.
+    """
+    import asyncio as _asyncio
+
+    import clawbench.environment as env_module
+    from clawbench.paths import resolve_workspace_path
+    from clawbench.render import (
+        render_argv_template,
+        render_shell_template,
+        render_template,
+        render_value,
+    )
+    from clawbench.schemas import ExecutionCheckResult
+
+    if "python3" in spec.command:
+        spec = spec.model_copy(
+            update={"command": spec.command.replace("python3", f'"{sys.executable}"')}
+        )
+
+    rendered_command = (
+        render_shell_template(spec.command, runtime_values)
+        if spec.shell
+        else render_template(spec.command, runtime_values)
+    )
+    try:
+        rendered_cwd = resolve_workspace_path(
+            workspace,
+            render_template(spec.cwd, runtime_values),
+            field=f"execution check cwd for {spec.name}",
+        )
+    except ValueError as exc:
+        return ExecutionCheckResult(
+            name=spec.name,
+            command=rendered_command,
+            exit_code=-1,
+            passed=False,
+            reason=str(exc),
+        )
+
+    rendered_env = render_value(spec.env, runtime_values)
+    full_env = {
+        **os.environ,
+        **{key: str(value) for key, value in rendered_env.items()},
+        "PYTHONUNBUFFERED": "1",
+    }
+    python_bin_dir = str(Path(sys.executable).parent)
+    full_env["PATH"] = python_bin_dir + os.pathsep + full_env.get("PATH", "")
+    python_path_parts = [str(rendered_cwd), str(workspace)]
+    existing_pythonpath = full_env.get("PYTHONPATH")
+    if existing_pythonpath:
+        python_path_parts.append(existing_pythonpath)
+    full_env["PYTHONPATH"] = os.pathsep.join(python_path_parts)
+
+    try:
+        if spec.shell:
+            process = await _asyncio.create_subprocess_shell(
+                rendered_command,
+                cwd=str(rendered_cwd),
+                env=full_env,
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.PIPE,
+            )
+        else:
+            process = await _asyncio.create_subprocess_exec(
+                *render_argv_template(spec.command, runtime_values),
+                cwd=str(rendered_cwd),
+                env=full_env,
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.PIPE,
+            )
+        stdout_bytes, stderr_bytes = await _asyncio.wait_for(
+            process.communicate(),
+            timeout=spec.timeout_seconds,
+        )
+    except _asyncio.TimeoutError:
+        process.kill()
+        await process.communicate()
+        return ExecutionCheckResult(
+            name=spec.name,
+            command=rendered_command,
+            exit_code=-1,
+            passed=False,
+            reason=f"Timed out after {spec.timeout_seconds}s",
+        )
+    except Exception as exc:
+        return ExecutionCheckResult(
+            name=spec.name,
+            command=rendered_command,
+            exit_code=-1,
+            passed=False,
+            reason=str(exc),
+        )
+
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+    passed, reason = env_module._evaluate_execution_result(
+        spec, workspace, runtime_values, process.returncode, stdout, stderr
+    )
+    return ExecutionCheckResult(
+        name=spec.name,
+        command=rendered_command,
+        exit_code=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
+        passed=passed,
+        reason=reason,
+    )
+
+
 async def _score_task_run(
     *,
     task,
@@ -639,15 +818,6 @@ async def _score_task_run(
     import clawbench.environment as env_module
 
     original_run_check = env_module.run_execution_check
-
-    async def _windows_run_execution_check(spec, *, workspace, runtime_values):
-        if "python3" in spec.command:
-            spec = spec.model_copy(
-                update={"command": spec.command.replace("python3", f'"{sys.executable}"')}
-            )
-        result = await original_run_check(spec, workspace=workspace, runtime_values=runtime_values)
-        return result
-
     env_module.run_execution_check = _windows_run_execution_check
     try:
         result = await score_task_run(
@@ -721,7 +891,7 @@ async def _run_single_task_run(
                 user_message = await simulator.next_message(transcript)
                 if user_message is None:
                     break
-                full_query = _workspace_prompt_prefix(workspace) + user_message
+                full_query = _workspace_prompt_prefix(workspace, task) + user_message
                 user_messages.append(user_message)
                 transcript.messages.append(TranscriptMessage(role="user", text=user_message))
 
@@ -775,8 +945,8 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     if use_ollama:
         await _ensure_ollama_available()
         print(f"[clawbench] Warming Ollama model at {_ollama_base_url()} ...", flush=True)
-        await _warm_ollama_model(model_label)
-        print("[clawbench] Ollama warm-up complete.", flush=True)
+        if await _warm_ollama_model(model_label):
+            print("[clawbench] Ollama warm-up complete.", flush=True)
 
     task_ids = args.task or []
     if args.core_v1:
