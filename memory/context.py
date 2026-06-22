@@ -13,7 +13,13 @@ from rich.console import Console
 from rich.prompt import Prompt
 from rich.panel import Panel
 from rich.text import Text
-from core.usage_ledger import append_usage_event
+try:
+    from core.usage_ledger import append_usage_event
+except ImportError:
+    # Usage ledger is non-critical telemetry. If the module is unavailable
+    # (e.g. a stale build/image), degrade gracefully instead of failing startup.
+    def append_usage_event(event):  # type: ignore[misc]
+        return None
 
 
 def sanitize_io_keys_list(keys):

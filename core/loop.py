@@ -1,4 +1,4 @@
-# flow.py – 100% NetworkX Graph-First (No agentSession)
+﻿# flow.py – 100% NetworkX Graph-First (No agentSession)
 
 import networkx as nx
 import asyncio
@@ -333,7 +333,7 @@ class AgentLoop4:
         fallback_model = budget_cfg.get("budget_fallback_model")
         if not fallback_model:
             fallback_model = (
-                reload_settings().get("models", {}).get("semantic_chunking", "gemma4:e4b")
+                reload_settings().get("models", {}).get("semantic_chunking", "gemma3:4b")
                 if fallback_provider == "ollama"
                 else "gemini-2.5-flash"
             )

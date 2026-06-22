@@ -1,4 +1,4 @@
-# S18Share
+﻿# S18Share
 
 Open-source agent runtime and orchestration framework for AI systems.
 
@@ -18,6 +18,20 @@ Open-source agent runtime and orchestration framework for AI systems.
 - **Settings API hardening:** `GET /settings` redacts Supabase secrets; `PUT /settings` preserves `[redacted]` placeholders instead of persisting them; settings routes require Supabase auth when enabled.
 - **DAG execution:** when a step fails terminally, pending downstream nodes are marked skipped so runs do not hang waiting on unreachable dependents.
 - **Hosted Gemini fixes:** Gemini embedding support for Railway/hosted profiles, env provider pins honored, and hosted overrides kept out of persisted `settings.json`.
+
+## ClawBench smoke parity (Jun 2026)
+
+Single-run ClawBench smoke on `t1-fs-quick-note` now matches across Ollama and Gemini:
+
+- Ollama (`gemma3:4b`) and Gemini (`gemini-2.5-flash`) both score **0.88 overall** with **C=1.00**, **T=0.60**, **B=1.00**, **pass_rate=1.0**.
+- `notes.md` materialization succeeds and both task verifiers pass for both providers.
+- Sandbox containment remains intact: escaping paths (`../../escape.txt`, `..\\..\\escape.txt`, absolute out-of-root paths) are rejected by `resolve_workspace_path` / `write_workspace_file`.
+- Remaining gap is trajectory (`T=0.60`) from planning/tool-use behavior (no read-before-write and no self-verification), not from workspace sandbox/materialization correctness.
+
+Latest result artifacts:
+
+- `benchmarks/clawbench/results/smoke_t1_ollama_gemma3_v3.json`
+- `benchmarks/clawbench/results/smoke_t1_gemini_v4.json`
 
 ## The magic moment (under 30 seconds)
 
@@ -247,7 +261,7 @@ you can run `llama-server` natively for better CPU/GPU performance than Docker.
 
 Available profiles under `config/profiles/`:
 
-- `local-laptop-gemma` - Ollama mode with `gemma4:e4b`
+- `local-laptop-gemma` - Ollama mode with `gemma3:4b`
 - `local-laptop-qwen` - Ollama mode with Qwen models
 - `local-llama-cpp` - llama.cpp mode for chat and embeddings
 - `privacy-first` - Ollama-first private local profile
@@ -549,7 +563,7 @@ Before running production-like sessions after switching providers:
 Checks include:
 - required containers up (`s18share-api`, `s18share-redis`, provider container)
 - provider endpoint reachable from `s18share-api`
-- Ollama model readiness (`gemma4:e4b`, `nomic-embed-text`)
+- Ollama model readiness (`gemma3:4b`, `nomic-embed-text`)
 - optional Wise→S18 health check when `wiseai-backend-1` is running
 
 ### 5. Verify (Docker mapping)

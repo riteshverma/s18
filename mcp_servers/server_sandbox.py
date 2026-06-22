@@ -29,6 +29,14 @@ spec.loader.exec_module(sandbox_mod)
 
 run_user_code = sandbox_mod.run_user_code
 
+workspace_io_path = root_dir / "tools" / "workspace_io.py"
+workspace_spec = importlib.util.spec_from_file_location("tools.workspace_io", workspace_io_path)
+workspace_io_mod = importlib.util.module_from_spec(workspace_spec)
+workspace_spec.loader.exec_module(workspace_io_mod)
+
+read_workspace_file_fn = workspace_io_mod.read_workspace_file
+write_workspace_file_fn = workspace_io_mod.write_workspace_file
+
 from mcp.server.fastmcp import FastMCP
 
 configure_mcp_stdio_logging()
@@ -55,6 +63,33 @@ async def run_python_script(code: str) -> str:
     else:
         err = result.get("error", "Unknown error")
         return f"Execution Failed:\n{err}"
+
+
+@mcp.tool()
+def read_workspace_file(path: str, workspace_root: str = "") -> str:
+    """
+    Read a UTF-8 text file from the ClawBench task workspace.
+    Paths may be relative to the workspace root or absolute within it.
+    """
+    try:
+        root = workspace_root.strip() or None
+        return read_workspace_file_fn(path, root)
+    except Exception as exc:
+        return f"Read failed: {exc}"
+
+
+@mcp.tool()
+def write_workspace_file(path: str, content: str, workspace_root: str = "") -> str:
+    """
+    Write UTF-8 text to a file inside the ClawBench task workspace.
+    Creates parent directories as needed. Use for notes, patches, and deliverables.
+    """
+    try:
+        root = workspace_root.strip() or None
+        return write_workspace_file_fn(path, content, root)
+    except Exception as exc:
+        return f"Write failed: {exc}"
+
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")

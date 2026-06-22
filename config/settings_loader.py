@@ -1,4 +1,4 @@
-"""
+﻿"""
 Centralized Settings Loader
 
 This module provides a single point of access for all runtime configuration.
@@ -635,7 +635,7 @@ def get_llama_cpp_url(endpoint: str = "chat_completions") -> str:
 
 def get_model(purpose: str) -> str:
     """Get model name for a specific purpose."""
-    return load_settings()["models"].get(purpose, "gemma4:e4b")
+    return load_settings()["models"].get(purpose, "gemma3:4b")
 
 
 def get_embedding_provider() -> str:

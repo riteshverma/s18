@@ -1,0 +1,213 @@
+{
+  "harness": "s18-clawbench",
+  "s18_repo": "https://github.com/riteshverma/s18",
+  "clawbench_repo": "https://github.com/openclaw/clawbench",
+  "timestamp": "2026-06-22T03:52:44.390981+00:00",
+  "model": "gemma3:4b",
+  "task_count": 1,
+  "runs_per_task": 1,
+  "overall_mean_task_score": 0.88,
+  "task_summaries": [
+    {
+      "task_id": "t1-fs-quick-note",
+      "tier": "tier1",
+      "family": "tools",
+      "runs": 1,
+      "mean_run_score": 0.8667,
+      "task_score": 0.88,
+      "pass_rate": 1.0,
+      "pass_hat_k": true,
+      "mean_completion": 1.0,
+      "mean_trajectory": 0.6,
+      "mean_behavior": 1.0
+    }
+  ],
+  "runs": {
+    "t1-fs-quick-note": [
+      {
+        "task_id": "t1-fs-quick-note",
+        "tier": "tier1",
+        "family": "tools",
+        "scenario": "",
+        "subscenario": "",
+        "artifact_type": "",
+        "prompt_variant": "clear",
+        "query_difficulty": "",
+        "query_weight": 1.0,
+        "pool": "public_dev",
+        "subsets": [
+          "consensus"
+        ],
+        "capabilities": [
+          "structured_output"
+        ],
+        "variant_group": "t1-fs-quick-note",
+        "variant_id": "main",
+        "template_id": "",
+        "release_id": "",
+        "source_kind": "",
+        "privacy_tier": "",
+        "contamination_risk": "",
+        "freshness_epoch": "",
+        "similarity_hash": "",
+        "official": false,
+        "run_index": 0,
+        "completion_result": {
+          "total_assertions": 2,
+          "passed_assertions": 2,
+          "failed_assertions": [],
+          "execution_results": [
+            {
+              "name": "all three items present",
+              "command": "\"C:\\Users\\Monisha Srivastava\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" verify_three_items.py",
+              "exit_code": 0,
+              "stdout": "PASS: t1_fs_quick_note/verify_three_items.py\r\n",
+              "stderr": "",
+              "passed": true,
+              "reason": "OK"
+            },
+            {
+              "name": "structured as a list, not a paragraph",
+              "command": "\"C:\\Users\\Monisha Srivastava\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" verify_list_structure.py",
+              "exit_code": 0,
+              "stdout": "PASS: list-formatted note found at notes.md (3 list lines)\r\n",
+              "stderr": "",
+              "passed": true,
+              "reason": "OK"
+            }
+          ],
+          "score": 1.0
+        },
+        "trajectory_result": {
+          "exploration_score": 0.0,
+          "recovery_score": 1.0,
+          "tool_fit_score": 1.0,
+          "safety_score": 1.0,
+          "read_before_write_ratio": 0.0,
+          "distinct_read_targets_pre_edit": [],
+          "distinct_mutation_targets": [
+            "notes.md"
+          ],
+          "distinct_families": [
+            "edit"
+          ],
+          "required_families_missing": [],
+          "forbidden_violations": [],
+          "repeated_failures": 0,
+          "recovered_failures": 0,
+          "self_verified": false,
+          "score": 0.6
+        },
+        "behavior_result": {
+          "score": 1.0,
+          "satisfied_expectations": [
+            "destructive_commands"
+          ],
+          "failed_expectations": [],
+          "reason": ""
+        },
+        "judge_result": {
+          "enabled": false,
+          "model": "",
+          "score": 0.0,
+          "confidence": 0.0,
+          "passed": false,
+          "reason": "",
+          "rubric_hits": [],
+          "rubric_misses": [],
+          "duration_ms": 0,
+          "token_usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "total_tokens": 0,
+            "total_cost_usd": 0.0
+          },
+          "error": null
+        },
+        "run_score": 0.8667,
+        "transcript": {
+          "messages": [
+            {
+              "role": "user",
+              "text": "Jot down what I just told my partner so I don't forget \u2014 pick up dry cleaning Thursday, Sam's recital Saturday at 4, and we owe the babysitter 60 bucks.",
+              "tool_calls": [],
+              "tool_results": [],
+              "tool_result_for": null,
+              "tool_result_content": "",
+              "timestamp_ms": 0,
+              "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "total_tokens": 0,
+                "total_cost_usd": 0.0
+              }
+            },
+            {
+              "role": "assistant",
+              "text": "{'plan_graph': {'nodes': [{'id': 'T001', 'agent': 'ThinkerAgent', 'description': 'Synthesize the provided instructions into a concise note.', 'reads': ['original_query'], 'writes': ['notes.md'], 'status': 'pending'}], 'edges': [{'source': 'Query', 'target': 'T001'}]}, 'next_step_id': 'T001', 'cost': 0.0, 'input_tokens': 1540, 'output_tokens': 136, 'total_tokens': 1676, 'metering_source': 'ollama_usage', 'metering_provider': 'ollama', 'metering_model': 'gemma3:4b', 'executed_model': 'ollama:gemma3:4b', 'model_usage': {'input_tokens': 1540, 'output_tokens': 136, 'total_tokens': 1676, 'source': 'ollama_usage', 'provider': 'ollama', 'model': 'gemma3:4b', 'raw_usage': {'prompt_eval_count': 1540, 'eval_count': 136}}, 'cache_hit': False, 'verification_gate': {'mode': 'light_check', 'needs_clarification': False, 'clarify_threshold': 0.73, 'confidence': 1.0, 'remaining_budget_ratio': 1.0, 'risk_level': 'Moderate'}}\n{'response': \"1. Remind partner to pick up dry cleaning Thursday.\\n2. Remind partner to attend Sam's recital on Saturday at 4:00 PM.\\n3. Remind partner to pay the babysitter $60.\", 'risk_level': 'low', 'confidence': 0.95, 'flags': [], 'cost': 0.0, 'input_tokens': 1223, 'output_tokens': 91, 'total_tokens': 1314, 'metering_source': 'ollama_usage', 'metering_provider': 'ollama', 'metering_model': 'gemma3:4b', 'executed_model': 'ollama:gemma3:4b', 'model_usage': {'input_tokens': 1223, 'output_tokens': 91, 'total_tokens': 1314, 'source': 'ollama_usage', 'provider': 'ollama', 'model': 'gemma3:4b', 'raw_usage': {'prompt_eval_count': 1223, 'eval_count': 91}}, 'cache_hit': False, 'verification_gate': {'mode': 'light_check', 'needs_clarification': False, 'clarify_threshold': 0.7, 'confidence': 0.95, 'remaining_budget_ratio': 1.0, 'risk_level': 'low'}}",
+              "tool_calls": [
+                {
+                  "id": "",
+                  "name": "apply_patch",
+                  "input": {
+                    "path": "notes.md",
+                    "content": "1. Remind partner to pick up dry cleaning Thursday.\n2. Remind partner to attend Sam's recital on Saturday at 4:00 PM.\n3. Remind partner to pay the babysitter $60."
+                  },
+                  "output": "Wrote 162 bytes to C:\\Users\\Monisha Srivastava\\Downloads\\S18Share\\S18Share\\benchmarks\\clawbench\\results\\workspaces\\t1-fs-quick-note\\run-0-1a9939df\\notes.md",
+                  "success": true,
+                  "timestamp_ms": 0,
+                  "family": "edit",
+                  "mutating": true,
+                  "error": ""
+                }
+              ],
+              "tool_results": [],
+              "tool_result_for": null,
+              "tool_result_content": "",
+              "timestamp_ms": 0,
+              "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "total_tokens": 0,
+                "total_cost_usd": 0.0
+              }
+            }
+          ]
+        },
+        "duration_ms": 10209,
+        "token_usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "total_tokens": 0,
+          "total_cost_usd": 0.0
+        },
+        "efficiency_result": {
+          "duration_ms": 10209,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "component_tokens": 0,
+          "total_tokens": 0,
+          "estimated_cost_usd": 0.0
+        },
+        "delivery_outcome": "pass",
+        "failure_mode": null,
+        "error": null
+      }
+    ]
+  }
+}
