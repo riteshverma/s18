@@ -51,6 +51,25 @@ python benchmarks/clawbench/runner.py -t t1-fs-quick-note --runs 1
 
 This runs the tier-1 “quick note” task once and writes JSON under `benchmarks/clawbench/results/`.
 
+### Latest smoke snapshot (Jun 2026)
+
+Final parity snapshot for `t1-fs-quick-note` (`--runs 1`):
+
+- Ollama profile/model: `local-laptop-gemma` with `gemma3:4b`
+- Gemini model: `gemini-2.5-flash`
+- Both runs: **overall 0.88**, **C=1.00**, **T=0.60**, **B=1.00**, **pass_rate=1.0**
+
+Result files:
+
+- `benchmarks/clawbench/results/smoke_t1_ollama_gemma3_v3.json`
+- `benchmarks/clawbench/results/smoke_t1_gemini_v4.json`
+
+Notes:
+
+- `notes.md` materialization succeeds and both verifier scripts pass.
+- Workspace sandbox containment guardrail remains enforced; path-escape attempts are rejected by `resolve_workspace_path` and `write_workspace_file`.
+- The remaining trajectory gap (`T=0.60`) is due to agent planning/tool-use behavior (missing read-before-write/self-verification), not a sandbox/materialization bug.
+
 ## Core v1 (19 tasks)
 
 ```bash

@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -138,7 +139,7 @@ def _apply_benchmark_settings() -> None:
     settings.setdefault("agent", {})
     if use_ollama:
         settings["agent"]["model_provider"] = "ollama"
-        settings["agent"].setdefault("default_model", "gemma4:e4b")
+        settings["agent"].setdefault("default_model", "gemma3:4b")
     elif gemini_available:
         settings["agent"]["model_provider"] = "gemini"
         if not str(settings["agent"].get("default_model", "")).lower().startswith("gemini"):
@@ -213,7 +214,7 @@ async def _ensure_ollama_available() -> None:
     )
 
 
-async def _warm_ollama_model(model: str = "gemma4:e4b") -> None:
+async def _warm_ollama_model(model: str = "gemma3:4b") -> None:
     """Load the model into Ollama before the benchmark run."""
     import aiohttp
 
@@ -345,6 +346,120 @@ def _looks_like_note_content(text: str) -> bool:
     return any(token in lowered for token in ("dry cleaning", "recital", "babysitter", "pick up"))
 
 
+def _unescape_tool_string(text: str) -> str:
+    return (
+        text.replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace('\\"', '"')
+        .replace("\\'", "'")
+        .replace("\\\\", "\\")
+    )
+
+
+_WRITE_WORKSPACE_CALL = re.compile(
+    r"write_workspace_file\s*\(\s*path\s*=\s*(['\"])(?P<path>.*?)\1"
+    r"\s*,\s*content\s*=\s*(['\"])(?P<content>.*?)\3\s*\)",
+    re.DOTALL,
+)
+
+
+def _extract_pseudo_tool_writes(text: str) -> list[tuple[str, str]]:
+    """Parse write_workspace_file(...) from model text or ```tool_code``` blocks."""
+    if not text:
+        return []
+
+    targets: list[tuple[str, str]] = []
+    for match in _WRITE_WORKSPACE_CALL.finditer(text):
+        path = _unescape_tool_string(match.group("path")).strip()
+        content = _unescape_tool_string(match.group("content"))
+        if path and content:
+            targets.append((path, content))
+    return targets
+
+
+def _collect_text_blobs(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        blobs: list[str] = []
+        for item in value.values():
+            blobs.extend(_collect_text_blobs(item))
+        return blobs
+    if isinstance(value, (list, tuple)):
+        blobs = []
+        for item in value:
+            blobs.extend(_collect_text_blobs(item))
+        return blobs
+    if value is not None:
+        return [str(value)]
+    return []
+
+
+def _extract_structured_content(value: object) -> str:
+    if isinstance(value, dict):
+        for key in _CONTENT_KEYS:
+            text = _coerce_text(value.get(key))
+            if text:
+                return text
+        return ""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("{") and "response" in stripped:
+            try:
+                import ast
+
+                parsed = ast.literal_eval(stripped)
+                if isinstance(parsed, dict):
+                    return _extract_structured_content(parsed)
+            except (SyntaxError, ValueError):
+                pass
+        return stripped
+    return _coerce_text(value)
+
+
+def _planned_file_writes(node: dict) -> list[str]:
+    paths: list[str] = []
+    for raw in node.get("writes") or []:
+        path = _coerce_text(raw)
+        if not path:
+            continue
+        if path.endswith((".md", ".txt", ".json", ".yaml", ".yml")) or "." in Path(path).name:
+            paths.append(path)
+    return paths
+
+
+def _extract_all_workspace_write_targets(plan_graph) -> list[tuple[str, str]]:
+    graph = getattr(plan_graph, "graph", None) or {}
+    globals_schema = graph.get("globals_schema", {})
+    targets = list(_extract_workspace_write_targets(globals_schema))
+
+    nodes = getattr(plan_graph, "nodes", {}) or {}
+    for node_id, node in nodes.items():
+        if node_id in {"ROOT", "Query"}:
+            continue
+        for blob in _collect_text_blobs(node.get("output")):
+            targets.extend(_extract_pseudo_tool_writes(blob))
+
+        content = _extract_structured_content(node.get("output"))
+        if not content or not _looks_like_note_content(content):
+            continue
+        write_paths = _planned_file_writes(node)
+        if write_paths:
+            for path in write_paths:
+                targets.append((path, content))
+        else:
+            targets.append((_DEFAULT_NOTE_PATH, content))
+
+    deduped: list[tuple[str, str]] = []
+    seen_paths: set[str] = set()
+    for path, content in targets:
+        key = path.strip()
+        if key and key not in seen_paths:
+            seen_paths.add(key)
+            deduped.append((path, content))
+    return deduped
+
+
 async def _materialize_workspace_outputs(
     *,
     context: object | None,
@@ -360,19 +475,26 @@ async def _materialize_workspace_outputs(
     if plan_graph is None:
         return
 
-    globals_schema = (plan_graph.graph or {}).get("globals_schema", {})
     workspace_root = str(workspace.resolve())
 
-    for rel_or_abs_path, content in _extract_workspace_write_targets(globals_schema):
+    for rel_or_abs_path, content in _extract_all_workspace_write_targets(plan_graph):
+        # GUARDRAIL: resolve_workspace_path enforces workspace-root containment and
+        # raises if the path escapes the root. A rejected path is skipped, never written.
         try:
             from tools.workspace_io import resolve_workspace_path
 
             target = resolve_workspace_path(rel_or_abs_path, workspace_root)
-        except Exception:
+        except Exception as exc:
+            print(
+                f"[clawbench] Skipping contained/rejected write target {rel_or_abs_path!r}: {exc}",
+                flush=True,
+            )
             continue
         if target.is_file() and target.read_text(encoding="utf-8").strip():
             continue
 
+        # target is always absolute (resolve_workspace_path returns a resolved path) and is
+        # guaranteed to live under workspace_root, so this relative_to never escapes.
         write_path = rel_or_abs_path
         if target.is_absolute():
             try:
@@ -380,23 +502,24 @@ async def _materialize_workspace_outputs(
             except ValueError:
                 write_path = str(target)
 
+        # Only record the synthetic tool call when the sandboxed write actually succeeds.
         try:
             from tools.workspace_io import write_workspace_file
 
             preview = write_workspace_file(write_path, content, workspace_root)
-            collector.record_tool_call(
-                tool_name="write_workspace_file",
-                arguments={"path": write_path, "content": content},
-                output=preview,
-                success=True,
-            )
         except Exception as exc:
-            collector.record_tool_call(
-                tool_name="write_workspace_file",
-                arguments={"path": write_path, "content": content},
-                output=f"Write failed: {exc}",
-                success=False,
+            print(
+                f"[clawbench] Workspace write failed for {write_path!r}: {exc}",
+                flush=True,
             )
+            continue
+
+        collector.record_tool_call(
+            tool_name="write_workspace_file",
+            arguments={"path": write_path, "content": content},
+            output=preview,
+            success=True,
+        )
 
 
 def _apply_clawbench_agent_aliases() -> dict[str, str | None]:

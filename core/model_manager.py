@@ -1,4 +1,4 @@
-import os
+﻿import os
 import time
 import asyncio
 import json
@@ -335,7 +335,7 @@ class ModelManager:
             if provider == "gemini":
                 model_name = agent_settings.get("default_model", "gemini-2.5-flash")
             elif provider == "ollama":
-                model_name = self._settings.get("models", {}).get("semantic_chunking", "gemma4:e4b")
+                model_name = self._settings.get("models", {}).get("semantic_chunking", "gemma3:4b")
             else:
                 model_name = self._settings.get("agent", {}).get("default_model", "Llama-3.2-3B-Instruct")
         try:

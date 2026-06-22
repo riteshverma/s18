@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("ollama", "llama_cpp")]
     [string]$Mode = "ollama"
 )
@@ -47,7 +47,7 @@ tags=requests.get(base+'/api/tags', timeout=15).json()
 names={m.get('name','') for m in tags.get('models',[])}
 import os
 profile=os.environ.get('S18_PROFILE','')
-chat='gemma3:4b' if 'docker' in profile else 'gemma4:e4b'
+chat='gemma3:4b'
 required=[chat,'nomic-embed-text']
 for model in required:
     if model not in names and (model+':latest') not in names:

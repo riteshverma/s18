@@ -1,15 +1,15 @@
 {
   "agent": {
     "model_provider": "ollama",
-    "default_model": "gemma4:e4b",
+    "default_model": "gemma3:4b",
     "planning_mode": "conservative",
     "max_steps": 3
   },
   "models": {
     "embedding": "nomic-embed-text",
-    "semantic_chunking": "gemma4:e4b",
-    "image_captioning": "gemma4:e4b",
-    "memory_extraction": "gemma4:e4b",
+    "semantic_chunking": "gemma3:4b",
+    "image_captioning": "gemma3:4b",
+    "memory_extraction": "gemma3:4b",
     "insights_provider": "ollama"
   },
   "ollama": {

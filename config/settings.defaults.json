@@ -20,8 +20,8 @@
         "embedding_provider": "ollama",
         "embedding_retry_attempts": 3,
         "embedding_retry_backoff_seconds": 0.6,
-        "semantic_chunking": "gemma4:e4b",
-        "image_captioning": "gemma4:e4b",
+        "semantic_chunking": "gemma3:4b",
+        "image_captioning": "gemma3:4b",
         "memory_extraction": "qwen3-vl:8b",
         "insights_provider": "ollama"
     },
@@ -47,7 +47,7 @@
         "overrides": {
             "TestAgent": {
                 "model_provider": "ollama",
-                "model": "gemma4:e4b"
+                "model": "gemma3:4b"
             }
         },
         "max_steps": 3,
@@ -61,7 +61,7 @@
         "downgrade_at_remaining_usd": 0.1,
         "downgrade_at_remaining_tokens": 5000,
         "budget_fallback_provider": "ollama",
-        "budget_fallback_model": "gemma4:e4b",
+        "budget_fallback_model": "gemma3:4b",
         "prompt_cache": {
             "enabled": true,
             "ttl_seconds": 3600,
