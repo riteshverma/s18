@@ -20,7 +20,7 @@ class EventCollector:
     async def start(self) -> None:
         from core.event_bus import event_bus
 
-        self._queue = await event_bus.subscribe(max_queue_size=500)
+        self._queue = await event_bus.subscribe(max_queue_size=500, replay_history=False)
 
     async def stop(self) -> None:
         self._queue = None

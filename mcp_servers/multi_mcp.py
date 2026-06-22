@@ -25,6 +25,9 @@ from config.settings_loader import (
     settings,
 )
 
+_WORKSPACE_IO_TOOLS = {"read_workspace_file", "write_workspace_file"}
+
+
 class MultiMCP:
     def __init__(self):
         self.exit_stack = AsyncExitStack()
@@ -103,6 +106,25 @@ class MultiMCP:
         """Reset request-scoped metadata with the provided token."""
         if token is not None:
             self._trace_context.reset(token)
+
+    def _bind_workspace_arguments(
+        self,
+        tool_name: str,
+        arguments: dict | None,
+        trace_context: dict | None = None,
+    ) -> dict:
+        """Bind workspace I/O tools to a trusted trace workspace only."""
+        if tool_name not in _WORKSPACE_IO_TOOLS:
+            return dict(arguments or {})
+
+        bound = dict(arguments or {})
+        context = trace_context if trace_context is not None else self._trace_context.get()
+        workspace = (context or {}).get("workspace")
+        if workspace:
+            bound["workspace_root"] = workspace
+        else:
+            bound.pop("workspace_root", None)
+        return bound
 
     def _load_config(self) -> dict:
         """Load server configuration from JSON"""
@@ -492,6 +514,7 @@ class MultiMCP:
         if server_name not in self.sessions:
             raise ValueError(f"Server '{server_name}' not connected")
         trace_context = self._trace_context.get()
+        arguments = self._bind_workspace_arguments(tool_name, arguments, trace_context)
         if trace_context:
             print(
                 f"[MCP trace] server={server_name} tool={tool_name} "
@@ -510,12 +533,7 @@ class MultiMCP:
         workflow_id = trace_context.get("workflow_id", "generic")
         contract_version = trace_context.get("contract_version", "v1")
 
-        if trace_context.get("workspace") and tool_name in {
-            "read_workspace_file",
-            "write_workspace_file",
-        }:
-            arguments = dict(arguments or {})
-            arguments.setdefault("workspace_root", trace_context["workspace"])
+        arguments = self._bind_workspace_arguments(tool_name, arguments, trace_context)
         
         # Get or create circuit breaker for this tool
         breaker = get_breaker(tool_name, failure_threshold=5, recovery_timeout=60.0)

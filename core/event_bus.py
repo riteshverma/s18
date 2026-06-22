@@ -70,16 +70,17 @@ class EventBus:
         for ref in dead:
             self._subscribers.discard(ref)
 
-    async def subscribe(self, max_queue_size: int = 100):
+    async def subscribe(self, max_queue_size: int = 100, replay_history: bool = True):
         q = asyncio.Queue(maxsize=max_queue_size)
         self._subscribers.add(weakref.ref(q))
 
-        # Replay last 5 events
-        for event in list(self._history)[-5:]:
-            try:
-                q.put_nowait(event)
-            except asyncio.QueueFull:
-                break
+        if replay_history:
+            # Replay last 5 events
+            for event in list(self._history)[-5:]:
+                try:
+                    q.put_nowait(event)
+                except asyncio.QueueFull:
+                    break
 
         return q
 
