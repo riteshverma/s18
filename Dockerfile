@@ -36,4 +36,6 @@ CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-kee
 FROM base AS ci
 
 # CI target: lightweight sanity check over the full source tree.
+# Build-time smoke test to fail fast on missing import/module issues.
+RUN python -c "import memory.context"
 CMD ["python", "-m", "compileall", "-q", "."]
