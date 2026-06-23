@@ -515,7 +515,9 @@ class MultiMCP:
             "write_workspace_file",
         }:
             arguments = dict(arguments or {})
-            arguments.setdefault("workspace_root", trace_context["workspace"])
+            # The workspace root is trusted runner context, not model input. Always
+            # override caller-supplied roots so prompt/tool injection cannot escape it.
+            arguments["workspace_root"] = trace_context["workspace"]
         
         # Get or create circuit breaker for this tool
         breaker = get_breaker(tool_name, failure_threshold=5, recovery_timeout=60.0)
