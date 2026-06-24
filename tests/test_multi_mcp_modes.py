@@ -2,6 +2,7 @@ import asyncio
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +69,50 @@ class MultiMcpModeTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "mockehr"):
                 asyncio.run(mm.start())
+
+    def test_workspace_trace_context_overrides_caller_supplied_root(self):
+        mm = MultiMCP()
+        session = _RecordingSession()
+        mm.sessions = {"sandbox": session}
+        mm.tools = {"sandbox": [SimpleNamespace(name="write_workspace_file")]}
+        token = mm.set_trace_context({"workspace": "/trusted/task-workspace"})
+        try:
+            asyncio.run(
+                mm.route_tool_call(
+                    "write_workspace_file",
+                    {
+                        "path": "notes.md",
+                        "content": "safe",
+                        "workspace_root": "/",
+                    },
+                )
+            )
+        finally:
+            mm.reset_trace_context(token)
+
+        self.assertEqual(session.arguments["workspace_root"], "/trusted/task-workspace")
+
+    def test_workspace_root_argument_is_removed_without_trusted_context(self):
+        mm = MultiMCP()
+        session = _RecordingSession()
+        mm.sessions = {"sandbox": session}
+        mm.tools = {"sandbox": [SimpleNamespace(name="read_workspace_file")]}
+
+        asyncio.run(
+            mm.route_tool_call(
+                "read_workspace_file",
+                {"path": "config/settings.json", "workspace_root": "/workspace"},
+            )
+        )
+
+        self.assertNotIn("workspace_root", session.arguments)
+
+
+class _RecordingSession:
+    async def call_tool(self, tool_name, arguments):
+        self.tool_name = tool_name
+        self.arguments = dict(arguments or {})
+        return "ok"
 
 
 if __name__ == "__main__":
