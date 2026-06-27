@@ -15,7 +15,7 @@ class SkillInfo(BaseModel):
 @router.get("", response_model=List[SkillInfo])
 async def list_skills():
     """List all installed skills."""
-    if not skill_manager.loaded_skills:
+    if not skill_manager.registry_file.exists():
         skill_manager.initialize()
         
     registry = skill_manager.registry_file.read_text()

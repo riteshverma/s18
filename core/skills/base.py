@@ -2,6 +2,13 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from abc import ABC, abstractmethod
 
+# Skill authoring quick guide:
+# - Create a folder under core/skills/library/<skill_name>/
+# - Add a skill.py file with one BaseSkill subclass
+# - Implement get_metadata() and get_tools()
+# - Optionally implement on_run_start/on_run_success/on_run_failure hooks
+# - The registry is auto-built by SkillManager.initialize()
+
 class SkillMetadata(BaseModel):
     name: str # e.g. "market_analyst"
     version: str # e.g. "1.0.0" 

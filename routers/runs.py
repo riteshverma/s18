@@ -27,6 +27,7 @@ from core.supabase_logging import (
 from core.event_bus import event_bus
 from core.run_store import get_run_store
 from core.run_executor import execute_resume, execute_run, is_celery_enabled
+from core.skills.lifecycle import resolve_skill, run_skill_failure, run_skill_success
 from remme.utils import get_embedding
 from config.settings_loader import settings, get_run_poll_timeout
 from integrations.contracts import CanonicalRunRequest
@@ -76,6 +77,7 @@ class RunRequest(BaseModel):
     consent_ref: Optional[str] = None
     raw_payload: Optional[Dict[str, Any]] = None
     idempotency_key: Optional[str] = None
+    skill_id: Optional[str] = None
     
     def __init__(self, **data):
         super().__init__(**data)
@@ -239,6 +241,14 @@ def _normalize_run_status(raw_status: Optional[str]) -> str:
     return status
 
 
+def _merge_run_metadata(run_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    existing = run_store.get_run(run_id) or {}
+    metadata = dict(existing.get("metadata") or {})
+    metadata.update(updates)
+    run_store.update_run(run_id, metadata=metadata)
+    return metadata
+
+
 def _retrieve_memories_sync(query: str):
     return remme_store.search_text(query, limit=3, requester="run_context")
 
@@ -319,6 +329,10 @@ async def process_run(
     tenant_context: Optional[Dict[str, str]] = None,
 ):
     """Background task to execute the agent loop"""
+    skill = None
+    resolved_skill_id: Optional[str] = None
+    skill_result: Optional[Dict[str, Any]] = None
+    query = canonical_request.query
     tenant_context = tenant_context or {
         "tenant_id": canonical_request.tenant_id,
         "tenant_tier": canonical_request.tenant_tier,
@@ -332,6 +346,28 @@ async def process_run(
 
     loop = AgentLoop4(multi_mcp=multi_mcp)
     active_loops[run_id] = loop
+    try:
+        skill, query, resolved_skill_id = await resolve_skill(
+            query=canonical_request.query,
+            run_id=run_id,
+            agent_id=canonical_request.workflow_id or "runs",
+            explicit_skill_id=canonical_request.skill_id,
+            integration_id=canonical_request.integration_id,
+            workflow_id=canonical_request.workflow_id,
+        )
+    except Exception as e:
+        print(f"⚠️ Skill resolution failed for run {run_id}: {e}")
+        skill = None
+        resolved_skill_id = None
+        query = canonical_request.query
+    skill_source = None
+    if resolved_skill_id:
+        skill_source = "explicit" if canonical_request.skill_id else "intent"
+        await asyncio.to_thread(
+            _merge_run_metadata,
+            run_id,
+            {"skill_id": resolved_skill_id, "skill_source": skill_source},
+        )
     await asyncio.to_thread(
         run_store.update_status,
         run_id,
@@ -359,7 +395,6 @@ async def process_run(
     try:
         # 1. RETRIEVE MEMORIES (Remme)
         # Search for past relevant facts to injecting into this run
-        query = canonical_request.query
         memory_context, results = await _build_memory_context(run_id, query)
 
         # Execute the loop
@@ -668,6 +703,24 @@ async def process_run(
                      final_result["summary"] = output_str.strip() if output_str else "Completed."
              except Exception as e:
                  print(f"⚠️ Extraction Error: {e}")
+
+        try:
+            artifact = {
+                "status": final_result.get("status"),
+                "summary": final_result.get("summary"),
+                "output": final_result.get("output"),
+                "error": final_result.get("error"),
+            }
+            if skill and final_result.get("status") == "failed":
+                await run_skill_failure(skill, str(final_result.get("error") or "Run failed"))
+            else:
+                skill_result = await run_skill_success(skill, artifact)
+                if skill_result:
+                    final_result["skill"] = skill_result
+                    if skill_result.get("summary"):
+                        final_result["summary"] = skill_result["summary"]
+        except Exception as e:
+            print(f"⚠️ Skill lifecycle hook failed for run {run_id}: {e}")
         
         if audit_context:
             try:
@@ -715,6 +768,16 @@ async def process_run(
             summary=final_result.get("summary"),
             error=final_result.get("error"),
         )
+        if resolved_skill_id:
+            await asyncio.to_thread(
+                _merge_run_metadata,
+                run_id,
+                {
+                    "skill_id": resolved_skill_id,
+                    "skill_source": skill_source,
+                    "skill_result": skill_result,
+                },
+            )
 
         return final_result
 
@@ -907,6 +970,7 @@ async def create_run(
         metadata={
             "source_system": source_system,
             "contract_version": canonical_request.contract_version,
+            "skill_id": canonical_request.skill_id,
         },
     )
 
