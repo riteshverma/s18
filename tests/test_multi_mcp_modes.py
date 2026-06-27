@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +11,15 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from config.settings_loader import reload_settings
 from mcp_servers.multi_mcp import MultiMCP
+
+
+class RecordingSession:
+    def __init__(self):
+        self.calls = []
+
+    async def call_tool(self, tool_name, arguments):
+        self.calls.append((tool_name, arguments))
+        return {"ok": True}
 
 
 class MultiMcpModeTests(unittest.TestCase):
@@ -68,6 +78,90 @@ class MultiMcpModeTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "mockehr"):
                 asyncio.run(mm.start())
+
+    def test_workspace_tool_overrides_caller_root_with_trusted_trace_workspace(self):
+        mm = MultiMCP()
+        session = RecordingSession()
+        mm.sessions = {"sandbox": session}
+
+        token = mm.set_trace_context({"workspace": "/trusted/workspace"})
+        try:
+            result = asyncio.run(
+                mm.call_tool(
+                    "sandbox",
+                    "read_workspace_file",
+                    {"path": "notes.md", "workspace_root": "/tmp/attacker"},
+                )
+            )
+        finally:
+            mm.reset_trace_context(token)
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(
+            session.calls,
+            [
+                (
+                    "read_workspace_file",
+                    {"path": "notes.md", "workspace_root": "/trusted/workspace"},
+                )
+            ],
+        )
+
+    def test_routed_workspace_tool_overrides_caller_root_with_trusted_trace_workspace(self):
+        mm = MultiMCP()
+        session = RecordingSession()
+        mm.sessions = {"sandbox": session}
+        mm.tools = {"sandbox": [SimpleNamespace(name="write_workspace_file")]}
+
+        token = mm.set_trace_context({"workspace": "/trusted/workspace"})
+        try:
+            result = asyncio.run(
+                mm.route_tool_call(
+                    "write_workspace_file",
+                    {
+                        "path": "solution.py",
+                        "content": "print('fixed')\n",
+                        "workspace_root": "/tmp/attacker",
+                    },
+                )
+            )
+        finally:
+            mm.reset_trace_context(token)
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(
+            session.calls,
+            [
+                (
+                    "write_workspace_file",
+                    {
+                        "path": "solution.py",
+                        "content": "print('fixed')\n",
+                        "workspace_root": "/trusted/workspace",
+                    },
+                )
+            ],
+        )
+
+    def test_workspace_tool_rejects_direct_call_without_trusted_workspace(self):
+        mm = MultiMCP()
+        session = RecordingSession()
+        mm.sessions = {"sandbox": session}
+
+        with self.assertRaisesRegex(ValueError, "trusted workspace trace context"):
+            asyncio.run(
+                mm.call_tool(
+                    "sandbox",
+                    "write_workspace_file",
+                    {
+                        "path": "solution.py",
+                        "content": "print('owned')\n",
+                        "workspace_root": "/tmp/attacker",
+                    },
+                )
+            )
+
+        self.assertEqual(session.calls, [])
 
 
 if __name__ == "__main__":
