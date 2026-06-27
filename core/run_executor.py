@@ -22,6 +22,33 @@ def _merge_run_metadata(run_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
     return store.update_run(run_id, metadata=metadata)
 
 
+async def _mark_enqueue_failed(
+    run_id: str,
+    audit_context: Optional[Dict[str, Any]],
+    error: str,
+) -> None:
+    from core.run_store import get_run_store
+
+    store = get_run_store()
+    store.update_status(run_id, "failed", error=error)
+    _merge_run_metadata(
+        run_id,
+        {"execution_backend": "celery", "enqueue_error": error},
+    )
+    if audit_context and audit_context.get("idempotency_key"):
+        try:
+            from core.supabase_logging import update_request_status
+
+            await update_request_status(
+                idempotency_key=audit_context["idempotency_key"],
+                run_id=run_id,
+                status="failed",
+                error_code=error,
+            )
+        except Exception:
+            pass
+
+
 async def execute_run(
     run_id: str,
     canonical_request: CanonicalRunRequest,
@@ -30,14 +57,18 @@ async def execute_run(
 ):
     """Execution boundary for run processing."""
     if is_celery_enabled():
-        from workers.agent_tasks import run_agent_task
+        try:
+            from workers.agent_tasks import run_agent_task
 
-        task = run_agent_task.delay(
-            run_id,
-            canonical_request.model_dump(),
-            audit_context,
-            tenant_context,
-        )
+            task = run_agent_task.delay(
+                run_id,
+                canonical_request.model_dump(),
+                audit_context,
+                tenant_context,
+            )
+        except Exception as exc:
+            await _mark_enqueue_failed(run_id, audit_context, str(exc))
+            raise
         _merge_run_metadata(
             run_id,
             {"celery_task_id": task.id, "execution_backend": "celery"},
@@ -57,9 +88,13 @@ async def execute_run(
 async def execute_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = None):
     """Execution boundary for resume processing."""
     if is_celery_enabled():
-        from workers.agent_tasks import resume_agent_task
+        try:
+            from workers.agent_tasks import resume_agent_task
 
-        task = resume_agent_task.delay(run_id, audit_context)
+            task = resume_agent_task.delay(run_id, audit_context)
+        except Exception as exc:
+            await _mark_enqueue_failed(run_id, audit_context, str(exc))
+            raise
         _merge_run_metadata(
             run_id,
             {"celery_task_id": task.id, "execution_backend": "celery"},
