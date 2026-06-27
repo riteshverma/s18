@@ -17,6 +17,7 @@ class CanonicalRunRequest(BaseModel):
     consent_ref: Optional[str] = None
     raw_payload: Optional[Dict[str, Any]] = None
     idempotency_key: Optional[str] = None
+    skill_id: Optional[str] = None
     session: Dict[str, Any] = Field(default_factory=dict)
     policy: Dict[str, Any] = Field(default_factory=dict)
     payload: Dict[str, Any] = Field(default_factory=dict)

@@ -20,6 +20,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from core.loop import AgentLoop4
 from core.scheduler import scheduler_service
+from core.skills.manager import skill_manager
 from core.persistence import persistence_manager
 from core.graph_adapter import nx_to_reactflow
 from memory.context import ExecutionContextManager
@@ -100,6 +101,7 @@ async def lifespan(app: FastAPI):
         f"gemini_configured={bool(os.environ.get('GEMINI_API_KEY', '').strip())}"
     )
     scheduler_service.initialize()
+    skill_manager.initialize()
     scheduler_service.register_morning_briefing()
     persistence_manager.load_snapshot()
     reconciled_runs = await asyncio.to_thread(

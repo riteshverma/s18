@@ -30,6 +30,7 @@ class DefaultIntegrationAdapter:
             consent_ref=raw_request.get("consent_ref"),
             raw_payload=payload,
             idempotency_key=raw_request.get("idempotency_key"),
+            skill_id=raw_request.get("skill_id"),
             policy={
                 "risk_profile": profile.get("risk_profile", "generic_default"),
                 "response_profile": profile.get("response_profile", "default_v1"),

@@ -86,7 +86,7 @@ class SchedulerService:
         async def job_wrapper():
             # Lazy import to avoid circular dependency
             from routers.runs import process_run
-            from .skills.manager import skill_manager
+            from .skills.lifecycle import resolve_skill, run_skill_failure, run_skill_success
             from core.event_bus import event_bus
             from routers.inbox import send_to_inbox
             from integrations.contracts import CanonicalRunRequest
@@ -109,34 +109,31 @@ class SchedulerService:
             job.last_run = datetime.now().isoformat()
             await self.save_jobs_async()
             
+            skill = None
             try:
                 # Skill Lifecycle Execution
-                skill = None
-                effective_query = job.query
-
-                if job.skill_id:
-                    skill = skill_manager.get_skill(job.skill_id)
-                    if skill:
-                        # 1. Update Context
-                        skill.context.run_id = run_id
-                        skill.context.agent_id = job.agent_type
-                        skill.context.config = {"query": job.query}
-                        
-                        # 2. Hook: On Start (Prompt modification)
-                        effective_query = await skill.on_run_start(job.query)
-                        
-                        msg = f"🧠 Skill '{job.skill_id}' modified prompt: {effective_query[:50]}..."
-                        logger.info(msg)
-                        await event_bus.publish("log", "scheduler", {"message": msg})
+                skill, effective_query, resolved_skill_id = await resolve_skill(
+                    query=job.query,
+                    run_id=run_id,
+                    agent_id=job.agent_type,
+                    explicit_skill_id=job.skill_id,
+                    integration_id="default",
+                    workflow_id="generic",
+                )
+                if skill and resolved_skill_id:
+                    msg = f"🧠 Skill '{resolved_skill_id}' modified prompt: {effective_query[:50]}..."
+                    logger.info(msg)
+                    await event_bus.publish("log", "scheduler", {"message": msg})
 
                 # 3. Execution (The standard run)
                 canonical_request = CanonicalRunRequest(query=effective_query)
                 result = await process_run(run_id, canonical_request)
                 
                 # 4. Hook: On Success (The "Doing")
-                skill_result = None
-                if skill and result:
-                     skill_result = await skill.on_run_success(result if isinstance(result, dict) else {"output": str(result)})
+                skill_result = await run_skill_success(
+                    skill,
+                    result if isinstance(result, dict) else {"output": str(result)},
+                )
 
                 # Notify Success
                 success_msg = f"✅ Job '{job.name}' completed successfully."
@@ -193,8 +190,7 @@ class SchedulerService:
                     priority=2 # High priority for failures
                 )
 
-                if skill:
-                    await skill.on_run_failure(str(e))
+                await run_skill_failure(skill, str(e))
 
         # Parse cron expression (simple space-separated 5 fields)
         try:
