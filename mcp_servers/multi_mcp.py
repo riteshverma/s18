@@ -25,6 +25,9 @@ from config.settings_loader import (
     settings,
 )
 
+_WORKSPACE_FILE_TOOLS = {"read_workspace_file", "write_workspace_file"}
+
+
 class MultiMCP:
     def __init__(self):
         self.exit_stack = AsyncExitStack()
@@ -103,6 +106,23 @@ class MultiMCP:
         """Reset request-scoped metadata with the provided token."""
         if token is not None:
             self._trace_context.reset(token)
+
+    def _prepare_tool_arguments(self, tool_name: str, arguments: dict | None) -> dict:
+        """Apply request-scoped argument policy before dispatching a tool call."""
+        prepared = dict(arguments or {})
+        if tool_name not in _WORKSPACE_FILE_TOOLS:
+            return prepared
+
+        trace_context = self._trace_context.get()
+        workspace = trace_context.get("workspace") if trace_context else None
+        if not workspace:
+            raise ValueError(
+                f"Tool '{tool_name}' requires trusted workspace trace context"
+            )
+
+        # The model/request payload must never choose the filesystem boundary.
+        prepared["workspace_root"] = workspace
+        return prepared
 
     def _load_config(self) -> dict:
         """Load server configuration from JSON"""
@@ -491,6 +511,7 @@ class MultiMCP:
         """Call a tool on a specific server"""
         if server_name not in self.sessions:
             raise ValueError(f"Server '{server_name}' not connected")
+        arguments = self._prepare_tool_arguments(tool_name, arguments)
         trace_context = self._trace_context.get()
         if trace_context:
             print(
@@ -509,13 +530,6 @@ class MultiMCP:
         integration_id = trace_context.get("integration_id", "default")
         workflow_id = trace_context.get("workflow_id", "generic")
         contract_version = trace_context.get("contract_version", "v1")
-
-        if trace_context.get("workspace") and tool_name in {
-            "read_workspace_file",
-            "write_workspace_file",
-        }:
-            arguments = dict(arguments or {})
-            arguments.setdefault("workspace_root", trace_context["workspace"])
         
         # Get or create circuit breaker for this tool
         breaker = get_breaker(tool_name, failure_threshold=5, recovery_timeout=60.0)
