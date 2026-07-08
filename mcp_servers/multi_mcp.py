@@ -25,6 +25,9 @@ from config.settings_loader import (
     settings,
 )
 
+
+_WORKSPACE_FILE_TOOLS = {"read_workspace_file", "write_workspace_file"}
+
 class MultiMCP:
     def __init__(self):
         self.exit_stack = AsyncExitStack()
@@ -492,6 +495,7 @@ class MultiMCP:
         if server_name not in self.sessions:
             raise ValueError(f"Server '{server_name}' not connected")
         trace_context = self._trace_context.get()
+        arguments = self._prepare_tool_arguments(tool_name, arguments, trace_context)
         if trace_context:
             print(
                 f"[MCP trace] server={server_name} tool={tool_name} "
@@ -501,6 +505,28 @@ class MultiMCP:
             )
         return await self.sessions[server_name].call_tool(tool_name, arguments)
 
+    def _prepare_tool_arguments(
+        self,
+        tool_name: str,
+        arguments: dict | None,
+        trace_context: dict | None = None,
+    ) -> dict:
+        """Bind sensitive tool arguments to trusted request-scoped context."""
+        prepared = dict(arguments or {})
+        if tool_name not in _WORKSPACE_FILE_TOOLS:
+            return prepared
+
+        context = trace_context if trace_context is not None else self._trace_context.get()
+        trusted_workspace = (context or {}).get("workspace")
+        if not trusted_workspace:
+            prepared.pop("workspace_root", None)
+            raise ValueError(
+                f"Tool '{tool_name}' requires a trusted workspace context"
+            )
+
+        prepared["workspace_root"] = trusted_workspace
+        return prepared
+
     # Helper to route tool call by finding which server has it
     async def route_tool_call(self, tool_name: str, arguments: dict):
         from core.circuit_breaker import get_breaker, CircuitOpenError
@@ -509,13 +535,6 @@ class MultiMCP:
         integration_id = trace_context.get("integration_id", "default")
         workflow_id = trace_context.get("workflow_id", "generic")
         contract_version = trace_context.get("contract_version", "v1")
-
-        if trace_context.get("workspace") and tool_name in {
-            "read_workspace_file",
-            "write_workspace_file",
-        }:
-            arguments = dict(arguments or {})
-            arguments.setdefault("workspace_root", trace_context["workspace"])
         
         # Get or create circuit breaker for this tool
         breaker = get_breaker(tool_name, failure_threshold=5, recovery_timeout=60.0)
