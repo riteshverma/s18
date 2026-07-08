@@ -1066,6 +1066,16 @@ class AgentLoop4:
 
     async def _execute_dag(self, context):
         """Execute DAG with visualization - DEBUGGING MODE"""
+        if not nx.is_directed_acyclic_graph(context.plan_graph):
+            error = "Merged plan graph contains a cycle and cannot be executed"
+            context.plan_graph.graph["status"] = "failed"
+            context.plan_graph.graph["error"] = error
+            for node_id, node_data in context.plan_graph.nodes(data=True):
+                if node_id != "ROOT" and node_data.get("status") in {"pending", "running"}:
+                    node_data["status"] = "failed"
+                    node_data["error"] = error
+            await context.save_session_async()
+            raise RuntimeError(error)
         
         # Get plan_graph structure for visualization
         plan_graph = {

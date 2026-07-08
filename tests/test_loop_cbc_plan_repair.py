@@ -210,3 +210,52 @@ def test_execute_dag_skips_dependents_after_terminal_step_failure(monkeypatch, t
     assert context.plan_graph.nodes["T002"]["status"] == "skipped"
     assert context.plan_graph.nodes["T002"]["skip_reason"] == "upstream_failed:T001"
     assert context.plan_graph.graph["status"] == "failed"
+
+
+def test_execute_dag_fails_fast_on_cyclic_plan_graph(tmp_path):
+    context = ExecutionContextManager(
+        {
+            "nodes": [
+                {
+                    "id": "Query",
+                    "agent": "PlannerAgent",
+                    "status": "completed",
+                    "writes": ["plan_graph"],
+                },
+                {
+                    "id": "T001",
+                    "agent": "ThinkerAgent",
+                    "status": "pending",
+                },
+                {
+                    "id": "T002",
+                    "agent": "FormatterAgent",
+                    "status": "pending",
+                },
+            ],
+            "edges": [
+                {"source": "ROOT", "target": "Query"},
+                {"source": "Query", "target": "T001"},
+                {"source": "T001", "target": "T002"},
+                {"source": "T002", "target": "T001"},
+            ],
+        },
+        session_id="dag-cycle-test",
+        original_query="test query",
+    )
+    context.session_file = tmp_path / "session.json"
+    loop = AgentLoop4(MagicMock())
+
+    async def execute_with_timeout():
+        await asyncio.wait_for(loop._execute_dag(context), timeout=0.5)
+
+    try:
+        asyncio.run(execute_with_timeout())
+    except RuntimeError as exc:
+        assert "cycle" in str(exc)
+    else:
+        raise AssertionError("cyclic plan graph did not fail")
+
+    assert context.plan_graph.graph["status"] == "failed"
+    assert context.plan_graph.nodes["T001"]["status"] == "failed"
+    assert context.plan_graph.nodes["T002"]["status"] == "failed"
