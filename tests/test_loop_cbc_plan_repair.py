@@ -210,3 +210,78 @@ def test_execute_dag_skips_dependents_after_terminal_step_failure(monkeypatch, t
     assert context.plan_graph.nodes["T002"]["status"] == "skipped"
     assert context.plan_graph.nodes["T002"]["skip_reason"] == "upstream_failed:T001"
     assert context.plan_graph.graph["status"] == "failed"
+
+
+def test_run_publishes_failed_when_dag_finishes_with_failed_step(monkeypatch):
+    session_id = "run-dag-failure-status-test"
+    context = ExecutionContextManager(
+        {
+            "nodes": [
+                {
+                    "id": "Query",
+                    "agent": "PlannerAgent",
+                    "status": "running",
+                    "reads": ["original_query"],
+                    "writes": ["plan_graph"],
+                },
+            ],
+            "edges": [{"source": "ROOT", "target": "Query"}],
+        },
+        session_id=session_id,
+        original_query="test query",
+    )
+
+    loop = AgentLoop4(MagicMock())
+    published_events = []
+
+    monkeypatch.setattr(ExecutionContextManager, "_save_session", lambda self: None)
+
+    async def capture_publish(event_type, source, data):
+        published_events.append({"type": event_type, "source": source, "data": data})
+
+    async def fake_run_agent(agent_type, _payload):
+        assert agent_type == "PlannerAgent"
+        return {
+            "success": True,
+            "output": {
+                "plan_graph": {
+                    "nodes": [
+                        {
+                            "id": "T001",
+                            "agent": "ThinkerAgent",
+                            "description": "Failing step",
+                            "reads": ["original_query"],
+                            "writes": ["answer"],
+                            "status": "pending",
+                        }
+                    ],
+                    "edges": [{"source": "Query", "target": "T001"}],
+                },
+                "next_step_id": "T001",
+            },
+        }
+
+    async def fail_step(step_id, _context):
+        assert step_id == "T001"
+        return {"success": False, "error": "provider unavailable"}
+
+    monkeypatch.setattr("core.loop.event_bus.publish", capture_publish)
+    monkeypatch.setattr(loop.agent_runner, "run_agent", fake_run_agent)
+    monkeypatch.setattr(loop, "_execute_step", fail_step)
+
+    asyncio.run(
+        loop.run(
+            query="test query",
+            file_manifest=[],
+            globals_schema={},
+            uploaded_files=[],
+            session_id=session_id,
+            existing_context=context,
+        )
+    )
+
+    run_finished = [event for event in published_events if event["type"] == "run_finished"]
+    assert run_finished
+    assert run_finished[-1]["data"]["status"] == "failed"
+    assert run_finished[-1]["data"]["error"] == "T001 failed: provider unavailable"
+    assert context.plan_graph.graph["status"] == "failed"

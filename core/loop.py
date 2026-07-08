@@ -379,6 +379,28 @@ class AgentLoop4:
         await self._track_task(self._execute_dag(self.context))
         return self.context
 
+    def _dag_failure_error(self, context):
+        """Return a run-level error when DAG execution ended unsuccessfully."""
+        graph_status = (context.plan_graph.graph.get("status") or "").strip().lower()
+        failed_nodes = [
+            (node_id, node_data)
+            for node_id, node_data in context.plan_graph.nodes(data=True)
+            if node_id != "ROOT" and node_data.get("status") == "failed"
+        ]
+
+        if graph_status not in {"failed", "cost_exceeded", "token_budget_exceeded"} and not failed_nodes:
+            return None
+
+        if failed_nodes:
+            node_id, node_data = failed_nodes[0]
+            error = node_data.get("error")
+            return f"{node_id} failed: {error}" if error else f"{node_id} failed"
+        if graph_status == "cost_exceeded":
+            return "Run cost budget exceeded"
+        if graph_status == "token_budget_exceeded":
+            return "Run token budget exceeded"
+        return "DAG execution failed"
+
     async def run(
         self,
         query,
@@ -726,6 +748,12 @@ class AgentLoop4:
 
                     if self.context.stop_requested:
                         break
+
+                    dag_error = self._dag_failure_error(self.context)
+                    if dag_error:
+                        final_status = "failed"
+                        final_error = dag_error
+                        return self.context
 
                     # Phase 5: Check for Adaptive Re-Planning (Dead End Discovery)
                     if self._should_replan():
