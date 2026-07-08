@@ -104,6 +104,20 @@ class MultiMCP:
         if token is not None:
             self._trace_context.reset(token)
 
+    def _prepare_tool_arguments(self, tool_name: str, arguments: dict | None) -> dict:
+        """Apply trusted request context to sensitive tool arguments."""
+        prepared = dict(arguments or {})
+        if tool_name not in {"read_workspace_file", "write_workspace_file"}:
+            return prepared
+
+        trace_context = self._trace_context.get()
+        workspace = trace_context.get("workspace")
+        if workspace:
+            prepared["workspace_root"] = workspace
+        else:
+            prepared.pop("workspace_root", None)
+        return prepared
+
     def _load_config(self) -> dict:
         """Load server configuration from JSON"""
         if self.config_path.exists():
@@ -491,6 +505,7 @@ class MultiMCP:
         """Call a tool on a specific server"""
         if server_name not in self.sessions:
             raise ValueError(f"Server '{server_name}' not connected")
+        arguments = self._prepare_tool_arguments(tool_name, arguments)
         trace_context = self._trace_context.get()
         if trace_context:
             print(
@@ -510,12 +525,7 @@ class MultiMCP:
         workflow_id = trace_context.get("workflow_id", "generic")
         contract_version = trace_context.get("contract_version", "v1")
 
-        if trace_context.get("workspace") and tool_name in {
-            "read_workspace_file",
-            "write_workspace_file",
-        }:
-            arguments = dict(arguments or {})
-            arguments.setdefault("workspace_root", trace_context["workspace"])
+        arguments = self._prepare_tool_arguments(tool_name, arguments)
         
         # Get or create circuit breaker for this tool
         breaker = get_breaker(tool_name, failure_threshold=5, recovery_timeout=60.0)

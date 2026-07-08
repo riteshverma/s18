@@ -12,6 +12,20 @@ from config.settings_loader import reload_settings
 from mcp_servers.multi_mcp import MultiMCP
 
 
+class _DummyTool:
+    def __init__(self, name: str):
+        self.name = name
+
+
+class _RecordingSession:
+    def __init__(self):
+        self.calls = []
+
+    async def call_tool(self, tool_name, arguments):
+        self.calls.append((tool_name, arguments))
+        return {"tool": tool_name, "arguments": arguments}
+
+
 class MultiMcpModeTests(unittest.TestCase):
     def tearDown(self):
         reload_settings()
@@ -46,6 +60,45 @@ class MultiMcpModeTests(unittest.TestCase):
 
         self.assertTrue(health["mcp_ready"])
         self.assertEqual(sorted(health["connected_servers"]), ["mockehr", "rag"])
+
+    def test_workspace_tools_use_trusted_trace_workspace(self):
+        mm = MultiMCP()
+        session = _RecordingSession()
+        mm.tools = {"sandbox": [_DummyTool("write_workspace_file")]}
+        mm.sessions = {"sandbox": session}
+        trace_token = mm.set_trace_context({"workspace": "/trusted/task"})
+        try:
+            result = asyncio.run(
+                mm.route_tool_call(
+                    "write_workspace_file",
+                    {
+                        "path": "answer.txt",
+                        "content": "ok",
+                        "workspace_root": "/",
+                    },
+                )
+            )
+        finally:
+            mm.reset_trace_context(trace_token)
+
+        self.assertEqual(result["arguments"]["workspace_root"], "/trusted/task")
+        self.assertEqual(session.calls[0][1]["workspace_root"], "/trusted/task")
+
+    def test_workspace_tools_strip_caller_root_without_trace_workspace(self):
+        mm = MultiMCP()
+        session = _RecordingSession()
+        mm.sessions = {"sandbox": session}
+
+        result = asyncio.run(
+            mm.call_tool(
+                "sandbox",
+                "read_workspace_file",
+                {"path": "notes.md", "workspace_root": "/"},
+            )
+        )
+
+        self.assertNotIn("workspace_root", result["arguments"])
+        self.assertNotIn("workspace_root", session.calls[0][1])
 
     def test_strict_mode_start_raises_when_required_server_missing(self):
         with patch.dict(
