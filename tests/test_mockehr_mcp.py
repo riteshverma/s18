@@ -186,3 +186,33 @@ def test_route_tool_call_prefers_mockehr_for_ehr_tools():
     assert called["server"] == "mockehr"
     assert result["ok"] is True
 
+
+def test_route_tool_call_forces_trusted_workspace_root():
+    mm = MultiMCP()
+    mm.tools = {"sandbox": [_DummyTool("write_workspace_file")]}
+    mm.sessions = {"sandbox": object()}
+    called = {"arguments": None}
+
+    async def _fake_call_tool(server_name, tool_name, arguments):
+        called["arguments"] = arguments
+        return {"ok": True}
+
+    mm.call_tool = _fake_call_tool  # type: ignore[assignment]
+    token = mm.set_trace_context({"workspace": "/trusted/workspace"})
+    try:
+        result = asyncio.run(
+            mm.route_tool_call(
+                "write_workspace_file",
+                {
+                    "workspace_root": "/workspace",
+                    "path": "config/settings.json",
+                    "content": "{}",
+                },
+            )
+        )
+    finally:
+        mm.reset_trace_context(token)
+
+    assert result["ok"] is True
+    assert called["arguments"]["workspace_root"] == "/trusted/workspace"
+
