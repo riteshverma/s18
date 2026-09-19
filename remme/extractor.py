@@ -11,7 +11,7 @@ The extractor uses free-form extraction - it doesn't need to know the hub schema
 import requests
 import json
 import sys
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 from pathlib import Path
 
 # Add project root to path and import settings
@@ -72,7 +72,7 @@ class RemmeExtractor:
         try:
             prompt_path = Path(__file__).parent.parent / "prompts" / "remme_extraction.md"
             base_prompt = prompt_path.read_text().strip()
-        except:
+        except Exception:
             base_prompt = settings.get("remme", {}).get("extraction_prompt", "Extract facts from conversation.")
 
         system_prompt = f"""{base_prompt}

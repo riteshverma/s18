@@ -1,19 +1,19 @@
 ﻿# flow.py – 100% NetworkX Graph-First (No agentSession)
 
-import networkx as nx
 import asyncio
-import time
+import logging
 import ast
-import json
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
 from memory.context import ExecutionContextManager
-from agents.base_agent import AgentRunner
-from core.utils import log_step, log_error
+from agents.base_agent import AGENT_ALIASES, AgentRunner
+from core.utils import log_step, log_error, sanitize_io_keys_list
 from core.event_bus import event_bus
 from core.graph_adapter import nx_to_reactflow
 from core.schemas.clinical import extract_request_payload_from_query, validate_cbc_payload
-from core.model_manager import ModelManager
 from config.settings_loader import get_timeout, reload_settings
 from core.prometheus_metrics import (
     ORCHESTRATOR_RUNS_TOTAL,
@@ -32,32 +32,8 @@ from integrations.policies.workflow_guards import (
 )
 from core.verification_gate import evaluate_verification_gate
 from ui.visualizer import ExecutionVisualizer
-from rich.live import Live
 from rich.console import Console
 from datetime import datetime
-
-
-def sanitize_io_keys_list(keys):
-    """Normalize reads/writes to string keys to avoid unhashable dict errors."""
-    if keys is None:
-        return []
-    if not isinstance(keys, list):
-        keys = [keys]
-    out = []
-    for item in keys:
-        if isinstance(item, str):
-            key = item.strip()
-        elif isinstance(item, dict):
-            if len(item) == 1:
-                _, v = next(iter(item.items()))
-                key = v.strip() if isinstance(v, str) and v.strip() else json.dumps(item, sort_keys=True, default=str)
-            else:
-                key = json.dumps(item, sort_keys=True, default=str)
-        else:
-            key = str(item).strip()
-        if key and key not in out:
-            out.append(key)
-    return out
 
 
 # ===== EXPONENTIAL BACKOFF FOR TRANSIENT FAILURES =====
@@ -103,7 +79,7 @@ async def retry_with_backoff(
                 await asyncio.sleep(delay)
             else:
                 log_error(f"All {max_retries} retry attempts failed: {e}")
-        except Exception as e:
+        except Exception:
             # Non-retryable error, raise immediately
             raise
     
@@ -452,7 +428,7 @@ class AgentLoop4:
                 },
             )
         except Exception as e:
-            print(f"❌ ERROR initializing context: {e}")
+            logger.error("Error initializing context: %s", e, exc_info=True)
             raise
 
         # Phase 1: File Profiling (if files exist)
@@ -700,7 +676,7 @@ class AgentLoop4:
                     
                     log_step(f"Injected ClarificationAgent before {first_step}", symbol="➕")
                 elif has_clarification_agent:
-                    log_step(f"Planner already added ClarificationAgent, skipping auto-injection", symbol="ℹ️")
+                    log_step("Planner already added ClarificationAgent, skipping auto-injection", symbol="ℹ️")
                 
                 # ✅ Mark Query/Planner as Done
                 self.context.plan_graph.nodes["Query"]["output"] = plan_result["output"]
@@ -743,9 +719,7 @@ class AgentLoop4:
                     if isinstance(e, asyncio.CancelledError) or self.context.stop_requested:
                         log_step("🛑 Execution interrupted/stopped.", symbol="🛑")
                         break
-                    print(f"❌ ERROR during execution: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    logger.error("Error during execution: %s", e, exc_info=True)
                     raise
         except (Exception, asyncio.CancelledError) as e:
             if self.context:
@@ -1084,8 +1058,6 @@ class AgentLoop4:
         console = Console()
         
         # 🔧 DEBUGGING MODE: No Live display, just regular prints
-        max_iterations = 20
-        iteration = 0
         
         # ===== COST/TOKEN BUDGET ENFORCEMENT =====
         settings = reload_settings()
@@ -1328,16 +1300,9 @@ class AgentLoop4:
         )
 
         agent_type = step_data["agent"]
-        # Normalize common planner aliases to configured agent names
-        agent_aliases = {
-            "SummarizationAgent": "SummarizerAgent",
-            "SummaryAgent": "SummarizerAgent",
-            "ResearchAgent": "RetrieverAgent",
-            "RAG": "RetrieverAgent",
-            "RagAgent": "RetrieverAgent",
-            "ResponseAgent": "FormatterAgent",
-        }
-        agent_type = agent_aliases.get(agent_type, agent_type)
+        # Normalize planner-invented aliases to configured agent names so
+        # downstream agent-specific handling sees canonical names.
+        agent_type = AGENT_ALIASES.get(agent_type, agent_type)
         
         # Get inputs from NetworkX graph
         inputs = context.get_inputs(step_data.get("reads", []))
@@ -1510,7 +1475,7 @@ class AgentLoop4:
                     )
 
                     # Log result (truncated)
-                    log_step(f"✅ Tool Result", payload={"result_preview": result_str[:200] + "..."}, symbol="🔌")
+                    log_step("✅ Tool Result", payload={"result_preview": result_str[:200] + "..."}, symbol="🔌")
                     
                     # Prepare input for next iteration
                     instruction = output.get("thought", "Use the tool result to generate the final output.")

@@ -4,6 +4,7 @@ import networkx as nx
 import json
 import ast
 import time
+import logging
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -22,27 +23,9 @@ except ImportError:
         return None
 
 
-def sanitize_io_keys_list(keys):
-    """Normalize reads/writes to string keys to avoid unhashable dict errors."""
-    if keys is None:
-        return []
-    if not isinstance(keys, list):
-        keys = [keys]
-    out = []
-    for item in keys:
-        if isinstance(item, str):
-            key = item.strip()
-        elif isinstance(item, dict):
-            if len(item) == 1:
-                _, v = next(iter(item.items()))
-                key = v.strip() if isinstance(v, str) and v.strip() else json.dumps(item, sort_keys=True, default=str)
-            else:
-                key = json.dumps(item, sort_keys=True, default=str)
-        else:
-            key = str(item).strip()
-        if key and key not in out:
-            out.append(key)
-    return out
+from core.utils import sanitize_io_keys_list
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionContextManager:
@@ -348,7 +331,7 @@ class ExecutionContextManager:
         
         # API Mode (Async Wait)
         if self.api_mode:
-            print(f"⏳ Waiting for user input: {message}")
+            logger.info("Waiting for user input: %s", message)
             
             # Reset event and value
             self.user_input_event.clear()
@@ -453,13 +436,13 @@ class ExecutionContextManager:
                 output["user_response"] = user_response
                 output["rich_context_saved"] = rich_context
                 output["interaction_completed"] = True
-                print(f"✅ User input captured: {writes_to} = '{rich_context}'")
+                logger.info("User input captured: %s = '%s'", writes_to, rich_context)
                 
                 # Restore status to running before completing
                 node_data['status'] = 'running'
                 
             except Exception as e:
-                print(f"❌ User interaction failed: {e}")
+                logger.error("User interaction failed: %s", e)
                 node_data['error'] = str(e)
         
         # CODE EXECUTION CHECK
@@ -469,7 +452,7 @@ class ExecutionContextManager:
                 execution_result = await self._auto_execute_code(step_id, output)
                 output = self._merge_execution_results(output, execution_result)
             except Exception as e:
-                print(f"❌ Code execution failed: {e}")
+                logger.error("Code execution failed: %s", e)
         
         # EXTRACTION LOGIC - Handle both code execution results AND direct agent outputs
         globals_schema = self.plan_graph.graph['globals_schema']
@@ -485,12 +468,12 @@ class ExecutionContextManager:
                     
                     if write_key in result_data:
                         globals_schema[write_key] = result_data[write_key]
-                        print(f"✅ Extracted {write_key} = {result_data[write_key]}")
+                        logger.debug("Extracted %s = %s", write_key, result_data[write_key])
                         extracted = True
                     elif len(result_data) == 1 and len(writes) == 1:
                         key, value = next(iter(result_data.items()))
                         globals_schema[write_key] = value
-                        print(f"✅ Extracted {write_key} = {value} (from {key})")
+                        logger.debug("Extracted %s = %s (from %s)", write_key, value, key)
                         extracted = True
                 
                 # Strategy 2: Extract from direct agent output (ThinkerAgent, DistillerAgent, FormatterAgent)
@@ -498,29 +481,29 @@ class ExecutionContextManager:
                     # Check root
                     if write_key in output:
                         globals_schema[write_key] = output[write_key]
-                        print(f"✅ Extracted {write_key} = {output[write_key]} (direct)")
+                        logger.debug("Extracted %s = %s (direct)", write_key, output[write_key])
                         extracted = True
                     # Check nested 'output' dictionary (common pattern)
                     elif "output" in output and isinstance(output["output"], dict) and write_key in output["output"]:
                         val = output["output"][write_key]
                         globals_schema[write_key] = val
-                        print(f"✅ Extracted {write_key} = {val} (nested)")
+                        logger.debug("Extracted %s = %s (nested)", write_key, val)
                         extracted = True
-                    
+
                     # 🎉 NEW: Check for 'final_answer' as fallback (Summarizer often uses this)
                     elif "final_answer" in output:
                         globals_schema[write_key] = output["final_answer"]
-                        print(f"✅ Extracted {write_key} = [Final Answer] (mapped from 'final_answer')")
+                        logger.debug("Extracted %s = [Final Answer] (mapped from 'final_answer')", write_key)
                         extracted = True
                 
                 # Strategy 3: Fall back to response text or full output dict
                 if not extracted:
                     if isinstance(output, dict) and isinstance(output.get("response"), str):
                         globals_schema[write_key] = output["response"]
-                        print(f"⚠️  {write_key} not in output keys; stored output['response'] instead")
+                        logger.warning("%s not in output keys; stored output['response'] instead", write_key)
                         extracted = True
                     else:
-                        print(f"⚠️  Could not extract {write_key}")
+                        logger.warning("Could not extract %s", write_key)
                         globals_schema[write_key] = []
         
         # Propagate WISE fields (risk_level, confidence, flags) from reasoning agents
@@ -545,7 +528,7 @@ class ExecutionContextManager:
             end = datetime.fromisoformat(node_data['end_time'])
             node_data['execution_time'] = (end - start).total_seconds()
         
-        print(f"✅ {step_id} completed successfully")
+        logger.info("%s completed successfully", step_id)
         append_usage_event(
             {
                 "event_type": "step_completed",
@@ -596,8 +579,11 @@ class ExecutionContextManager:
                 if root_query is not None:
                     inputs[read_key] = root_query
             else:
-                print(f"⚠️  Missing dependency: '{read_key}' not found in globals_schema")
-                print(f"📋 Available keys: {list(globals_schema.keys())}")
+                logger.warning(
+                    "Missing dependency: '%s' not found in globals_schema; available keys: %s",
+                    read_key,
+                    list(globals_schema.keys()),
+                )
                 
         return inputs
 
@@ -720,7 +706,7 @@ class ExecutionContextManager:
         try:
             self._save_session()
         except Exception as e:
-            print(f"⚠️  Auto-save failed: {e}")
+            logger.warning("Auto-save failed: %s", e)
 
     def _save_session(self):
         """Save the NetworkX graph as session"""

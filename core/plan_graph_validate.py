@@ -58,7 +58,6 @@ def validate_merged_plan_graph(G: nx.DiGraph) -> tuple[list[str], list[str]]:
             continue
         data = G.nodes[nid]
         reads = sanitize_io_keys_list(data.get("reads", []))
-        writes = sanitize_io_keys_list(data.get("writes", []))
         ancestors = nx.ancestors(G, nid) if nid in G else set()
 
         available: set[str] = set(BUILTIN_READ_KEYS)

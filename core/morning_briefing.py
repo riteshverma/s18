@@ -2,7 +2,6 @@
 Morning Briefing: scheduled job that fetches overnight news, summarizes,
 sends to Inbox, and publishes to EventBus. Combines Scheduler + Inbox + EventBus.
 """
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import List, Any

@@ -1,6 +1,5 @@
 import sys
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.append(".")
@@ -54,4 +53,6 @@ def test_persistence():
     print("🎉 Persistence Test Complete.")
 
 if __name__ == "__main__":
+    from core.logging_setup import configure_logging
+    configure_logging()
     test_persistence()

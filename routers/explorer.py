@@ -1,18 +1,20 @@
 # Explorer Router - File system scanning, code analysis, and architecture mapping
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import os
 import json
+import logging
 import shutil
 import tempfile
 import subprocess
-from pathlib import Path
 
 # Import agents/tools
 from core.explorer_utils import CodeSkeletonExtractor
 from core.model_manager import ModelManager
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -52,10 +54,10 @@ async def list_files(path: str):
         if not os.path.isabs(abs_path):
             abs_path = os.path.abspath(abs_path)
             
-        print(f"📁 Explorer: Listing files for {abs_path}")
+        logger.info("Explorer: Listing files for %s", abs_path)
             
         if not os.path.exists(abs_path):
-            print(f"  ⚠️ Path not found: {abs_path}")
+            logger.warning("Path not found: %s", abs_path)
             return { "files": [], "root_path": abs_path, "error": "Path not found" }
         
         extractor = CodeSkeletonExtractor(abs_path)
@@ -63,9 +65,9 @@ async def list_files(path: str):
             nodes = []
             try:
                 items = os.listdir(current_path)
-                print(f"  📂 Found {len(items)} raw items in {current_path}")
+                logger.debug("Found %d raw items in %s", len(items), current_path)
             except Exception as e:
-                print(f"  ❌ listdir failed for {current_path}: {e}")
+                logger.warning("listdir failed for %s: %s", current_path, e)
                 return []
 
             for item in items:
@@ -83,11 +85,11 @@ async def list_files(path: str):
                     }
                     nodes.append(node)
                 except Exception as e:
-                    print(f"  ⚠️ Error processing {item}: {e}")
+                    logger.warning("Error processing %s: %s", item, e)
                     continue
             
             nodes.sort(key=lambda x: (x["type"] != "folder", x["name"].lower()))
-            print(f"  ✅ Returning {len(nodes)} processed nodes")
+            logger.debug("Returning %d processed nodes", len(nodes))
             return nodes
 
         files = list_items(abs_path)
@@ -97,7 +99,7 @@ async def list_files(path: str):
             "root_path": abs_path
         }
     except Exception as e:
-        print(f"  ❌ List Files Failed: {e}")
+        logger.error("List Files Failed: %s", e)
         return { "files": [], "root_path": path, "error": str(e) }
 
 
@@ -106,22 +108,22 @@ async def analyze_project(request: AnalyzeRequest):
     """Analyze a project and generate an architecture map"""
     target_path = request.path
     is_temp = False
-    print(f"🧠 Explorer: Analyzing {target_path} (Type: {request.type})")
+    logger.info("Explorer: Analyzing %s (Type: %s)", target_path, request.type)
     
     try:
         # 1. HANDLE GITHUB
         if request.type == "github" or target_path.startswith("http"):
             is_temp = True
             temp_dir = tempfile.mkdtemp()
-            print(f"  🔗 Cloning GitHub Repo {target_path} to {temp_dir}...")
+            logger.info("Cloning GitHub Repo %s to %s...", target_path, temp_dir)
             try:
                 # Add --depth 1 for speed
                 subprocess.run(["git", "clone", "--depth", "1", target_path, temp_dir], check=True, capture_output=True)
                 target_path = temp_dir
-                print("  ✅ Clone Successful.")
+                logger.info("Clone Successful.")
             except subprocess.CalledProcessError as e:
                 err_msg = e.stderr.decode() if e.stderr else str(e)
-                print(f"  ❌ Clone Failed: {err_msg}")
+                logger.error("Clone Failed: %s", err_msg)
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
                 raise HTTPException(status_code=400, detail=f"Git clone failed: {err_msg}")
@@ -129,13 +131,13 @@ async def analyze_project(request: AnalyzeRequest):
             # Resolve local path
             target_path = os.path.abspath(target_path)
             if not os.path.exists(target_path):
-                print(f"  ⚠️ Local path not found: {target_path}")
+                logger.warning("Local path not found: %s", target_path)
                 raise HTTPException(status_code=404, detail=f"Local path not found: {target_path}")
 
         if request.files:
             # Context Analysis Mode: We have a selected list of files
             # Read full content of selected files
-            print(f"  📚 Analying {len(request.files)} selected files with Full Context...")
+            logger.info("Analying %d selected files with Full Context...", len(request.files))
             context_str = ""
             for rel_path in request.files:
                 full_path = os.path.join(target_path, rel_path)
@@ -144,11 +146,11 @@ async def analyze_project(request: AnalyzeRequest):
                         content = f.read()
                         context_str += f"--- FILE: {rel_path} ---\n{content}\n\n"
                 except Exception as e:
-                    print(f"  ⚠️ Could not read {rel_path}: {e}")
+                    logger.warning("Could not read %s: %s", rel_path, e)
         else:
             # Fallback to Skeleton Mode (Legacy/Auto)
             # 2. EXTRACT SKELETON
-            print("  💀 Extracting Skeletons (Blind Mode)...")
+            logger.info("Extracting Skeletons (Blind Mode)...")
             extractor = CodeSkeletonExtractor(target_path)
             skeletons = extractor.extract_all()
             
@@ -208,7 +210,7 @@ async def analyze_project(request: AnalyzeRequest):
         """
         
         response_text = await model.generate_text(prompt)
-        print(f"  🤖 LLM Response (Raw): {response_text[:200]}...")
+        logger.debug("LLM Response (Raw): %s...", response_text[:200])
         
         # Clean response if it contains markdown code blocks
         if "```json" in response_text:
@@ -219,7 +221,7 @@ async def analyze_project(request: AnalyzeRequest):
         try:
             flow_data = json.loads(response_text)
         except json.JSONDecodeError as je:
-            print(f"  ❌ JSON Parse Error: {je}")
+            logger.error("JSON Parse Error: %s", je)
             raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(je)}")
             
         return {
@@ -229,7 +231,7 @@ async def analyze_project(request: AnalyzeRequest):
         }
         
     except Exception as e:
-        print(f"Analysis Failed: {e}")
+        logger.error("Analysis Failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if is_temp and os.path.exists(target_path):

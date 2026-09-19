@@ -105,8 +105,8 @@ async def get_rag_documents():
             try:
                 ledger_data = json.loads(ledger_file.read_text())
                 file_entries = ledger_data.get("files", {})
-            except:
-                pass
+            except (OSError, ValueError) as e:
+                logger.debug("Could not parse RAG ledger %s: %s", ledger_file, e)
         elif cache_file.exists():
             # Legacy format: {"path": "hash"}
             try:
@@ -118,8 +118,8 @@ async def get_rag_documents():
                         "indexed_at": None,
                         "chunk_count": 0
                     }
-            except:
-                pass
+            except (OSError, ValueError) as e:
+                logger.debug("Could not parse legacy RAG cache %s: %s", cache_file, e)
 
         def build_tree(path: Path):
             items = []
@@ -333,8 +333,8 @@ def process_markdown_images(content: str, note_path: Path):
                     new_content = new_content.replace(raw_path, rel_path)
                     modified = True
                     continue
-            except:
-                pass
+            except Exception as e:
+                logger.debug("Could not rewrite localhost image URL %s: %s", raw_path, e)
 
         is_local = raw_path.startswith("/") or raw_path.startswith("file://")
         is_url = raw_path.startswith("http://") or raw_path.startswith("https://")
@@ -395,7 +395,7 @@ def process_markdown_images(content: str, note_path: Path):
                 new_content = new_content.replace(raw_path, rel_path)
                 modified = True
         except Exception as e:
-            print(f"Error processing image {raw_path}: {e}")
+            logger.warning("Error processing image %s: %s", raw_path, e)
                 
     return new_content, modified
 
@@ -732,17 +732,17 @@ async def rag_ripgrep_search(
             if match:
                  try:
                      return json.loads(match.group(0))
-                 except:
-                     pass
-            
+                 except ValueError as e:
+                     logger.debug("Ripgrep JSON list extraction failed: %s", e)
+
             # Try ast if it looks like a Python list with single quotes
             match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
             if match:
                  try:
                      import ast
                      return ast.literal_eval(match.group(0))
-                 except:
-                     pass
+                 except (ValueError, TypeError, SyntaxError) as e:
+                     logger.debug("Ripgrep ast list extraction failed: %s", e)
             return None
 
         # 1. Try to find content in 'content' list
@@ -777,17 +777,17 @@ async def rag_ripgrep_search(
                                 results.extend(valid)
                             elif isinstance(parsed, dict) and "file" in parsed:
                                 results.append(parsed)
-                        except:
+                        except ValueError:
                             try:
                                 import ast
                                 parsed = ast.literal_eval(text_content)
-                                if isinstance(parsed, list): 
+                                if isinstance(parsed, list):
                                     valid = [x for x in parsed if isinstance(x, dict) and "file" in x]
                                     results.extend(valid)
                                 elif isinstance(parsed, dict) and "file" in parsed:
                                     results.append(parsed)
-                            except:
-                                pass
+                            except (ValueError, TypeError, SyntaxError) as e:
+                                logger.debug("Could not parse ripgrep payload as JSON or Python literal: %s", e)
         
         # 2. Fallback: If result itself is already a list (direct return)
         elif isinstance(result, list):
@@ -959,8 +959,8 @@ async def get_document_preview(path: str):
                 data = json.loads(result)
                 if isinstance(data, dict) and 'markdown' in data:
                     return {"status": "success", "markdown": data['markdown']}
-            except:
-                pass
+            except ValueError as e:
+                logger.debug("Preview result is not JSON, returning raw text: %s", e)
             return {"status": "success", "markdown": result}
 
         # 2. Proper handling of MCP CallToolResult object
@@ -978,8 +978,8 @@ async def get_document_preview(path: str):
                         data = json.loads(text)
                         if isinstance(data, dict) and 'markdown' in data:
                             return {"status": "success", "markdown": data['markdown']}
-                    except:
-                        pass
+                    except ValueError as e:
+                        logger.debug("Preview text payload is not JSON, returning raw text: %s", e)
                     return {"status": "success", "markdown": text}
         
         # 3. Fallback for direct storage objects
@@ -1020,7 +1020,7 @@ async def ask_rag_document(request: Request, user: Dict[str, Any] = Depends(requ
                             context_list.extend(parsed)
                         else:
                             context_list.append(c.text)
-                    except:
+                    except Exception:
                         context_list.append(c.text)
         
         context_text = "\n\n".join(context_list) if context_list else "No relevant context found in document."
@@ -1121,7 +1121,8 @@ When the tool output is provided to you in a subsequent message, use it to answe
                                     yield f"data: {json.dumps({'content': chunk})}\n\n"
                                 if data.get("done"):
                                     break
-                            except:
+                            except Exception as e:
+                                logger.debug("Skipping non-JSON stream line: %s", e)
                                 continue
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"

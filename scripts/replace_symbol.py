@@ -1,5 +1,4 @@
 import sys
-import os
 import ast
 
 def replace_symbol_in_file(file_path, symbol_name, new_content_file):

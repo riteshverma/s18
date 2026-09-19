@@ -12,7 +12,7 @@ def test_execute_run_defaults_to_in_process(monkeypatch):
     request = CanonicalRunRequest(query="demo")
     process_run = AsyncMock(return_value={"status": "completed"})
     monkeypatch.delenv("S18_RUN_EXECUTOR", raising=False)
-    monkeypatch.setattr("routers.runs.process_run", process_run)
+    monkeypatch.setattr("core.run_service.process_run", process_run)
 
     result = asyncio.run(execute_run("run-1", request, {"request_id": "req-1"}, None))
 

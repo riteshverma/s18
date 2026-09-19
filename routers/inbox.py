@@ -1,9 +1,8 @@
 import sqlite3
 import json
 import uuid
-import os
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any

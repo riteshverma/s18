@@ -1,6 +1,7 @@
 # RemMe Router - Handles memory management, smart scan, and user profile
 import asyncio
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -23,6 +24,8 @@ from core.prometheus_metrics import (
 )
 
 router = APIRouter(prefix="/remme", tags=["RemMe"])
+
+logger = logging.getLogger(__name__)
 
 # Get shared instances
 remme_store = get_remme_store()
@@ -49,11 +52,11 @@ class GBrainCanaryToggleRequest(BaseModel):
 
 async def background_smart_scan():
     """Scan all past sessions that haven't been processed yet."""
-    print("🧠 RemMe: Starting Smart Sync...")
+    logger.info("RemMe: Starting Smart Sync...")
     try:
         # 1. Identify what we have
         scanned_ids = remme_store.get_scanned_run_ids()
-        print(f"🧠 RemMe: Found {len(scanned_ids)} already scanned sessions.")
+        logger.info("RemMe: Found %d already scanned sessions.", len(scanned_ids))
         
         # 2. Identify what exists on disk
         summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
@@ -66,7 +69,7 @@ async def background_smart_scan():
             if rid not in scanned_ids:
                 to_scan.append(sess_path)
         
-        print(f"🧠 RemMe: Identified {len(to_scan)} pending sessions to scan.")
+        logger.info("RemMe: Identified %d pending sessions to scan.", len(to_scan))
         
         # 4. Process matches (Newest First)
         to_scan.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -82,7 +85,7 @@ async def background_smart_scan():
         for sess_path in to_scan[:BATCH_SIZE]:
             try:
                 run_id = sess_path.stem.replace("session_", "")
-                print(f"🧠 RemMe: Auto-Scanning Run {run_id}...")
+                logger.info("RemMe: Auto-Scanning Run %s...", run_id)
                 
                 data = json.loads(sess_path.read_text(encoding="utf-8", errors="ignore"))
                 # Fix: Query is deeply nested in graph attributes for NetworkX adjacency format
@@ -99,7 +102,7 @@ async def background_smart_scan():
                          output = n.get("output")
                          
                 if not query:
-                    print(f"⚠️ RemMe: Run {run_id} has no query, marking as scanned and skipping.")
+                    logger.warning("RemMe: Run %s has no query, marking as scanned and skipping.", run_id)
                     remme_store.mark_run_scanned(run_id)
                     continue
 
@@ -116,8 +119,8 @@ async def background_smart_scan():
                 existing = []
                 try:
                     existing = remme_store.search_text(query, limit=5, requester="smart_scan")
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("Memory context search failed for %s: %s", run_id, e)
                 
                 # Extract memories AND preferences using new format
                 result = await asyncio.to_thread(extractor.extract, query, hist, existing)
@@ -147,7 +150,7 @@ async def background_smart_scan():
                                 remme_store.update_text(tid, text, emb, source=f"run_{run_id}")
                                 processed_count += 1
                         except Exception as e:
-                            print(f"❌ RemMe Action Failed: {e}")
+                            logger.warning("RemMe Action Failed: %s", e)
                 
                 # Write preferences to staging queue (will be normalized later)
                 if preferences:
@@ -155,22 +158,20 @@ async def background_smart_scan():
                         from remme.staging import get_staging_store
                         staging = get_staging_store()
                         staging.add(preferences, source=f"session_{run_id}")
-                        print(f"📥 Staged {len(preferences)} preferences for normalization")
+                        logger.info("Staged %d preferences for normalization", len(preferences))
                     except Exception as e:
-                        print(f"⚠️ Failed to stage preferences: {e}")
+                        logger.warning("Failed to stage preferences: %s", e)
                 
                 # Mark session as scanned
                 remme_store.mark_run_scanned(run_id)
                 
             except Exception as e:
-                print(f"❌ Failed to scan session {sess_path}: {e}")
+                logger.warning("Failed to scan session %s: %s", sess_path, e)
                 
         return processed_count
 
     except Exception as e:
-        print(f"❌ Smart Scan Crashed: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("Smart Scan Crashed: %s", e, exc_info=True)
         return 0
 
 
@@ -376,17 +377,17 @@ async def add_memory(request: AddMemoryRequest):
         try:
             from remme.bootstrap import extract_from_memories, apply_extraction_to_hubs
             
-            print(f"🔄 Auto-extracting preferences from: '{request.text[:50]}...'")
+            logger.info("Auto-extracting preferences from: '%s...'", request.text[:50])
             extraction = await extract_from_memories([{"text": request.text, "category": request.category}])
             
             if extraction:
                 changes = apply_extraction_to_hubs(extraction)
-                print(f"✅ Auto-extracted {len(changes)} preferences from new memory")
+                logger.info("Auto-extracted %d preferences from new memory", len(changes))
                 memory["extracted_preferences"] = changes
             else:
                 memory["extracted_preferences"] = []
         except Exception as e:
-            print(f"⚠️ Auto-extraction failed (memory still saved): {e}")
+            logger.warning("Auto-extraction failed (memory still saved): %s", e)
             memory["extracted_preferences"] = []
         
         MEMORY_OPERATIONS_TOTAL.labels(endpoint="add_memory", status="success").inc()
@@ -425,7 +426,7 @@ async def delete_memory(memory_id: str):
 async def manual_remme_scan(background_tasks: BackgroundTasks):
     """Manually trigger RemMe Smart Sync."""
     start_ms = now_ms()
-    print("🔎 RemMe: Manual Smart Scan Triggered")
+    logger.info("RemMe: Manual Smart Scan Triggered")
     # We run this in background so UI returns immediately
     background_tasks.add_task(background_smart_scan)
     MEMORY_OPERATIONS_TOTAL.labels(endpoint="manual_scan", status="success").inc()
@@ -446,11 +447,11 @@ async def get_remme_profile():
             current_time = datetime.now().timestamp()
             # 7 days in seconds = 604800
             if (current_time - modified_time) < 604800:
-                print(f"🧠 RemMe Profile: Loading cached profile (Age: {(current_time - modified_time) / 86400:.1f} days)")
+                logger.info("RemMe Profile: Loading cached profile (Age: %.1f days)", (current_time - modified_time) / 86400)
                 return {"content": profile_path.read_text()}
                 
         # 2. Generate New Profile
-        print("🧠 RemMe Profile: Generating NEW profile via Gemini...")
+        logger.info("RemMe Profile: Generating NEW profile via Gemini...")
         
         # Load all memories
         if not remme_store.index:
@@ -515,7 +516,7 @@ USER CONTEXT & PREFERENCES:
 - Known Professional Interests: {", ".join(context_data['interests']['professional'])}
 """
         except Exception as e:
-            print(f"⚠️ Failed to load preferences for profile prompt: {e}")
+            logger.warning("Failed to load preferences for profile prompt: %s", e)
             pref_block = "No specific preferences or operating context detected yet."
             context_data = {
                 "meta": {"overall_confidence": 0.5, "total_evidence": 0},
@@ -597,8 +598,7 @@ A high-level overview of who the user appears to be, their primary drivers, and 
         }
         
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error("Profile generation failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -726,8 +726,7 @@ async def get_user_preferences():
             }
         }
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error("Failed to load user preferences: %s", e, exc_info=True)
         # Return empty/default structure on error
         return {
             "status": "error",
@@ -746,7 +745,7 @@ async def bootstrap_preferences():
     try:
         from remme.bootstrap import bootstrap_from_remme
         
-        print("🚀 Starting preferences bootstrap...")
+        logger.info("Starting preferences bootstrap...")
         changes = await bootstrap_from_remme()
         
         return {
@@ -755,8 +754,7 @@ async def bootstrap_preferences():
             "changes": changes
         }
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error("Preferences bootstrap failed: %s", e, exc_info=True)
         return {
             "status": "error",
             "error": str(e),
@@ -793,7 +791,7 @@ async def run_normalize():
     try:
         from remme.normalizer import run_normalizer
         
-        print("🔄 Running preference normalizer...")
+        logger.info("Running preference normalizer...")
         changes = await run_normalizer()
         
         return {
@@ -802,8 +800,7 @@ async def run_normalize():
             "changes": changes
         }
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error("Preference normalizer failed: %s", e, exc_info=True)
         return {
             "status": "error",
             "error": str(e),
@@ -824,7 +821,7 @@ async def run_system_scan():
         from remme.sources.session_scanner import scan_sessions
         from remme.normalizer import run_normalizer
         
-        print("🔍 Starting SYSTEM-WIDE preference scan...")
+        logger.info("Starting SYSTEM-WIDE preference scan...")
         
         # 1. Scan Notes
         notes_count = await scan_notes()
@@ -837,15 +834,14 @@ async def run_system_scan():
         
         return {
             "status": "success",
-            "message": f"System scan complete",
+            "message": "System scan complete",
             "notes_scanned": notes_count,
             "sessions_scanned": sessions_count,
             "preferences_normalized": len(changes),
             "changes": changes
         }
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error("System-wide preference scan failed: %s", e, exc_info=True)
         return {
             "status": "error",
             "error": str(e)
@@ -858,7 +854,7 @@ async def run_notes_scan():
     try:
         from remme.sources.notes_scanner import scan_notes
         
-        print("📝 Scanning Notes folder...")
+        logger.info("Scanning Notes folder...")
         count = await scan_notes()
         
         return {
@@ -875,7 +871,7 @@ async def run_sessions_scan():
     try:
         from remme.sources.session_scanner import scan_sessions
         
-        print("💬 Scanning session summaries...")
+        logger.info("Scanning session summaries...")
         count = await scan_sessions()
         
         return {

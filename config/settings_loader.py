@@ -41,6 +41,7 @@ _ALLOWED_MCP_MODES = {"legacy", "strict"}
 _DEFAULT_MCP_MODE = "legacy"
 _DEFAULT_MCP_STARTUP_TIMEOUT_SECONDS = 5
 _DEFAULT_MCP_STDIO_CONNECT_TIMEOUT_SECONDS = 120
+_DEFAULT_SANDBOX_TIMEOUT_SECONDS = 20
 
 
 def _normalize_local_http_base_url(
@@ -704,6 +705,18 @@ def get_llama_cpp_timeout() -> int:
     except (TypeError, ValueError):
         return 360
     return value if value > 0 else 360
+
+def get_sandbox_timeout_seconds() -> float:
+    """Get code-sandbox subprocess timeout in seconds."""
+    raw = load_settings().get("sandbox", {}).get(
+        "timeout_seconds", _DEFAULT_SANDBOX_TIMEOUT_SECONDS
+    )
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return float(_DEFAULT_SANDBOX_TIMEOUT_SECONDS)
+    return value if value > 0 else float(_DEFAULT_SANDBOX_TIMEOUT_SECONDS)
+
 
 def get_run_poll_timeout() -> int:
     """Recommended timeout in seconds for clients polling GET /runs/{id}. Full runs often exceed 5 minutes."""

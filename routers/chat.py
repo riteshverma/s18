@@ -1,15 +1,15 @@
 import json
-import os
-import shutil
 import time
-import uuid
 import hashlib
+import logging
 from pathlib import Path
 from typing import List, Optional, Literal
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from shared.state import PROJECT_ROOT
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -115,14 +115,15 @@ async def list_chat_sessions(target_type: str, target_id: str):
                             "model": data.get("model"),
                             "preview": data["messages"][-1]["content"][:50] if data["messages"] else ""
                         })
-                    except:
+                    except Exception as e:
+                        logger.debug("Skipping unreadable chat session file %s: %s", file, e)
                         continue
-                    
+
         # Sort by updated_at desc
         sessions.sort(key=lambda x: x["updated_at"], reverse=True)
         return {"status": "success", "sessions": sessions}
     except Exception as e:
-        print(f"Error listing sessions: {e}")
+        logger.warning("Error listing sessions: %s", e)
         return {"status": "success", "sessions": []} # Fallback to empty
 
 @router.get("/session/{session_id}")

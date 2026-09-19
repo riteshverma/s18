@@ -66,7 +66,7 @@ class ScanTracker:
             
             # If modification time is the same, file hasn't changed
             return abs(current_mtime - tracked_mtime) < 1  # 1 second tolerance
-        except:
+        except Exception:
             return False
     
     def mark_scanned(self, source_type: str, file_path: Path):
@@ -78,7 +78,7 @@ class ScanTracker:
         
         try:
             mtime = file_path.stat().st_mtime
-        except:
+        except Exception:
             mtime = 0
         
         self.data[source_type][rel_path] = {

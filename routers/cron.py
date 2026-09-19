@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException, Body
-from typing import List, Optional
+from fastapi import APIRouter, HTTPException
+from typing import List
 from pydantic import BaseModel
 from core.scheduler import scheduler_service, JobDefinition
 

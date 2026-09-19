@@ -1,7 +1,6 @@
 from pathlib import Path
 import hashlib
 import shutil
-import os
 
 source_dir = Path("/Users/rohanshravan/TSAI/Arcturus/memory/session_summaries_index")
 target_dir = Path("/Users/rohanshravan/TSAI/Arcturus/data/conversation_history")

@@ -1,7 +1,6 @@
 # Settings Router - Manages system configuration and dependencies (Ollama)
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
 import requests
 import os
 
@@ -24,7 +23,6 @@ from config.settings_loader import (
     _should_force_gemini_for_hosted,
 )
 from core.supabase_auth import require_supabase_user
-from shared.state import settings
 
 router = APIRouter(dependencies=[Depends(require_supabase_user)])
 

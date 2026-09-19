@@ -4,6 +4,7 @@ Handles test manifest, test generation triggers, and test execution.
 """
 import os
 import json
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -13,8 +14,10 @@ from typing import List, Optional, Dict, Any
 
 # Add project root to path to allow importing tools and agents
 sys.path.append(str(Path(__file__).parent.parent))
-from tools.ast_differ import analyze_file, FileAnalysis
+from tools.ast_differ import analyze_file
 from agents.base_agent import AgentRunner
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tests", tags=["tests"])
 
@@ -78,7 +81,7 @@ def load_settings(path: str) -> dict:
     try:
         with open(settings_path, "r") as f:
             return json.load(f)
-    except:
+    except (OSError, ValueError):
         return {"testing": {"feedback_mode": "with_permission"}}
 
 def get_source_file_from_test(test_file: str, project_path: str) -> Optional[str]:
@@ -167,7 +170,7 @@ async def get_tests_for_file(path: str, file_path: str):
                 if current_hash != stored_hash:
                     has_changes = True
     except Exception as e:
-        print(f"Error checking file changes: {e}")
+        logger.warning("Error checking file changes for %s: %s", file_path, e)
 
     # Build function line map from analysis
     function_lines = {}
@@ -204,8 +207,8 @@ async def get_tests_for_file(path: str, file_path: str):
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and node.name == func_name:
                     return ast.get_source_segment(content, node)
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Could not extract test source for %s: %s", func_name, e)
         return None
 
     # Load test file content for code extraction
@@ -215,8 +218,8 @@ async def get_tests_for_file(path: str, file_path: str):
     if test_path.exists():
         try:
             test_file_content = test_path.read_text()
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Could not read test file %s: %s", test_path, e)
 
     # 1. Add top-level tests (from file-level generation)
     seen_tests = set()
@@ -384,7 +387,6 @@ async def generate_tests(request: GenerateTestsRequest):
         if isinstance(agent_output, dict):
             # Get test_code from the structured response (preferred)
             code = agent_output.get("test_code", "")
-            tests_generated = agent_output.get("tests_generated", [])
             
             # Fallback to other possible keys
             if not code:
@@ -395,7 +397,6 @@ async def generate_tests(request: GenerateTestsRequest):
                 code = str(agent_output)
         else:
             code = str(agent_output)
-            tests_generated = []
 
         # Handle DELETED signal
         if code.strip() == "DELETED":
@@ -448,9 +449,9 @@ async def generate_tests(request: GenerateTestsRequest):
                 # Just ensuring they exist in the file entry is enough for get_tests_for_file now.
                 
                 save_manifest(request.path, manifest)
-                print(f"✅ Updated manifest with {len(found_tests)} tests for {request.file_path}")
+                logger.info("Updated manifest with %d tests for %s", len(found_tests), request.file_path)
         except Exception as e:
-             print(f"⚠️ Failed to parse generated tests for manifest update: {e}")
+             logger.warning("Failed to parse generated tests for manifest update: %s", e)
         # ---------------------------------------------------------
         
         return {
@@ -461,7 +462,7 @@ async def generate_tests(request: GenerateTestsRequest):
         }
         
     except Exception as e:
-        print(f"Test Agent failed: {e}")
+        logger.error("Test Agent failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Test generation failed: {str(e)}")
 
 
@@ -510,6 +511,10 @@ async def generate_spec_tests(request: GenerateTestsRequest):
         
         # Handle DELETED signal
         if code.strip() == "DELETED":
+            # Spec-test path/manifest the cleanup below removes (mirrors the save path further down)
+            test_filename = f"test_{Path(request.file_path).name.replace('.py', '_spec.py')}"
+            test_path = get_arcturus_tests_dir(request.path) / test_filename
+            manifest = load_manifest(request.path)
             if test_path.exists():
                 os.remove(test_path)
             # Remove from manifest
@@ -542,7 +547,7 @@ async def generate_spec_tests(request: GenerateTestsRequest):
         }
         
     except Exception as e:
-        print(f"Test Agent failed: {e}")
+        logger.error("Test Agent failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Spec test generation failed: {str(e)}")
 
 
@@ -621,7 +626,7 @@ async def fix_test_failures(request: FixTestsRequest):
             }
             
             # Run DebuggerAgent
-            print(f"🤖 DebuggerAgent fixing {os.path.basename(source_file)}...")
+            logger.info("DebuggerAgent fixing %s...", os.path.basename(source_file))
             result = await runner.run_agent("DebuggerAgent", input_data)
             
             if result.get("success"):
@@ -640,7 +645,7 @@ async def fix_test_failures(request: FixTestsRequest):
                             "explanation": explanation
                         })
         except Exception as e:
-            print(f"Failed to fix {source_file}: {e}")
+            logger.warning("Failed to fix %s: %s", source_file, e)
             
     return {
         "success": True,
@@ -702,7 +707,7 @@ async def sync_missing_tests(request: SyncTestsRequest):
 
             if test_path.exists():
                 # Exists on disk but not in manifest -> REPAIR
-                print(f"🔧 Sync: Repairing manifest for {py_file} (found {test_filename})")
+                logger.info("Sync: Repairing manifest for %s (found %s)", py_file, test_filename)
                 try:
                     import ast
                     code = test_path.read_text()
@@ -718,12 +723,12 @@ async def sync_missing_tests(request: SyncTestsRequest):
                         save_manifest(request.path, manifest)
                         repaired.append(py_file)
                 except Exception as e:
-                    print(f"⚠️ Repair failed for {py_file}: {e}")
+                    logger.warning("Repair failed for %s: %s", py_file, e)
             else:
                 # Missing completely -> GENERATE
                 from routers.tests import generate_tests # Import here
                 
-                print(f"🔄 Sync: Generating missing tests for {py_file}")
+                logger.info("Sync: Generating missing tests for %s", py_file)
                 gen_req = GenerateTestsRequest(
                     path=request.path,
                     file_path=py_file,
@@ -740,7 +745,7 @@ async def sync_missing_tests(request: SyncTestsRequest):
         }
         
     except Exception as e:
-        print(f"Sync failed: {e}")
+        logger.error("Sync failed: %s", e, exc_info=True)
         return {"success": False, "error": str(e)}
 
 
@@ -760,10 +765,10 @@ async def run_tests(request: RunTestsRequest, background_tasks: BackgroundTasks)
         
     # Auto-install dependencies if missing
     try:
-        import pytest
-        import pytest_json_report
+        import pytest  # noqa: F401 -- availability check before pip-install fallback
+        import pytest_json_report  # noqa: F401 -- availability check before pip-install fallback
     except ImportError:
-        print("📦 Installing pytest dependencies (pytest, pytest-json-report)...")
+        logger.info("Installing pytest dependencies (pytest, pytest-json-report)...")
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "pytest", "pytest-json-report"],
             cwd=request.path, check=False, capture_output=True
@@ -801,18 +806,18 @@ async def run_tests(request: RunTestsRequest, background_tasks: BackgroundTasks)
     
     try:
         # Run pytest with JSON report
-        print(f"🐍 Executing tests using Python: {sys.executable}")
+        logger.info("Executing tests using Python: %s", sys.executable)
         cmd = [
             sys.executable, "-m", "pytest",
             str(tests_dir),
             "-v",
             "--tb=short",
-            f"--json-report",
+            "--json-report",
             f"--json-report-file={json_output_path}",
             "--json-report-indent=2"
         ]
         
-        print(f"[DEBUG] Running pytest command: {' '.join(cmd)}")
+        logger.debug("Running pytest command: %s", ' '.join(cmd))
         
         result = subprocess.run(
             cmd,
@@ -822,8 +827,8 @@ async def run_tests(request: RunTestsRequest, background_tasks: BackgroundTasks)
             timeout=120  # 2 min timeout
         )
         
-        print(f"[DEBUG] Pytest stdout:\n{result.stdout}")
-        print(f"[DEBUG] Pytest stderr:\n{result.stderr}")
+        logger.debug("Pytest stdout:\n%s", result.stdout)
+        logger.debug("Pytest stderr:\n%s", result.stderr)
         
         # Parse JSON output
         results = []
@@ -906,7 +911,6 @@ async def run_tests(request: RunTestsRequest, background_tasks: BackgroundTasks)
                 return stored_id == incoming_id or incoming_id.endswith("::" + stored_id) or stored_id in incoming_id
 
             for file_path, file_data in manifest.items():
-                match_found = False
                 
                 # Check top-level tests
                 for t in file_data.get("tests", []):
@@ -918,7 +922,6 @@ async def run_tests(request: RunTestsRequest, background_tasks: BackgroundTasks)
                             "last_run": timestamp,
                             "message": res.get("message")
                         }
-                        match_found = True
                 
                 # Check function-level tests
                 for func_name, func_info in file_data.get("functions", {}).items():
@@ -926,7 +929,6 @@ async def run_tests(request: RunTestsRequest, background_tasks: BackgroundTasks)
                         func_info["status"] = res["status"]
                         func_info["last_run"] = timestamp
                         func_info["message"] = res.get("message")
-                        match_found = True
                         
         save_manifest(request.path, manifest)
                         
@@ -939,7 +941,7 @@ async def run_tests(request: RunTestsRequest, background_tasks: BackgroundTasks)
         failed_tests = [r for r in results if r["status"] == "failing"]
         
         if failed > 0 and feedback_mode == "always":
-            print(f"🔄 Feedback mode 'always': Triggering auto-fix for {len(failed_tests)} failures")
+            logger.info("Feedback mode 'always': Triggering auto-fix for %d failures", len(failed_tests))
             # Create fix request
             fix_req = FixTestsRequest(path=request.path, failures=failed_tests)
             # Run in background to return results to UI quickly

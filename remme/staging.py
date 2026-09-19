@@ -89,7 +89,7 @@ class StagingStore:
                 hours_elapsed = (datetime.now() - last).total_seconds() / 3600
                 if hours_elapsed >= 6 and len(self.data["pending"]) > 0:
                     return True
-            except:
+            except Exception:
                 pass
         
         return False

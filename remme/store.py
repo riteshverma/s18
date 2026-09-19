@@ -762,7 +762,6 @@ class RemmeStore:
         self.memories = [m for m in self.memories if m["id"] != memory_id]
         
         # Rebuild Index
-        new_index = create_index_flat_l2(self.dimension)
         if self.memories:
             # We need embeddings to rebuild. 
             # OPTION 1: Store embeddings in a separate .npy file (Better for large scale)

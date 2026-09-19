@@ -2,9 +2,10 @@ from rich.console import Console
 from datetime import datetime
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
-import sys
+import logging
 import json
+
+logger = logging.getLogger(__name__)
 
 # MCP Protocol Safety: Redirect all rich output to stderr
 console = Console(stderr=True)
@@ -45,18 +46,21 @@ def sanitize_io_keys_list(keys):
 
 
 def log_step(title: str, payload=None, symbol: str = "🟢"):
-    print(f"\n[b]{symbol} {title}[/b]")
-    if payload:
-        from pprint import pprint
-        pprint(payload)
+    message = f"{symbol} {title}" if symbol else title
+    if payload is not None:
+        try:
+            message = f"{message} | {json.dumps(payload, ensure_ascii=True, default=str)}"
+        except (TypeError, ValueError):
+            message = f"{message} | {payload!r}"
+    logger.info(message)
 
 def log_error(message: str, err: Exception = None):
-    print(f"\n[red]❌ {message}[/red]")
-    if err:
-        print(f"[dim]{str(err)}[/dim]")
+    if err is not None:
+        logger.error("%s | %s", message, err)
+    else:
+        logger.error(message)
 
 def log_json_block(title: str, block):
-    from rich.panel import Panel
     # Use global console
 
     def truncate(value, max_length=150):
@@ -95,9 +99,6 @@ def log_json_block(title: str, block):
 
 
 def render_graph(graph, depth=1):
-    from rich.panel import Panel
-    from rich.table import Table
-    from rich.text import Text
     # Use global console
 
     def truncate(text, limit=200):
@@ -160,9 +161,7 @@ def render_graph(graph, depth=1):
 
     console.print(Panel(table, title="Agent Step Tracker", border_style="blue"))
 
-import json
 from pathlib import Path
-from datetime import datetime
 # Use global print/console
 
 def get_log_folder(session_id: str, base_dir: str = None) -> Path:

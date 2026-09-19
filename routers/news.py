@@ -1,15 +1,17 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import Optional
 import requests
 import feedparser
 from bs4 import BeautifulSoup
-import json
+import logging
 from datetime import datetime
 import asyncio
 from config.settings_loader import settings, save_settings
 
 router = APIRouter(prefix="/news", tags=["news"])
+
+logger = logging.getLogger(__name__)
 
 # Default News Sources
 DEFAULT_SOURCES = [
@@ -38,7 +40,7 @@ def get_news_settings():
             dirty = True
     
     if dirty:
-        print("  🔧 Automatically fixed broken Arxiv URL")
+        logger.info("Automatically fixed broken Arxiv URL")
         save_settings()
 
     return settings["news"]
@@ -95,7 +97,7 @@ async def add_source(request: AddSourceTabsRequest):
                 from urllib.parse import urljoin
                 feed_url = urljoin(request.url, feed_url)
     except Exception as e:
-        print(f"Feed discovery failed for {request.url}: {e}")
+        logger.warning("Feed discovery failed for %s: %s", request.url, e)
 
     new_source = {
         "id": request.name.lower().replace(" ", "_"),
@@ -154,7 +156,7 @@ async def fetch_hn():
                                 comments=len(story.get("kids", [])) if "kids" in story else 0
                             )
                 except Exception as e:
-                    print(f"Error fetching story {sid}: {e}")
+                    logger.warning("Error fetching story %s: %s", sid, e)
                 return None
             
             items = await asyncio.gather(*[fetch_story(sid) for sid in story_ids])
@@ -165,7 +167,7 @@ async def fetch_hn():
             return items
             
     except Exception as e:
-        print(f"HN fetch error: {e}")
+        logger.warning("HN fetch error: %s", e)
         # Return stale cache if available
         if _hn_cache["items"]:
             return _hn_cache["items"]
@@ -184,14 +186,14 @@ async def fetch_rss(source):
         response = requests.get(source["feed_url"], headers=headers, timeout=10)
         
         if response.status_code != 200:
-            print(f"RSS fetch failed for {source['name']}: Status {response.status_code}")
+            logger.warning("RSS fetch failed for %s: Status %s", source['name'], response.status_code)
             return []
             
         # Parse the content
         feed = feedparser.parse(response.content)
         
         if hasattr(feed, 'bozo_exception') and feed.bozo_exception:
-            print(f"RSS Parse Warning for {source['name']}: {feed.bozo_exception}")
+            logger.warning("RSS Parse Warning for %s: %s", source['name'], feed.bozo_exception)
 
         items = []
         for entry in feed.entries[:30]:
@@ -212,7 +214,7 @@ async def fetch_rss(source):
             ))
         return items
     except Exception as e:
-        print(f"RSS fetch error for {source['name']}: {e}")
+        logger.warning("RSS fetch error for %s: %s", source['name'], e)
         return []
 
 @router.get("/feed")
@@ -257,12 +259,11 @@ async def get_article_content(url: str):
                 head = requests.head(url, allow_redirects=True, timeout=2)
                 if 'application/pdf' in head.headers.get('Content-Type', '').lower():
                     is_pdf = True
-            except:
-                pass # Ignore network errors during check
+            except requests.RequestException as e:
+                logger.debug("Content-type HEAD probe failed for %s: %s", url, e) # Ignore network errors during check
 
         if is_pdf:
             try:
-                import io
                 import pymupdf  # Ensure pymupdf is available
                 
                 # Fetch content
@@ -290,7 +291,7 @@ async def get_article_content(url: str):
                 html_content += "</div>"
                 return {"status": "success", "html": html_content, "url": url, "title": pdf_title}
             except Exception as e:
-                print(f"PDF processing error for {url}: {e}")
+                logger.warning("PDF processing error for %s: %s", url, e)
                 # Fallback to playwright if PDF processing fails (might still fail there)
 
         from playwright.async_api import async_playwright
@@ -307,7 +308,7 @@ async def get_article_content(url: str):
             # Navigate to the URL and wait for content
             try:
                 await page.goto(url, wait_until="networkidle", timeout=15000)
-            except:
+            except Exception:
                 await page.goto(url, wait_until="domcontentloaded", timeout=15000)
             
             # Wait for dynamic content to settle and poll for title
@@ -327,8 +328,8 @@ async def get_article_content(url: str):
                     if h1_text and len(h1_text.strip()) > 20:
                         page_title = h1_text.strip()
                         break
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("H1 probe failed for %s: %s", url, e)
                 
                 if current_title and len(current_title) > 30:
                     page_title = current_title
@@ -343,14 +344,13 @@ async def get_article_content(url: str):
             
             # Inject a base tag so relative URLs resolve correctly
             if "<base" not in html_content.lower():
-                from urllib.parse import urljoin
                 base_tag = f'<base href="{url}" target="_blank">'
                 html_content = html_content.replace("<head>", f"<head>{base_tag}", 1)
             
             return {"status": "success", "html": html_content, "url": url, "title": page_title}
             
     except Exception as e:
-        print(f"Playwright rendering error for {url}: {e}")
+        logger.error("Playwright rendering error for %s: %s", url, e)
         return {"status": "error", "error": str(e)}
 
 @router.get("/reader")
@@ -364,11 +364,10 @@ async def get_reader_content(url: str):
                 head = requests.head(url, allow_redirects=True, timeout=2)
                 if 'application/pdf' in head.headers.get('Content-Type', '').lower():
                     is_pdf = True
-             except: pass
+             except requests.RequestException as e: logger.debug("Content-type HEAD probe failed for %s: %s", url, e)
 
         if is_pdf:
             try:
-                import functools
                 import pymupdf4llm
                 import requests
                 import pymupdf
@@ -381,7 +380,7 @@ async def get_reader_content(url: str):
                 
                 return {"status": "success", "content": md_text, "url": url}
             except Exception as e:
-                print(f"PDF Reader error for {url}: {e}")
+                logger.warning("PDF Reader error for %s: %s", url, e)
                 # Fallthrough to trafilatura if custom handling fails
 
         import trafilatura
@@ -396,7 +395,7 @@ async def get_reader_content(url: str):
             resp.raise_for_status()
             downloaded = resp.text
         except Exception as e:
-            print(f"Reader fetch failed for {url}: {e}")
+            logger.error("Reader fetch failed for %s: %s", url, e)
             return {"status": "error", "error": f"Failed to fetch content: {str(e)}"}
 
         if not downloaded:
@@ -419,7 +418,7 @@ async def get_reader_content(url: str):
         
         return {"status": "success", "content": content, "url": url}
     except Exception as e:
-        print(f"Reader extraction error for {url}: {e}")
+        logger.error("Reader extraction error for %s: %s", url, e)
         return {"status": "error", "error": str(e)}
 
 @router.get("/proxy")
@@ -438,7 +437,7 @@ async def proxy_content(url: str):
                 for chunk in r.iter_content(chunk_size=8192):
                     yield chunk
             except Exception as e:
-                print(f"Stream error: {e}")
+                logger.warning("Stream error: %s", e)
 
         # Forward content type
         content_type = r.headers.get("Content-Type", "application/octet-stream")
@@ -447,5 +446,5 @@ async def proxy_content(url: str):
         return StreamingResponse(iterfile(), media_type=content_type)
         
     except Exception as e:
-        print(f"Proxy error for {url}: {e}")
+        logger.error("Proxy error for %s: %s", url, e)
         raise HTTPException(status_code=500, detail=str(e))

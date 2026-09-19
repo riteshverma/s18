@@ -2,7 +2,7 @@ import json
 import asyncio
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger

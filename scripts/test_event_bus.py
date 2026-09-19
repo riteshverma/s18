@@ -1,6 +1,4 @@
 import asyncio
-import json
-import logging
 import sys
 # Imports removed
 
@@ -39,4 +37,6 @@ async def test_event_bus():
     print("🎉 Event Bus Test Complete.")
 
 if __name__ == "__main__":
+    from core.logging_setup import configure_logging
+    configure_logging()
     asyncio.run(test_event_bus())

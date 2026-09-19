@@ -2,33 +2,24 @@ import sys
 import os
 import asyncio
 import subprocess
-from pathlib import Path
 
 # Windows: ProactorEventLoop required for asyncio subprocess (git clone, uv run)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest  # type: ignore[reportMissingImports]
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from core.loop import AgentLoop4
 from core.scheduler import scheduler_service
 from core.skills.manager import skill_manager
 from core.persistence import persistence_manager
-from core.graph_adapter import nx_to_reactflow
-from memory.context import ExecutionContextManager
-from remme.utils import get_embedding
 from config.settings_loader import (
-    settings,
-    save_settings,
-    reset_settings,
     reload_settings,
     get_mcp_startup_timeout,
     get_run_poll_timeout,
@@ -45,7 +36,6 @@ from shared.state import (
     get_multi_mcp,
     get_remme_store,
     get_remme_extractor,
-    PROJECT_ROOT,
 )
 from routers.remme import background_smart_scan  # Needed for lifespan startup
 from core.prometheus_metrics import (
@@ -90,6 +80,8 @@ async def _start_mcp_with_timeout(timeout_seconds: Optional[float] = None) -> No
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from core.logging_setup import configure_logging
+    configure_logging()
     print("API starting up...")
     boot_settings = reload_settings()
     agent_cfg = boot_settings.get("agent", {})

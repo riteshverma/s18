@@ -2,6 +2,7 @@
 import time
 import asyncio
 import json
+import logging
 import yaml
 import hashlib
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import Optional, Any
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parent.parent
 MODELS_JSON = ROOT / "config" / "models.json"
@@ -58,7 +61,7 @@ class ModelManager:
             self._settings = settings
             self.ollama_base_url = settings.get("ollama", {}).get("base_url", "http://127.0.0.1:11434")
             self.llama_cpp_base_url = settings.get("llama_cpp", {}).get("base_url", "http://127.0.0.1:8080")
-        except:
+        except Exception:
             self._settings = {}
             self.ollama_base_url = "http://127.0.0.1:11434"
             self.llama_cpp_base_url = "http://127.0.0.1:8080"
@@ -276,7 +279,7 @@ class ModelManager:
                 fallback_manager = self._build_azure_fallback_manager()
                 if fallback_manager is None:
                     raise RuntimeError(f"Azure OpenAI generation failed: {str(e)}")
-                print(f"[ModelManager] Azure generation failed; falling back to {fallback_manager.model_type}. Error: {e}")
+                logger.warning("[ModelManager] Azure generation failed; falling back to %s. Error: %s", fallback_manager.model_type, e)
                 text = await fallback_manager.generate_text(prompt)
                 self._set_last_usage(fallback_manager.last_usage)
 
@@ -341,7 +344,7 @@ class ModelManager:
         try:
             return ModelManager(model_name, provider=provider)
         except Exception as e:
-            print(f"[ModelManager] Failed to initialize fallback provider {provider}: {e}")
+            logger.warning("[ModelManager] Failed to initialize fallback provider %s: %s", provider, e)
             return None
 
     async def _azure_generate(self, prompt: str) -> str:
@@ -422,7 +425,7 @@ class ModelManager:
                     encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
                     images_base64.append(encoded)
                 except Exception as e:
-                    print(f"⚠️ Failed to encode image for Ollama: {e}")
+                    logger.warning("Failed to encode image for Ollama: %s", e)
         
         prompt = "\n".join(text_parts)
         

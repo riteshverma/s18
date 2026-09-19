@@ -1,10 +1,9 @@
 # Apps Router - Handles app CRUD, generation, and hydration
 import json
-import os
+import logging
 import re
 import shutil
 import time
-from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
@@ -14,6 +13,8 @@ from pydantic import BaseModel
 from shared.state import PROJECT_ROOT
 from config.settings_loader import load_settings
 from core.model_manager import ModelManager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 
@@ -84,7 +85,8 @@ async def list_apps():
                             "description": data.get("description", ""),
                             "lastModified": data.get("lastModified", 0)
                         })
-                    except:
+                    except Exception as e:
+                        logger.debug("Skipping unreadable app manifest %s: %s", ui_file, e)
                         continue
         # Sort by recently modified
         return sorted(apps, key=lambda x: x['lastModified'], reverse=True)
@@ -170,8 +172,8 @@ async def generate_app(request: GenerateAppRequest):
     """Generate a new app using AI based on user prompt."""
     import yaml
     try:
-        print(f"[Generate] Starting app generation: {request.name}")
-        print(f"[Generate] User prompt: {request.prompt[:100]}...")
+        logger.info("[Generate] Starting app generation: %s", request.name)
+        logger.debug("[Generate] User prompt: %s...", request.prompt[:100])
         
         # Load generation prompt
         prompt_file = PROJECT_ROOT / "prompts" / "AppGenerationPrompt.md"
@@ -181,7 +183,7 @@ async def generate_app(request: GenerateAppRequest):
         
         generation_prompt = prompt_file.read_text()
         generation_prompt = generation_prompt.replace("{{USER_PROMPT}}", request.prompt)
-        print(f"[Generate] Prompt prepared, length: {len(generation_prompt)} chars")
+        logger.info("[Generate] Prompt prepared, length: %d chars", len(generation_prompt))
         
         # Get model from settings (same as agents)
         config_dir = PROJECT_ROOT / "config"
@@ -195,29 +197,29 @@ async def generate_app(request: GenerateAppRequest):
         # Allow request override
         if request.model:
             model = request.model
-        print(f"[Generate] Using model: {model} (from config key: {model_key})")
+        logger.info("[Generate] Using model: %s (from config key: %s)", model, model_key)
         
         # Provider-driven generation (Azure/Gemini/Ollama via ModelManager)
-        print("[Generate] Calling configured provider...")
+        logger.info("[Generate] Calling configured provider...")
         response_text = (await _generate_with_configured_model(generation_prompt, request.model or model)).strip()
-        print(f"[Generate] Got response, length: {len(response_text)} chars")
+        logger.info("[Generate] Got response, length: %d chars", len(response_text))
         
         # Clean up response - extract JSON from markdown fences or explanatory text
         # Try to find JSON within markdown code fences
         json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
         if json_match:
             response_text = json_match.group(1).strip()
-            print("[Generate] Extracted JSON from markdown fences")
+            logger.debug("[Generate] Extracted JSON from markdown fences")
         else:
             # Try to find JSON by looking for the opening brace
             json_start = response_text.find('{')
             if json_start > 0:
                 response_text = response_text[json_start:].strip()
-                print(f"[Generate] Trimmed explanatory text, JSON starts at char {json_start}")
+                logger.debug("[Generate] Trimmed explanatory text, JSON starts at char %d", json_start)
         
         # Parse the generated JSON
         generated_data = json.loads(response_text)
-        print(f"[Generate] Parsed JSON successfully, {len(generated_data.get('cards', []))} cards")
+        logger.info("[Generate] Parsed JSON successfully, %d cards", len(generated_data.get('cards', [])))
         
         # Create app ID and folder
         app_id = f"app-{int(time.time() * 1000)}"
@@ -237,17 +239,15 @@ async def generate_app(request: GenerateAppRequest):
         # Save to file
         ui_file = app_folder / "ui.json"
         ui_file.write_text(json.dumps(generated_data, indent=2))
-        print(f"[Generate] Saved generated app to {ui_file}")
+        logger.info("[Generate] Saved generated app to %s", ui_file)
         
         return {"status": "success", "id": app_id, "data": generated_data}
     except json.JSONDecodeError as e:
-        print(f"[Generate] JSON parse error: {e}")
-        print(f"[Generate] Response was: {response_text[:500] if 'response_text' in dir() else 'N/A'}...")
+        logger.error("[Generate] JSON parse error: %s", e)
+        logger.debug("[Generate] Response was: %s...", response_text[:500] if 'response_text' in dir() else 'N/A')
         raise HTTPException(status_code=500, detail=f"Failed to parse AI response as JSON: {str(e)}")
     except Exception as e:
-        print(f"[Generate] Error: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("[Generate] Error: %s: %s", type(e).__name__, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -262,8 +262,8 @@ async def generate_from_report(request: GenerateFromReportRequest):
     """Generate a new app using AI based on a structured report."""
     import yaml
     try:
-        print(f"[GenerateFromReport] Starting app generation from report...")
-        print(f"[GenerateFromReport] Report length: {len(request.report_content)} chars")
+        logger.info("[GenerateFromReport] Starting app generation from report...")
+        logger.info("[GenerateFromReport] Report length: %d chars", len(request.report_content))
         
         # Load generation prompt
         prompt_file = PROJECT_ROOT / "prompts" / "ReportToAppPrompt.md"
@@ -277,11 +277,11 @@ async def generate_from_report(request: GenerateFromReportRequest):
         # Prepare globals context (limit size if too large)
         globals_str = json.dumps(request.globals_json, indent=2)
         if len(globals_str) > 100000:
-             print("[GenerateFromReport] Globals too large, truncating...")
+             logger.info("[GenerateFromReport] Globals too large, truncating...")
              globals_str = globals_str[:100000] + "...(truncated)"
              
         generation_prompt = generation_prompt.replace("{{GLOBALS_CONTENT}}", globals_str)
-        print(f"[GenerateFromReport] Prompt prepared, length: {len(generation_prompt)} chars")
+        logger.info("[GenerateFromReport] Prompt prepared, length: %d chars", len(generation_prompt))
         
         # Get model from settings
         config_dir = PROJECT_ROOT / "config"
@@ -295,11 +295,11 @@ async def generate_from_report(request: GenerateFromReportRequest):
         # Allow request override
         if request.model:
             model = request.model
-        print(f"[GenerateFromReport] Using model: {model} (from config key: {model_key})")
+        logger.info("[GenerateFromReport] Using model: %s (from config key: %s)", model, model_key)
         
-        print("[GenerateFromReport] Calling configured provider...")
+        logger.info("[GenerateFromReport] Calling configured provider...")
         response_text = (await _generate_with_configured_model(generation_prompt, request.model or model)).strip()
-        print(f"[GenerateFromReport] Got response, length: {len(response_text)} chars")
+        logger.info("[GenerateFromReport] Got response, length: %d chars", len(response_text))
         
         # Clean up response
         json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
@@ -312,7 +312,7 @@ async def generate_from_report(request: GenerateFromReportRequest):
         
         # Parse JSON
         generated_data = json.loads(response_text)
-        print(f"[GenerateFromReport] Parsed JSON successfully, {len(generated_data.get('cards', []))} cards")
+        logger.info("[GenerateFromReport] Parsed JSON successfully, %d cards", len(generated_data.get('cards', [])))
         
         # Create app ID and folder
         app_id = f"app-{int(time.time() * 1000)}"
@@ -333,16 +333,14 @@ async def generate_from_report(request: GenerateFromReportRequest):
         # Save to file
         ui_file = app_folder / "ui.json"
         ui_file.write_text(json.dumps(generated_data, indent=2))
-        print(f"[GenerateFromReport] Saved generated app to {ui_file}")
+        logger.info("[GenerateFromReport] Saved generated app to %s", ui_file)
         
         return {"status": "success", "id": app_id, "data": generated_data}
     except json.JSONDecodeError as e:
-        print(f"[GenerateFromReport] JSON parse error: {e}")
+        logger.error("[GenerateFromReport] JSON parse error: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to parse AI response as JSON: {str(e)}")
     except Exception as e:
-        print(f"[GenerateFromReport] Error: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("[GenerateFromReport] Error: %s: %s", type(e).__name__, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -350,7 +348,7 @@ async def generate_from_report(request: GenerateFromReportRequest):
 async def hydrate_app(app_id: str, request: HydrateRequest = None):
     import yaml
     try:
-        print(f"[Hydrate] Starting hydration for app: {app_id}")
+        logger.info("[Hydrate] Starting hydration for app: %s", app_id)
         
         # Load the app
         app_folder = PROJECT_ROOT / "apps" / app_id
@@ -360,7 +358,7 @@ async def hydrate_app(app_id: str, request: HydrateRequest = None):
             raise HTTPException(status_code=404, detail="App not found")
         
         app_data = json.loads(ui_file.read_text())
-        print(f"[Hydrate] Loaded app with {len(app_data.get('cards', []))} cards")
+        logger.info("[Hydrate] Loaded app with %d cards", len(app_data.get('cards', [])))
         
         # Load hydration prompt
         prompt_file = PROJECT_ROOT / "prompts" / "AppHydrationPrompt.md"
@@ -379,10 +377,10 @@ async def hydrate_app(app_id: str, request: HydrateRequest = None):
         user_prompt = ""
         if request and hasattr(request, 'user_prompt') and request.user_prompt:
             user_prompt = request.user_prompt
-            print(f"[Hydrate] User preferences: {user_prompt[:100]}...")
+            logger.debug("[Hydrate] User preferences: %s...", user_prompt[:100])
         hydration_prompt = hydration_prompt.replace("{{USER_PROMPT}}", user_prompt)
         
-        print(f"[Hydrate] Prompt prepared with date {current_date}, length: {len(hydration_prompt)} chars")
+        logger.info("[Hydrate] Prompt prepared with date %s, length: %d chars", current_date, len(hydration_prompt))
         
         # Get model from settings (same as agents)
         config_dir = PROJECT_ROOT / "config"
@@ -396,11 +394,11 @@ async def hydrate_app(app_id: str, request: HydrateRequest = None):
         # Allow request override
         if request and hasattr(request, 'model') and request.model:
             model = request.model
-        print(f"[Hydrate] Using model: {model} (from config key: {model_key})")
+        logger.info("[Hydrate] Using model: %s (from config key: %s)", model, model_key)
         
-        print("[Hydrate] Calling configured provider...")
+        logger.info("[Hydrate] Calling configured provider...")
         response_text = (await _generate_with_configured_model(hydration_prompt, request.model or model)).strip()
-        print(f"[Hydrate] Got response, length: {len(response_text)} chars")
+        logger.info("[Hydrate] Got response, length: %d chars", len(response_text))
         
         # Clean up response - extract JSON from markdown fences or explanatory text
         # Gemini often adds "Okay, here's the JSON:" or similar before the actual JSON
@@ -408,17 +406,17 @@ async def hydrate_app(app_id: str, request: HydrateRequest = None):
         json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
         if json_match:
             response_text = json_match.group(1).strip()
-            print("[Hydrate] Extracted JSON from markdown fences")
+            logger.debug("[Hydrate] Extracted JSON from markdown fences")
         else:
             # Try to find JSON by looking for the opening brace
             json_start = response_text.find('{')
             if json_start > 0:
                 response_text = response_text[json_start:].strip()
-                print(f"[Hydrate] Trimmed explanatory text, JSON starts at char {json_start}")
+                logger.debug("[Hydrate] Trimmed explanatory text, JSON starts at char %d", json_start)
         
         # Parse the hydrated JSON
         hydrated_data = json.loads(response_text)
-        print(f"[Hydrate] Parsed JSON successfully, {len(hydrated_data.get('cards', []))} cards")
+        logger.info("[Hydrate] Parsed JSON successfully, %d cards", len(hydrated_data.get('cards', [])))
         
         # Update lastHydrated timestamp
         hydrated_data["lastHydrated"] = int(time.time() * 1000)
@@ -426,15 +424,13 @@ async def hydrate_app(app_id: str, request: HydrateRequest = None):
         
         # Save back
         ui_file.write_text(json.dumps(hydrated_data, indent=2))
-        print(f"[Hydrate] Saved hydrated app to {ui_file}")
+        logger.info("[Hydrate] Saved hydrated app to %s", ui_file)
         
         return {"status": "success", "id": app_id, "data": hydrated_data}
     except json.JSONDecodeError as e:
-        print(f"[Hydrate] JSON parse error: {e}")
-        print(f"[Hydrate] Response was: {response_text[:500] if 'response_text' in dir() else 'N/A'}...")
+        logger.error("[Hydrate] JSON parse error: %s", e)
+        logger.debug("[Hydrate] Response was: %s...", response_text[:500] if 'response_text' in dir() else 'N/A')
         raise HTTPException(status_code=500, detail=f"Failed to parse AI response as JSON: {str(e)}")
     except Exception as e:
-        print(f"[Hydrate] Error: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("[Hydrate] Error: %s: %s", type(e).__name__, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

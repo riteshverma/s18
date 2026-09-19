@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import sys
@@ -8,6 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -19,11 +22,6 @@ try:
 except ImportError:
     from .stdio_safety import configure_mcp_stdio_logging
 
-
-# MCP protocol safety: avoid stdout noise.
-def print(*args, **kwargs):
-    sys.stderr.write(" ".join(map(str, args)) + "\n")
-    sys.stderr.flush()
 
 configure_mcp_stdio_logging()
 
@@ -196,7 +194,7 @@ def _internal_labs_from_history(patient_id: str) -> List[Dict[str, Any]]:
             continue
         validated, err = validate_cbc_payload(payload)
         if err is not None:
-            print(f"[mockehr] CBC payload validation failed (session skipped): {err}")
+            logger.warning("[mockehr] CBC payload validation failed (session skipped): %s", err)
             continue
         graph = _normalize_dict(content.get("graph"))
         timestamp = content.get("timestamp") or graph.get("created_at") or _now_iso()

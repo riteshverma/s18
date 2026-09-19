@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 import re
 
@@ -29,7 +28,7 @@ def backfill_notes():
     
     # Clean up old notes
     if notes_dir.exists():
-        print(f"Cleaning data/Notes/Arcturus...")
+        print("Cleaning data/Notes/Arcturus...")
         for f in notes_dir.glob("*.md"):
             f.unlink()
     

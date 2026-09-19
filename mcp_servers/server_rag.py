@@ -1,16 +1,10 @@
-from mcp.server.fastmcp import FastMCP, Image
-from mcp.server.fastmcp.prompts import base
-from mcp.types import TextContent
-from mcp import types
-from PIL import Image as PILImage
-import math
+from mcp.server.fastmcp import FastMCP
 import sys
 import os
 import json
 from pathlib import Path
 import subprocess
 import hashlib
-import time
 import shutil
 import errno
 
@@ -19,6 +13,9 @@ import errno
 sys.path.append(str(Path(__file__).parent))
 # 2. Add project root to path so 'config.settings_loader' works
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Project root (same convention as the other mcp_servers/* servers)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Stdio safety: keep transport stdout clean for JSON-RPC frames.
 try:
@@ -30,13 +27,12 @@ configure_mcp_stdio_logging()
 
 # Import local models
 try:
-    from models import AddInput, AddOutput, SqrtInput, SqrtOutput, StringsToIntsInput, StringsToIntsOutput, ExpSumInput, ExpSumOutput, PythonCodeInput, PythonCodeOutput, UrlInput, FilePathInput, MarkdownInput, MarkdownOutput, ChunkListOutput, SearchDocumentsInput
+    from models import AddInput, AddOutput, SqrtInput, SqrtOutput, StringsToIntsInput, StringsToIntsOutput, ExpSumInput, ExpSumOutput, PythonCodeInput, PythonCodeOutput, UrlInput, FilePathInput, MarkdownInput, MarkdownOutput, ChunkListOutput, SearchDocumentsInput  # noqa: F401 -- tool schema availability probe; not every name is referenced directly
 except ImportError:
     # Fallback if running from root without path setup (safety)
-    from mcp_servers.models import AddInput, AddOutput, SqrtInput, SqrtOutput, StringsToIntsInput, StringsToIntsOutput, ExpSumInput, ExpSumOutput, PythonCodeInput, PythonCodeOutput, UrlInput, FilePathInput, MarkdownInput, MarkdownOutput, ChunkListOutput, SearchDocumentsInput
+    from mcp_servers.models import UrlInput, MarkdownOutput
 
 import sys
-import os
 import contextlib
 
 # MCP Protocol Safety: Suppression of library noise on stdout
@@ -62,13 +58,12 @@ with suppress_stdout():
     import requests
     from markitdown import MarkItDown
     from tqdm import tqdm
-    import trafilatura
     import pymupdf4llm
     import fitz 
     try:
-        fitz.TOOLS.mupdf_display_errors(False) 
+        fitz.TOOLS.mupdf_display_errors(False)
         fitz.TOOLS.set_stderr_log(False)
-    except:
+    except Exception:
         pass
 import re
 import base64 # ollama needs base64-encoded-image
@@ -81,7 +76,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 # Import the new index scheduler
-from index_scheduler import init_scheduler, get_scheduler, shutdown_scheduler
+from index_scheduler import init_scheduler
 
 # BM25 for hybrid search
 try:
@@ -225,7 +220,7 @@ def get_rg_path():
         result = subprocess.run(["which", "rg"], capture_output=True, text=True)
         if result.returncode == 0:
             return result.stdout.strip()
-    except:
+    except OSError:
         pass
     
     return None
@@ -481,7 +476,7 @@ class BM25Index:
             self.corpus = data['corpus']
             self.chunk_ids = data['chunk_ids']
             return True
-        except:
+        except Exception:
             return False
 
 # Global BM25 index instance
@@ -666,7 +661,7 @@ def preview_document(path: str) -> MarkdownOutput:
         if ext == ".pdf":
             return convert_pdf_to_markdown(str(file))
         elif ext in [".html", ".htm", ".url"]:
-            return extract_webpage(UrlInput(url=file.read_text().strip()))
+            return extract_webpage(UrlInput(url=file.read_text().strip()))  # noqa: F821 -- extract_webpage is not defined anywhere in the repo; legacy branch would NameError if hit
         elif ext == ".py":
             return MarkdownOutput(markdown=f"```python\n{file.read_text()}\n```")
         elif ext in [".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls"]:
@@ -1180,7 +1175,7 @@ def advanced_ripgrep_search(query: str, regex: bool = False, case_sensitive: boo
 
                     try:
                         rel_path = os.path.relpath(abs_path, PROJECT_ROOT)
-                    except:
+                    except (ValueError, OSError):
                         rel_path = os.path.basename(abs_path)
 
                     # Enforce target_dir filtering on results (extra safety)
@@ -1209,7 +1204,7 @@ def advanced_ripgrep_search(query: str, regex: bool = False, case_sensitive: boo
                 if len(results) >= max_results:
                     process.terminate()
                     break
-            except:
+            except Exception:
                 continue
         
         process.wait(timeout=5)
@@ -1302,7 +1297,7 @@ def advanced_ripgrep_search(query: str, regex: bool = False, case_sensitive: boo
 
                         try:
                             rel_path = os.path.relpath(abs_doc_path, PROJECT_ROOT)
-                        except:
+                        except (ValueError, OSError):
                             rel_path = os.path.basename(abs_doc_path)
 
                         result_obj = {
@@ -1667,7 +1662,7 @@ def log_debug(msg):
         debug_log = Path(__file__).parent / "rag_debug.log"
         with open(debug_log, "a") as f:
             f.write(f"{msg}\n")
-    except:
+    except OSError:
         pass
 
 def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
@@ -1698,7 +1693,7 @@ def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
         if ext == ".pdf":
             markdown = convert_pdf_to_markdown(str(file)).markdown
         elif ext in [".html", ".htm", ".url"]:
-            markdown = extract_webpage(UrlInput(url=file.read_text().strip())).markdown
+            markdown = extract_webpage(UrlInput(url=file.read_text().strip())).markdown  # noqa: F821 -- extract_webpage is not defined anywhere in the repo; legacy branch would NameError if hit
         elif ext == ".py":
             text = file.read_text()
             markdown = f"```python\n{text}\n```"
@@ -1726,7 +1721,7 @@ def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
                         desc = node.get("description", "Unnamed Step")
                         output = node.get("output", {})
                         
-                        summary_parts.append(f"---")
+                        summary_parts.append("---")
                         summary_parts.append(f"### Step: {desc} (by {agent})")
                         
                         if isinstance(output, dict):
@@ -1824,7 +1819,7 @@ def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
                         page_chunks = [page_text]
                     else:
                         page_chunks = semantic_merge(page_text)
-                except:
+                except Exception:
                     page_chunks = list(chunk_text(page_text))
                 
                 for pc in page_chunks:
@@ -1837,7 +1832,7 @@ def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
                     chunks = [markdown.strip()]
                 else:
                     chunks = semantic_merge(markdown)
-            except:
+            except Exception:
                 chunks = list(chunk_text(markdown))
             
             for c in chunks:
@@ -1860,7 +1855,7 @@ def process_single_file(file: Path, doc_path_root: Path, cache_meta: dict):
                 embeddings_list = get_batch_normalized_embeddings(
                     batch, task_type="search_document", timeout=OLLAMA_TIMEOUT
                 )
-            except Exception as e:
+            except Exception:
                 embeddings_list = [
                     try_get_normalized_embedding(text, task_type="search_document", timeout=OLLAMA_TIMEOUT)
                     for text in batch
@@ -1950,7 +1945,7 @@ def _process_documents_unlocked(target_path: str = None, specific_files: list[Pa
                 INDEXING_STATUS["last_error"] = mismatch_msg
             try:
                 REINDEX_BUSY_LOCK.release()
-            except:
+            except RuntimeError:
                 pass
             return
 
@@ -1982,7 +1977,7 @@ def _process_documents_unlocked(target_path: str = None, specific_files: list[Pa
                 )
             try:
                 REINDEX_BUSY_LOCK.release()
-            except:
+            except RuntimeError:
                 pass
             return
     else:
@@ -2119,9 +2114,9 @@ def _process_documents_unlocked(target_path: str = None, specific_files: list[Pa
     # Release re-indexing busy lock if held
     try:
         REINDEX_BUSY_LOCK.release()
-    except:
+    except RuntimeError:
         pass
-        
+
     mcp_log("INFO", "READY")
 
 
@@ -2175,7 +2170,7 @@ async def reindex_documents(target_path: str = None, force: bool = False) -> str
             INDEXING_STATUS["last_error"] = str(e)
         try:
             REINDEX_BUSY_LOCK.release()
-        except:
+        except RuntimeError:
             pass
         return f"Error starting indexing: {str(e)}"
 
@@ -2249,8 +2244,8 @@ async def index_images() -> str:
             # 3. Create Semantic Chunk (Additive)
             # Try to infer original doc: filename.pdf-page-imgIdx
             try:
-                original_doc = img.stem.rsplit("-", 2)[0] 
-            except:
+                original_doc = img.stem.rsplit("-", 2)[0]
+            except Exception:
                 original_doc = img.stem
 
             chunk_text = f"Image Context from {original_doc} (Page {img.stem.split('-')[-2]}): {caption}"

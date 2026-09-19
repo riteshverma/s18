@@ -7,10 +7,8 @@ during conversations and adds them to staging queue.
 
 import json
 import requests
-import sys
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from config.settings_loader import get_model, get_ollama_url, get_timeout
 from remme.staging import get_staging_store

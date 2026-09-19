@@ -1,6 +1,10 @@
 import os
 import ast
+import logging
 from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
+
 
 class CodeSkeletonExtractor:
     """
@@ -133,8 +137,8 @@ class CodeSkeletonExtractor:
             '.md', '.json', '.yaml', '.yml', '.toml'
         }
         
-        print(f"  📂 Scanning: {self.root_path}")
-        print(f"  🔍 Looking for extensions: {code_extensions}")
+        logger.info("Scanning: %s", self.root_path)
+        logger.debug("Looking for extensions: %s", code_extensions)
         
         for root, dirs, files in os.walk(self.root_path):
             # Skip ignored dirs
@@ -146,14 +150,14 @@ class CodeSkeletonExtractor:
                     full_path = os.path.join(root, file)
                     if not self.is_ignored(full_path):
                         rel_path = os.path.relpath(full_path, self.root_path)
-                        print(f"    ✓ Found: {rel_path}")
+                        logger.debug("Found: %s", rel_path)
                         # For Python, use AST skeleton; for others, read content directly
                         if ext == '.py':
                             results[rel_path] = self.extract_file_skeleton(full_path)
                         else:
                             results[rel_path] = self._read_file_content(full_path)
         
-        print(f"  📊 Total files extracted: {len(results)}")
+        logger.info("Total files extracted: %d", len(results))
         return results
     
     def _read_file_content(self, file_path: str, max_lines: int = 500) -> str:
@@ -239,7 +243,7 @@ class CodeSkeletonExtractor:
                         summary["total_lines"] += lines
                         
                 except Exception as e:
-                    print(f"Error scanning {rel_path}: {e}")
+                    logger.warning("Error scanning %s: %s", rel_path, e)
                     
         return {"files": file_stats, "summary": summary}
 

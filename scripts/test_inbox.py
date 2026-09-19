@@ -1,4 +1,3 @@
-import requests
 import sys
 
 BASE_URL = "http://localhost:8000"
@@ -7,12 +6,6 @@ def test_inbox():
     print("Testing Inbox API...")
     
     # 1. Create Notification
-    payload = {
-        "source": "CLI_Test",
-        "title": "Hello from CLI",
-        "body": "This is a **markdown** test message.",
-        "priority": 2
-    }
     
     # Note: This requires the server to be running. 
     # Since we can't easily assert on a running server in this strict environment without background processes,
@@ -24,7 +17,7 @@ def test_inbox():
     # That's much better for a self-contained test.
     
     sys.path.append(".")
-    from routers.inbox import send_to_inbox, get_notifications, mark_as_read, delete_notification, init_db
+    from routers.inbox import send_to_inbox, init_db
     
     print("✅ Module imported.")
     init_db()

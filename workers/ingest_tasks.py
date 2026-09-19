@@ -11,14 +11,13 @@ re-uploading bytes:
 from __future__ import annotations
 
 import base64
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from celery import chain
 
 from core.celery_app import celery_app
 from core.embedding import get_batch_normalized_embeddings
 from integrations.ingest import (
-    IngestRecord,
     chunk_record,
     chunk_text,
     get_job_store,

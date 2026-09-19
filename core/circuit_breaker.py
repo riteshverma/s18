@@ -11,10 +11,13 @@ States:
 """
 
 import time
+import logging
 from enum import Enum
 from threading import Lock
-from typing import Dict, Optional
+from typing import Dict
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitState(Enum):
@@ -108,15 +111,15 @@ class CircuitBreaker:
             self.failure_count = 0
             self.success_count = 0
             self.half_open_calls = 0
-            print(f"⚡ Circuit [{self.name}]: {old_state.value} → CLOSED (recovered)")
+            logger.info("Circuit [%s]: %s → CLOSED (recovered)", self.name, old_state.value)
         elif new_state == CircuitState.OPEN:
             self.half_open_calls = 0
             self.success_count = 0
-            print(f"🔴 Circuit [{self.name}]: {old_state.value} → OPEN (failing fast)")
+            logger.warning("Circuit [%s]: %s → OPEN (failing fast)", self.name, old_state.value)
         elif new_state == CircuitState.HALF_OPEN:
             self.half_open_calls = 0
             self.success_count = 0
-            print(f"🟡 Circuit [{self.name}]: {old_state.value} → HALF_OPEN (testing)")
+            logger.info("Circuit [%s]: %s → HALF_OPEN (testing)", self.name, old_state.value)
     
     def force_open(self):
         """Manually open the circuit."""

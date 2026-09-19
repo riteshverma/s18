@@ -45,3 +45,19 @@ dependencies = [
     "ag-ui-protocol>=0.1.18",
     "celery[redis]>=5.6.3",
 ]
+
+[tool.ruff]
+# Non-source paths: runtime artifacts, generated benchmark workspaces, vendored projects.
+extend-exclude = [
+    "data",
+    "benchmarks/clawbench/results",
+    "docs",
+    "models",
+    "gbrain",
+]
+
+[tool.ruff.lint]
+# Minimal gate for bug classes fixed by hand: bare `except:` (E722) and pyflakes (F):
+# unused imports/variables, shadowed builtins, undefined names, duplicate definitions.
+# Deliberately NOT formatting rules (E501 etc.) — legacy codebase, reformatting out of scope.
+select = ["E722", "F"]

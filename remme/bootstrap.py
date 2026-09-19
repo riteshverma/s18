@@ -6,7 +6,7 @@ Uses LLM to extract structured preferences from unstructured memory snippets.
 
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from config.settings_loader import get_model, load_settings
 from core.model_manager import ModelManager
