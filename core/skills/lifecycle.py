@@ -34,7 +34,9 @@ async def resolve_skill(
 
     resolved_skill_id = explicit_skill_id
     if not resolved_skill_id and _auto_match_allowed(integration_id, workflow_id):
-        resolved_skill_id = skill_manager.match_intent(query)
+        from core.decisions import resolve_skill_intent
+
+        resolved_skill_id = await resolve_skill_intent(query, skill_manager)
 
     if not resolved_skill_id:
         return None, query, None

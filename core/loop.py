@@ -21,6 +21,7 @@ from core.prometheus_metrics import (
     elapsed_ms,
     now_ms,
 )
+from core.decisions import ask_query_decisions
 from integrations.policies.workflow_guards import (
     enforce_cbc_full_mode_minimum_plan,
     enforce_mental_health_plan_guard,
@@ -457,6 +458,9 @@ class AgentLoop4:
                     break
 
                 # Note: The "Query" node is already 'running' in our bootstrap context
+                # One batched Jev call upgrades the regex guards below; {}
+                # (heuristic-only) whenever Jev is disabled, unkeyed or unreachable.
+                query_decisions = await ask_query_decisions(query)
                 # Validate CBC payloads for both fast AND full modes
                 if self._is_cbc_payload_query(query):
                     payload = extract_request_payload_from_query(query)
@@ -466,8 +470,8 @@ class AgentLoop4:
                         self.context.mark_failed("Query", msg)
                         raise RuntimeError(msg)
 
-                planner_memory_context = self._filter_memory_context_for_cbc(query, memory_context)
-                planner_memory_context = self._filter_memory_context_for_mental_health(query, planner_memory_context)
+                planner_memory_context = self._filter_memory_context_for_cbc(query, memory_context, query_decisions)
+                planner_memory_context = self._filter_memory_context_for_mental_health(query, planner_memory_context, query_decisions)
                 planner_memory_context = await self._compress_memory_context(query, planner_memory_context)
                 self.context.plan_graph.graph.setdefault("globals_schema", {})["compressed_memory_context"] = planner_memory_context
                 budget_cfg = reload_settings().get("agent", {})
@@ -482,7 +486,7 @@ class AgentLoop4:
                     },
                 }
 
-                if self._is_cbc_payload_query(query) and self._is_fast_mode(query):
+                if self._is_cbc_payload_query(query) and self._is_fast_mode(query, query_decisions):
                     plan_result = {
                         "success": True,
                         "output": {
@@ -568,7 +572,7 @@ class AgentLoop4:
 
                 # Fast-path for WISE CBC payloads (fast mode only):
                 # avoid expensive multi-step plans that frequently exceed frontend timeout windows.
-                if self._is_cbc_payload_query(query) and self._is_fast_mode(query):
+                if self._is_cbc_payload_query(query) and self._is_fast_mode(query, query_decisions):
                     out["plan_graph"] = {
                         "nodes": [
                             {
@@ -599,9 +603,9 @@ class AgentLoop4:
                     pg["edges"] = [{"source": "Query", "target": "T001"}]
                     out["next_step_id"] = "T001"
                 # For CBC full mode, enforce a deterministic minimum multi-step graph.
-                self._enforce_cbc_full_mode_minimum_plan(query, out)
+                self._enforce_cbc_full_mode_minimum_plan(query, out, query_decisions)
                 # For mental-health tasks, block CBC/lab-miner routing leakage.
-                mh_guard_applied = self._enforce_mental_health_plan_guard(query, out)
+                mh_guard_applied = self._enforce_mental_health_plan_guard(query, out, query_decisions)
                 if mh_guard_applied:
                     # Surface a compact marker in planner output so downstream adapters
                     # can expose this in API/debug flags without parsing full graphs.
@@ -774,23 +778,23 @@ class AgentLoop4:
     def _is_cbc_payload_query(self, query: str) -> bool:
         return is_cbc_payload_query(query)
 
-    def _is_fast_mode(self, query: str) -> bool:
-        return is_fast_mode(query)
+    def _is_fast_mode(self, query: str, decisions: dict | None = None) -> bool:
+        return is_fast_mode(query, decisions)
 
-    def _is_mental_health_task_query(self, query: str) -> bool:
-        return is_mental_health_task_query(query)
+    def _is_mental_health_task_query(self, query: str, decisions: dict | None = None) -> bool:
+        return is_mental_health_task_query(query, decisions)
 
-    def _filter_memory_context_for_cbc(self, query: str, memory_context):
-        return filter_memory_context_for_cbc(query, memory_context)
+    def _filter_memory_context_for_cbc(self, query: str, memory_context, decisions: dict | None = None):
+        return filter_memory_context_for_cbc(query, memory_context, decisions)
 
-    def _filter_memory_context_for_mental_health(self, query: str, memory_context):
-        return filter_memory_context_for_mental_health(query, memory_context)
+    def _filter_memory_context_for_mental_health(self, query: str, memory_context, decisions: dict | None = None):
+        return filter_memory_context_for_mental_health(query, memory_context, decisions)
 
-    def _enforce_cbc_full_mode_minimum_plan(self, query: str, out: dict):
-        enforce_cbc_full_mode_minimum_plan(query, out)
+    def _enforce_cbc_full_mode_minimum_plan(self, query: str, out: dict, decisions: dict | None = None):
+        enforce_cbc_full_mode_minimum_plan(query, out, decisions)
 
-    def _enforce_mental_health_plan_guard(self, query: str, out: dict) -> bool:
-        return enforce_mental_health_plan_guard(query, out)
+    def _enforce_mental_health_plan_guard(self, query: str, out: dict, decisions: dict | None = None) -> bool:
+        return enforce_mental_health_plan_guard(query, out, decisions)
 
     def _should_replan(self):
         """
