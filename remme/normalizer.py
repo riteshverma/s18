@@ -11,8 +11,7 @@ The normalizer reads raw extracted preferences from staging and:
 import json
 import requests
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from config.settings_loader import get_model, get_ollama_url, get_timeout
 from remme.staging import get_staging_store

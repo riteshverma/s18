@@ -100,4 +100,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from core.logging_setup import configure_logging
+    configure_logging()
     raise SystemExit(main())

@@ -28,6 +28,10 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from benchmarks.clawbench.transcript_builder import EventCollector
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -1097,6 +1101,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     os.environ.setdefault("PYTHONUTF8", "1")
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    from core.logging_setup import configure_logging
+    configure_logging()
     _ensure_python3_shim()
     parser = build_parser()
     args = parser.parse_args()

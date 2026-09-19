@@ -7,9 +7,8 @@ adds them to the staging queue for normalization.
 
 import json
 import requests
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from config.settings_loader import get_model, get_ollama_url, get_timeout
 from remme.staging import get_staging_store

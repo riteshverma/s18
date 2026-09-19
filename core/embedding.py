@@ -1,6 +1,6 @@
 import os
 import random
-import sys
+import logging
 import time
 from typing import Any, Optional
 
@@ -15,6 +15,8 @@ from config.settings_loader import (
     get_timeout,
     load_settings,
 )
+
+logger = logging.getLogger(__name__)
 
 EMBED_MODEL = get_model("embedding")
 OLLAMA_TIMEOUT = get_timeout()
@@ -459,5 +461,5 @@ def try_get_normalized_embedding(
     try:
         return get_normalized_embedding(text, task_type=task_type, timeout=timeout)
     except Exception as exc:
-        print(f"Embedding generation failed: {exc}", file=sys.stderr)
+        logger.error("Embedding generation failed: %s", exc)
         return None

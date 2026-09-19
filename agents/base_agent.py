@@ -1,6 +1,6 @@
-import re
 import yaml
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 from core.model_manager import ModelManager
@@ -11,15 +11,19 @@ from PIL import Image
 from datetime import datetime
 import os
 
+logger = logging.getLogger(__name__)
+
 # Alias map: planner-invented agent names -> actual agents in agent_config.yaml
 # Includes WISE CDSS architecture names so plans can use doc terminology (no refactor needed).
 AGENT_ALIASES = {
     # General / planner-invented
     "SearchLabsAgent": "RetrieverAgent",
     "SummarizationAgent": "SummarizerAgent",
+    "SummaryAgent": "SummarizerAgent",
     "NoteWriterAgent": "FormatterAgent",
     "NoteWriter": "FormatterAgent",
     "RAG": "RetrieverAgent",
+    "RagAgent": "RetrieverAgent",
     "QA": "QAAgent",
     "ParserAgent": "DistillerAgent",
     "ReportGeneratorAgent": "FormatterAgent",
@@ -147,23 +151,33 @@ class AgentRunner:
         output["plan_graph"] = pg
         return output
 
+    @staticmethod
+    def _debug_logging_enabled(agent_settings: dict) -> bool:
+        """Prompt/response capture is opt-in: agent.debug_logging or S18_DEBUG_LOGGING."""
+        if isinstance(agent_settings, dict) and agent_settings.get("debug_logging"):
+            return True
+        return os.getenv("S18_DEBUG_LOGGING", "").strip().lower() in {"1", "true", "yes"}
+
     async def run_agent(self, agent_type: str, input_data: dict, image_path: Optional[str] = None) -> dict:
         """Run a specific agent with input data and optional image"""
         # Resolve planner-invented aliases to actual configured agents
         agent_type = self._agent_aliases.get(agent_type, agent_type)
 
         if agent_type not in self.agent_configs:
-            import sys
             fallback = "ThinkerAgent"
-            print(
-                f"[WARN] Unknown agent type '{agent_type}'; falling back to {fallback}",
-                file=sys.stderr,
+            logger.warning(
+                "Unknown agent type '%s'; falling back to %s", agent_type, fallback
             )
             agent_type = fallback
             
         config = self.agent_configs[agent_type]
-        
+
         try:
+            # 0. Load fresh settings from disk once (drives debug logging and model selection)
+            from config.settings_loader import reload_settings
+            agent_settings = reload_settings().get("agent", {})
+            debug_logging = self._debug_logging_enabled(agent_settings)
+
             # 1. Load prompt template
             prompt_template = Path(config["prompt_file"]).read_text(encoding="utf-8")
             
@@ -207,25 +221,21 @@ class AgentRunner:
                 scope = scope_map.get(agent_type, "general")
                 user_prefs_text = f"\n---\n## User Preferences\n{get_compact_policy(scope)}\n---\n"
             except Exception as e:
-                print(f"⚠️ Could not load user preferences: {e}")
+                logger.warning("Could not load user preferences: %s", e)
                 user_prefs_text = ""
             
             full_prompt = f"CURRENT_DATE: {current_date}\n\n{prompt_template.strip()}{user_prefs_text}{tools_text}\n\n```json\n{json.dumps(input_data, indent=2)}\n```"
 
-            print(f"🛠️ [DEBUG] Generated Tools Text for {agent_type}:\n{tools_text}\n")
+            if debug_logging:
+                logger.debug("Generated Tools Text for %s:\n%s\n", agent_type, tools_text)
 
-            # 📝 LOGGING: Save prompt to file for debugging
-            debug_log_dir = Path(__file__).parent.parent / "memory" / "debug_logs"
-            debug_log_dir.mkdir(parents=True, exist_ok=True)
-            (debug_log_dir / "latest_prompt.txt").write_text(f"AGENT: {agent_type}\nCONFIG: {config['prompt_file']}\n\n{full_prompt}", encoding="utf-8")
+                # 📝 LOGGING: Save prompt to file for debugging
+                debug_log_dir = Path(__file__).parent.parent / "memory" / "debug_logs"
+                debug_log_dir.mkdir(parents=True, exist_ok=True)
+                (debug_log_dir / "latest_prompt.txt").write_text(f"AGENT: {agent_type}\nCONFIG: {config['prompt_file']}\n\n{full_prompt}", encoding="utf-8")
             log_step(f"🤖 {agent_type} invoked", payload={"prompt_file": config['prompt_file'], "input_keys": list(input_data.keys())}, symbol="🟦")
 
             # 4. Create model manager with user's selected model from settings
-            # IMPORTANT: Use reload_settings() to get fresh settings from disk
-            from config.settings_loader import reload_settings
-            fresh_settings = reload_settings()
-            agent_settings = fresh_settings.get("agent", {})
-            
             runtime_override = input_data.get("runtime_model_override", {})
             if not isinstance(runtime_override, dict):
                 runtime_override = {}
@@ -256,10 +266,11 @@ class AgentRunner:
             else:
                 response = await model_manager.generate_text(full_prompt)
             
-            # 📝 LOGGING: Save raw response
-            timestamp = datetime.now().strftime("%H%M%S")
-            (debug_log_dir / f"{timestamp}_{agent_type}_response.txt").write_text(response, encoding="utf-8")
-            (debug_log_dir / f"{timestamp}_{agent_type}_prompt.txt").write_text(full_prompt, encoding="utf-8")
+            # 📝 LOGGING: Save raw response for debugging
+            if debug_logging:
+                timestamp = datetime.now().strftime("%H%M%S")
+                (debug_log_dir / f"{timestamp}_{agent_type}_response.txt").write_text(response, encoding="utf-8")
+                (debug_log_dir / f"{timestamp}_{agent_type}_prompt.txt").write_text(full_prompt, encoding="utf-8")
 
             # 6. Parse JSON response dynamically (PlannerAgent must be strict; others allow plain-text fallback)
             if agent_type == "PlannerAgent":

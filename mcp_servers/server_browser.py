@@ -1,27 +1,17 @@
 import json
-from mcp.server.fastmcp import FastMCP, Context
-import httpx
-from bs4 import BeautifulSoup
-from typing import List, Dict, Optional, Any
-from dataclasses import dataclass
-import urllib.parse
-import sys
-import traceback
-from datetime import datetime
+import logging
+from mcp.server.fastmcp import FastMCP
 import asyncio
 import os
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Stdio safety: keep transport stdout clean for JSON-RPC frames.
 try:
     from stdio_safety import configure_mcp_stdio_logging
 except ImportError:
     from .stdio_safety import configure_mcp_stdio_logging
-
-# MCP Protocol Safety: Redirect print to stderr
-def print(*args, **kwargs):
-    sys.stderr.write(" ".join(map(str, args)) + "\n")
-    sys.stderr.flush()
 
 configure_mcp_stdio_logging()
 
@@ -34,7 +24,7 @@ try:
     BROWSER_USE_AVAILABLE = True
 except ImportError:
     BROWSER_USE_AVAILABLE = False
-    sys.stderr.write("⚠️ browser-use not installed. Vision features will be disabled.\n")
+    logger.warning("browser-use not installed. Vision features will be disabled.")
 
 load_dotenv()
 
@@ -103,12 +93,12 @@ async def search_web_with_text_content(string: str) -> dict:
         async def extract_one(i: int, url: str) -> dict:
             async with extract_semaphore:
                 try:
-                    print(f"Link: {url} | Status: Visiting...")
+                    logger.debug("Link: %s | Status: Visiting...", url)
                     web_result = await asyncio.wait_for(smart_web_extract(url), timeout=20)
                     text_content = web_result.get("best_text", "")[:4000]
                     text_content = text_content.replace('\n', ' ').replace('  ', ' ').strip()
                     token_count = len(text_content) // 4
-                    print(f"Link: {url} | Status: Extracted | Tokens: {token_count}")
+                    logger.debug("Link: %s | Status: Extracted | Tokens: %d", url, token_count)
                     return {
                         "url": url,
                         "content": text_content if text_content.strip() else "[error] No readable content found",
@@ -116,7 +106,7 @@ async def search_web_with_text_content(string: str) -> dict:
                         "rank": i + 1,
                     }
                 except Exception as e:
-                    print(f"Link: {url} | Status: Failed | Error: {str(e)}")
+                    logger.warning("Link: %s | Status: Failed | Error: %s", url, e)
                     return {"url": url, "content": f"[error] {str(e)}", "rank": i + 1}
 
         tasks = [extract_one(i, url) for i, url in enumerate(urls[:max_extracts])]
@@ -194,26 +184,27 @@ async def browser_use_action(string: str, headless: bool = True) -> str:
             model_name = agent_settings.get("default_model", "gemini-2.5-flash")
             ollama_base_url = settings.get("ollama", {}).get("base_url", "http://127.0.0.1:11434")
             llama_cpp_base_url = settings.get("llama_cpp", {}).get("base_url", "http://127.0.0.1:8080")
-        except:
+        except Exception:
+            logger.warning("Could not load agent settings; using Gemini defaults for browser_use_action")
             model_provider = "gemini"
             model_name = "gemini-2.5-flash"
             ollama_base_url = "http://127.0.0.1:11434"
             llama_cpp_base_url = "http://127.0.0.1:8080"
-        
+
         # Initialize LLM based on provider
         if model_provider == "ollama":
             try:
                 from langchain_ollama import ChatOllama
                 llm = ChatOllama(model=model_name, base_url=ollama_base_url)
-                print(f"🖥️ Browser Use: Using Ollama model {model_name}")
+                logger.info("Browser Use: Using Ollama model %s", model_name)
             except ImportError:
-                print("⚠️ langchain_ollama not installed, falling back to Gemini")
+                logger.warning("langchain_ollama not installed, falling back to Gemini")
                 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
         elif model_provider == "azure_openai":
             try:
                 from langchain_openai import AzureChatOpenAI  # type: ignore[reportMissingImports]
             except ImportError:
-                print("⚠️ langchain_openai not installed, falling back to Gemini")
+                logger.warning("langchain_openai not installed, falling back to Gemini")
                 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
             else:
                 try:
@@ -230,9 +221,9 @@ async def browser_use_action(string: str, headless: bool = True) -> str:
                         azure_deployment=model_name,
                         temperature=0.2,
                     )
-                    print(f"☁️ Browser Use: Using Azure OpenAI deployment {model_name}")
+                    logger.info("Browser Use: Using Azure OpenAI deployment %s", model_name)
                 except Exception as e:
-                    print(f"⚠️ Azure OpenAI init failed ({e}), falling back to Gemini")
+                    logger.warning("Azure OpenAI init failed (%s), falling back to Gemini", e)
                     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
         elif model_provider == "llama_cpp":
             try:
@@ -246,16 +237,16 @@ async def browser_use_action(string: str, headless: bool = True) -> str:
                     base_url=base_url,
                     temperature=0.2,
                 )
-                print(f"🖥️ Browser Use: Using llama.cpp model {model_name}")
+                logger.info("Browser Use: Using llama.cpp model %s", model_name)
             except ImportError:
-                print("⚠️ langchain_openai not installed, falling back to Gemini")
+                logger.warning("langchain_openai not installed, falling back to Gemini")
                 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
             except Exception as e:
-                print(f"⚠️ llama.cpp init failed ({e}), falling back to Gemini")
+                logger.warning("llama.cpp init failed (%s), falling back to Gemini", e)
                 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"))
         else:
             llm = ChatGoogleGenerativeAI(model=model_name, google_api_key=os.getenv("GEMINI_API_KEY"))
-            print(f"☁️ Browser Use: Using Gemini model {model_name}")
+            logger.info("Browser Use: Using Gemini model %s", model_name)
         
         # Initialize Agent
         agent = Agent(
@@ -269,7 +260,7 @@ async def browser_use_action(string: str, headless: bool = True) -> str:
         return result if result else "Task completed but returned no text result."
 
     except Exception as e:
-        traceback.print_exc()
+        logger.error("browser_use_action failed: %s", e, exc_info=True)
         return f"Browser Action Failed: {str(e)}"
 
 if __name__ == "__main__":

@@ -44,6 +44,7 @@
     "agent": {
         "model_provider": "gemini",
         "default_model": "gemini-2.5-flash",
+        "debug_logging": false,
         "overrides": {
             "TestAgent": {
                 "model_provider": "ollama",
@@ -74,6 +75,9 @@
         "startup_timeout_seconds": 5,
         "stdio_connect_timeout_seconds": 120,
         "required_servers": []
+    },
+    "sandbox": {
+      "timeout_seconds": 20
     },
     "scheduler": {
         "timezone": "UTC"

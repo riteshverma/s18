@@ -1,6 +1,8 @@
 ﻿import json
+import os
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,10 +17,43 @@ from config.settings_loader import (
     normalize_runtime_ollama_base_url,
     reload_settings,
     restore_redacted_settings_for_update,
-    reset_settings,
     validate_llama_cpp_base_url,
     validate_ollama_base_url,
 )
+
+
+# Env vars that settings_loader treats as runtime overrides. Some modules
+# (e.g. core/model_manager.py) call load_dotenv() at import time, so a
+# developer's .env / shell (S18_PROFILE, OLLAMA_BASE_URL, GEMINI_API_KEY,
+# RAILWAY_*, ...) can leak into the test process and change reload_settings()
+# results. These tests remove them explicitly to stay machine-independent.
+_HOSTED_ENV_KEYS = (
+    "GEMINI_API_KEY",
+    "S18_PROFILE",
+    "S18_MODEL_PROVIDER",
+    "AGENT_MODEL_PROVIDER",
+    "S18_FORCE_GEMINI",
+    "OLLAMA_BASE_URL",
+    "OLLAMA_TIMEOUT",
+    "LLAMA_CPP_BASE_URL",
+    "LLAMA_CPP_TIMEOUT",
+)
+
+
+@contextmanager
+def _isolated_hosting_env():
+    """Snapshot and remove leaked hosting/provider env vars, restoring on exit."""
+    saved = {
+        key: os.environ[key]
+        for key in list(os.environ)
+        if key in _HOSTED_ENV_KEYS or key.startswith("RAILWAY_")
+    }
+    for key in saved:
+        del os.environ[key]
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
 
 
 class ValidateOllamaBaseUrlTests(unittest.TestCase):
@@ -217,7 +252,7 @@ class ProfileSettingsTests(unittest.TestCase):
             self.assertEqual(loaded.get("llama_cpp", {}).get("timeout"), 420)
 
     def test_railway_forces_gemini_over_ollama_profile(self):
-        with patch.dict(
+        with _isolated_hosting_env(), patch.dict(
             "os.environ",
             {
                 "RAILWAY_ENVIRONMENT_NAME": "production",
@@ -233,7 +268,7 @@ class ProfileSettingsTests(unittest.TestCase):
             )
 
     def test_loopback_ollama_with_gemini_key_forces_gemini_without_railway_env(self):
-        with patch.dict(
+        with _isolated_hosting_env(), patch.dict(
             "os.environ",
             {"GEMINI_API_KEY": "test-key"},
             clear=False,
@@ -284,7 +319,9 @@ class ProfileSettingsTests(unittest.TestCase):
             defaults_file = Path(tmpdir) / "settings.defaults.json"
             settings_file.write_text(json.dumps(base_settings))
             defaults_file.write_text(json.dumps(base_settings))
-            with patch.object(settings_loader, "SETTINGS_FILE", settings_file), patch.object(
+            with _isolated_hosting_env(), patch.object(
+                settings_loader, "SETTINGS_FILE", settings_file
+            ), patch.object(
                 settings_loader, "DEFAULTS_FILE", defaults_file
             ), patch.dict(
                 "os.environ",

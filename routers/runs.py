@@ -1,8 +1,7 @@
 # Runs Router - Handles agent run execution, listing, and management
 import asyncio
-import ast
 import json
-from pathlib import Path
+import logging
 from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Body, Depends
 from pydantic import BaseModel, Field
@@ -10,9 +9,6 @@ from typing import Any, Dict, Optional
 
 from shared.state import (
     active_loops,
-    get_multi_mcp,
-    get_remme_store,
-    get_remme_extractor,
     PROJECT_ROOT,
 )
 from core.graph_adapter import nx_to_reactflow
@@ -20,45 +16,65 @@ from core.supabase_auth import require_supabase_user
 from core.supabase_logging import (
     build_idempotency_key,
     compute_payload_hash,
-    log_clinical_result,
     log_inbound_request,
-    update_request_status,
 )
-from core.event_bus import event_bus
-from core.run_store import get_run_store
+from core.run_store import generate_run_id, get_run_store
 from core.run_executor import execute_resume, execute_run, is_celery_enabled
-from core.skills.lifecycle import resolve_skill, run_skill_failure, run_skill_success
-from remme.utils import get_embedding
+# Run execution lives in core.run_service; re-exported here so the endpoints
+# and existing tests keep their names.
+from core.run_service import (
+    _build_memory_context,  # noqa: F401 -- re-export; tests call runs._build_memory_context
+    _find_session_file,
+    _load_runs_index,
+    _normalize_run_status,
+    multi_mcp,
+)
 from config.settings_loader import settings, get_run_poll_timeout
 from integrations.contracts import CanonicalRunRequest
 from integrations.tenancy import (
     can_route_to_growth,
     resolve_tenant_context,
-    storage_namespace_for_tenant,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["Runs"])
-RUNS_INDEX_FILE = PROJECT_ROOT / "memory" / "runs.index.json"
-
-class _LazyShared:
-    def __init__(self, factory):
-        self._factory = factory
-        self._value = None
-
-    def _get(self):
-        if self._value is None:
-            self._value = self._factory()
-        return self._value
-
-    def __getattr__(self, name):
-        return getattr(self._get(), name)
-
-
-# Keep router imports lightweight; heavy MCP/FAISS objects are created on first use.
-multi_mcp = _LazyShared(get_multi_mcp)
-remme_store = _LazyShared(get_remme_store)
-remme_extractor = _LazyShared(get_remme_extractor)
 run_store = get_run_store()
+
+
+def _has_idempotency_signal(canonical_request: CanonicalRunRequest) -> bool:
+    """True when the request carries a caller-supplied idempotency signal.
+
+    Only a client idempotency_key or an external_event_id marks a request as a
+    retry candidate; plain repeated queries hash to the same payload-hash key
+    but must keep starting fresh runs.
+    """
+    return bool(canonical_request.idempotency_key or canonical_request.external_event_id)
+
+
+def _deduped_run_response(
+    adapter,
+    existing_run: Dict[str, Any],
+    canonical_request: CanonicalRunRequest,
+) -> Dict[str, Any]:
+    """Build the create-run response for a retry that matched an existing run."""
+    return adapter.from_canonical(
+        {
+            "id": existing_run["id"],
+            "request_id": existing_run.get("request_id"),
+            "status": _normalize_run_status(existing_run.get("status")),
+            "created_at": existing_run.get("created_at") or datetime.now().isoformat(),
+            "query": canonical_request.query,
+            "idempotency_key": existing_run.get("idempotency_key"),
+            "tenant_id": existing_run.get("tenant_id") or canonical_request.tenant_id,
+            "tenant_tier": existing_run.get("tenant_tier") or canonical_request.tenant_tier,
+            "data_region": existing_run.get("data_region") or canonical_request.data_region,
+            "poll_timeout_seconds": get_run_poll_timeout(),
+            # Lets callers and ops tell a deduped retry from a fresh accept.
+            "deduplicated": True,
+        },
+        canonical_request,
+    )
 
 
 # === Pydantic Models ===
@@ -97,783 +113,6 @@ class UserInputRequest(BaseModel):
     response: str
 
 
-# === Background Tasks ===
-
-def _infer_query_type(query: str) -> str:
-    q = (query or "").lower()
-    if "cbc" in q:
-        return "cbc"
-    if "rac" in q:
-        return "rac"
-    if "abdm" in q or "fhir" in q:
-        return "abdm_fhir"
-    if "mental_health" in q or "phq9" in q or "gad7" in q:
-        return "mental_health"
-    return "generic"
-
-
-def _infer_query_type_from_canonical(canonical_request: CanonicalRunRequest) -> str:
-    workflow_id = (canonical_request.workflow_id or "").strip().lower()
-    if workflow_id and workflow_id != "generic":
-        return workflow_id
-    return _infer_query_type(canonical_request.query)
-
-
-def _session_file_candidates(run_id: str, summaries_dir: Path):
-    """
-    Build likely session file locations for a run id.
-    Run ids are usually epoch timestamps (ms precision), so we can map to the
-    date-sharded path directly instead of scanning the whole tree.
-    """
-    filename = f"session_{run_id}.json"
-    candidates = []
-
-    # Fast path for default run ids generated by this service.
-    if run_id.isdigit():
-        ts_value = int(run_id)
-        # 13+ digits => milliseconds, otherwise seconds.
-        ts_seconds = ts_value / 1000.0 if len(run_id) >= 13 else float(ts_value)
-        try:
-            dt = datetime.fromtimestamp(ts_seconds)
-            candidates.append(
-                summaries_dir
-                / f"{dt.year}"
-                / f"{dt.month:02d}"
-                / f"{dt.day:02d}"
-                / filename
-            )
-        except (OverflowError, OSError, ValueError):
-            pass
-
-    # Compatibility fallback for custom/non-timestamp run ids.
-    for path in summaries_dir.glob(f"**/{filename}"):
-        candidates.append(path)
-
-    return candidates
-
-
-def _find_session_file(run_id: str, summaries_dir: Path) -> Optional[Path]:
-    for candidate in _session_file_candidates(run_id, summaries_dir):
-        if candidate.exists():
-            return candidate
-    return None
-
-
-def _read_run_entry_sync(session_file: Path) -> Optional[Dict[str, Any]]:
-    try:
-        data = json.loads(session_file.read_text(encoding="utf-8", errors="ignore"))
-        graph_details = data.get("graph", {})
-        query = graph_details.get("original_query") or graph_details.get("globals", {}).get("original_query", "Unknown Query")
-        created_at = graph_details.get("created_at") or datetime.fromtimestamp(session_file.stat().st_ctime).isoformat()
-        nodes = data.get("nodes", [])
-        node_statuses = [n.get("status", "pending") for n in nodes if n.get("id") != "ROOT"]
-        if any(s == "running" for s in node_statuses):
-            computed_status = "running"
-        elif any(s == "failed" for s in node_statuses):
-            computed_status = "failed"
-        elif all(s == "completed" for s in node_statuses) and node_statuses:
-            computed_status = "completed"
-        else:
-            computed_status = graph_details.get("status", "completed")
-        total_tokens = sum((n.get("total_tokens", 0) or 0) for n in nodes)
-        return {
-            "id": session_file.stem.replace("session_", ""),
-            "query": query,
-            "created_at": created_at,
-            "status": computed_status,
-            "total_tokens": total_tokens,
-            "path": str(session_file),
-        }
-    except Exception:
-        return None
-
-
-def _write_runs_index_sync(index_rows: list[Dict[str, Any]]) -> None:
-    RUNS_INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = RUNS_INDEX_FILE.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(index_rows, fh, indent=2)
-    tmp.replace(RUNS_INDEX_FILE)
-
-
-async def _refresh_runs_index() -> list[Dict[str, Any]]:
-    summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
-    if not summaries_dir.exists():
-        return []
-    session_files = list(summaries_dir.glob("**/session_*.json"))
-    rows = []
-    for entry in await asyncio.gather(*[asyncio.to_thread(_read_run_entry_sync, path) for path in session_files]):
-        if entry:
-            rows.append(entry)
-    rows.sort(key=lambda x: x["id"], reverse=True)
-    await asyncio.to_thread(_write_runs_index_sync, rows)
-    return rows
-
-
-async def _load_runs_index() -> list[Dict[str, Any]]:
-    if RUNS_INDEX_FILE.exists():
-        try:
-            data = await asyncio.to_thread(lambda: json.loads(RUNS_INDEX_FILE.read_text(encoding="utf-8")))
-            if isinstance(data, list):
-                return data
-        except Exception:
-            pass
-    return await _refresh_runs_index()
-
-
-def _normalize_run_status(raw_status: Optional[str]) -> str:
-    status = (raw_status or "failed").strip().lower()
-    if status == "success":
-        return "completed"
-    if status == "paused":
-        return "stopped"
-    if status not in {
-        "accepted",
-        "starting",
-        "running",
-        "waiting_input",
-        "completed",
-        "failed",
-        "stopped",
-        "interrupted",
-    }:
-        return "failed"
-    return status
-
-
-def _merge_run_metadata(run_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
-    existing = run_store.get_run(run_id) or {}
-    metadata = dict(existing.get("metadata") or {})
-    metadata.update(updates)
-    run_store.update_run(run_id, metadata=metadata)
-    return metadata
-
-
-def _retrieve_memories_sync(query: str):
-    return remme_store.search_text(query, limit=3, requester="run_context")
-
-
-async def _build_memory_context(run_id: str, query: str):
-    memory_context = ""
-    results = []
-
-    try:
-        # Keep sync embedding/search work off the event loop so /runs polling
-        # stays responsive under load.
-        results = await asyncio.to_thread(_retrieve_memories_sync, query)
-        if results:
-            memory_str = "\n".join([f"- {r['text']} (Confidence: {r.get('score', 0):.2f})" for r in results])
-            memory_context = f"PREVIOUS MEMORIES ABOUT USER:\n{memory_str}\n"
-            print(f" Remme: Injected {len(results)} memories into run {run_id}")
-    except Exception as e:
-        print(f"⚠️ Remme Retrieval Failed: {e}")
-
-    try:
-        rag_result = await multi_mcp.call_tool("rag", "search_stored_documents_rag", {"query": query})
-        if rag_result and hasattr(rag_result, "content") and isinstance(rag_result.content, list):
-            snippets = []
-            for item in rag_result.content:
-                if hasattr(item, "text"):
-                    try:
-                        parsed = ast.literal_eval(item.text)
-                        if isinstance(parsed, list):
-                            snippets.extend(parsed[:5])
-                        else:
-                            snippets.append(item.text[:500])
-                    except Exception:
-                        snippets.append((item.text or "")[:500])
-            if snippets:
-                rag_str = "\n".join(f"- {s[:400]}..." if len(s) > 400 else f"- {s}" for s in snippets[:8])
-                memory_context += f"\nRELEVANT DOCUMENT SNIPPETS (RAG):\n{rag_str}\n"
-                print(f"[{run_id}] Injected {len(snippets)} RAG snippets into run context")
-    except Exception as e:
-        print(f"⚠️ RAG context injection failed (non-fatal): {e}")
-
-    return memory_context, results
-
-
-async def _mirror_run_status_from_events(run_id: str, stop_signal: asyncio.Event):
-    queue = await event_bus.subscribe(max_queue_size=500)
-    try:
-        while not stop_signal.is_set():
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=0.5)
-            except asyncio.TimeoutError:
-                continue
-
-            data = event.get("data", {})
-            if data.get("session_id") != run_id:
-                continue
-
-            event_type = event.get("type")
-            if event_type == "run_started":
-                await asyncio.to_thread(run_store.update_status, run_id, "running")
-            elif event_type == "step_update":
-                status = data.get("status")
-                if status == "waiting_input":
-                    await asyncio.to_thread(run_store.update_status, run_id, "waiting_input")
-                elif status == "running":
-                    await asyncio.to_thread(run_store.update_status, run_id, "running")
-            elif event_type == "run_finished":
-                status = _normalize_run_status(data.get("status"))
-                await asyncio.to_thread(run_store.update_status, run_id, status)
-                return
-    finally:
-        event_bus.unsubscribe(queue)
-
-
-async def process_run(
-    run_id: str,
-    canonical_request: CanonicalRunRequest,
-    audit_context: Optional[Dict[str, Any]] = None,
-    tenant_context: Optional[Dict[str, str]] = None,
-):
-    """Background task to execute the agent loop"""
-    skill = None
-    resolved_skill_id: Optional[str] = None
-    skill_result: Optional[Dict[str, Any]] = None
-    query = canonical_request.query
-    tenant_context = tenant_context or {
-        "tenant_id": canonical_request.tenant_id,
-        "tenant_tier": canonical_request.tenant_tier,
-        "data_region": canonical_request.data_region or "in",
-    }
-    storage_namespace = storage_namespace_for_tenant(tenant_context, settings.get("tenancy", {}))
-    final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete", "run_id": run_id}
-    context = None
-    results = []
-    from core.loop import AgentLoop4
-
-    loop = AgentLoop4(multi_mcp=multi_mcp)
-    active_loops[run_id] = loop
-    try:
-        skill, query, resolved_skill_id = await resolve_skill(
-            query=canonical_request.query,
-            run_id=run_id,
-            agent_id=canonical_request.workflow_id or "runs",
-            explicit_skill_id=canonical_request.skill_id,
-            integration_id=canonical_request.integration_id,
-            workflow_id=canonical_request.workflow_id,
-        )
-    except Exception as e:
-        print(f"⚠️ Skill resolution failed for run {run_id}: {e}")
-        skill = None
-        resolved_skill_id = None
-        query = canonical_request.query
-    skill_source = None
-    if resolved_skill_id:
-        skill_source = "explicit" if canonical_request.skill_id else "intent"
-        await asyncio.to_thread(
-            _merge_run_metadata,
-            run_id,
-            {"skill_id": resolved_skill_id, "skill_source": skill_source},
-        )
-    await asyncio.to_thread(
-        run_store.update_status,
-        run_id,
-        "starting",
-        query=canonical_request.query,
-        integration_id=canonical_request.integration_id,
-        workflow_id=canonical_request.workflow_id,
-        tenant_id=canonical_request.tenant_id,
-        tenant_tier=canonical_request.tenant_tier,
-        data_region=canonical_request.data_region,
-    )
-    mirror_stop = asyncio.Event()
-    mirror_task = asyncio.create_task(_mirror_run_status_from_events(run_id, mirror_stop))
-    trace_token = multi_mcp.set_trace_context(
-        {
-            "integration_id": canonical_request.integration_id,
-            "workflow_id": canonical_request.workflow_id,
-            "contract_version": canonical_request.contract_version,
-            "tenant_id": canonical_request.tenant_id,
-            "tenant_tier": canonical_request.tenant_tier,
-            "data_region": canonical_request.data_region,
-            "storage_namespace": storage_namespace,
-        }
-    )
-    try:
-        # 1. RETRIEVE MEMORIES (Remme)
-        # Search for past relevant facts to injecting into this run
-        memory_context, results = await _build_memory_context(run_id, query)
-
-        # Execute the loop
-        # The loop will maintain its own internal context
-        print(f"[{run_id}] MEMORY CONTEXT READY ({len(memory_context)} chars)")
-        try:
-             context = await loop.run(
-                 query,
-                 [],
-                 {
-                     "_integration_meta": {
-                         "integration_id": canonical_request.integration_id,
-                         "workflow_id": canonical_request.workflow_id,
-                         "contract_version": canonical_request.contract_version,
-                     }
-                 },
-                 [],
-                 session_id=run_id,
-                 memory_context=memory_context,
-                 storage_namespace=storage_namespace,
-             )
-        except asyncio.CancelledError:
-             print(f"[{run_id}] Run cancelled.")
-             context = loop.context # Recovery context from loop if possible
-        
-        # 2. EXTRACT NEW MEMORIES (Remme)
-        # We put this in a finally block? No, because we want it only on success/completion of meaningful work.
-        # But if user stops it, we might want to extract partials.
-        # For now, let's leave it after run() but handle the stop case explicitly if context is returned.
-        
-    except Exception as e:
-        print(f"Run {run_id} failed: {e}")
-    finally:
-        mirror_stop.set()
-        if not mirror_task.done():
-            mirror_task.cancel()
-            try:
-                await mirror_task
-            except asyncio.CancelledError:
-                pass
-        multi_mcp.reset_trace_context(trace_token)
-        # Clean up
-        if run_id in active_loops:
-            del active_loops[run_id]
-            
-        # Attempt extraction if we have context (even if stopped)
-        # Note: 'context' variable needs to be accessible here.
-        pass 
-        # After run completes, extract new facts
-        try:
-            # Get the history from context (Plan Graph or Session Summary)
-            # For now, we don't return the full conversation history from loop.run directly
-            # But context has plan_graph... 
-            # Ideally we extract from the "Summary" generated by the ReportingAgent if available
-            # OR we can pass the query and the FINAL output.
-            
-            # Simple V1: Extract from Query + Final Answer (if available)
-            final_output = ""
-            # Try to find final output from graph
-            if context and context.plan_graph:
-                # Find nodes with output
-                for node_id in context.plan_graph.nodes:
-                    node = context.plan_graph.nodes[node_id]
-                    if node.get("status") == "completed" and node.get("output"):
-                        final_output += f"{node_id} Output: {str(node['output'])}\n"
-
-            history = [{"role": "assistant", "content": final_output}]
-            
-            print(f" Remme: Extracting facts from run {run_id}...")
-            # Pass existing memories from earlier search to context-aware extractor
-            # ⚡ RUN IN THREAD TO AVOID BLOCKING EVENT LOOP
-            commands, preferences = await asyncio.to_thread(
-                remme_extractor.extract, 
-                query, 
-                history, 
-                existing_memories=results
-            )
-            
-            if commands:
-                # Skip embedding work entirely once Ollama has failed on this
-                # run - each failing call can block ~12 minutes (two endpoints
-                # x OLLAMA_TIMEOUT). Fail fast and keep the event loop healthy.
-                embedding_available = True
-                for cmd in commands:
-                    if not isinstance(cmd, dict):
-                        print(f"⚠️ Remme: Skipping invalid command format: {cmd}")
-                        continue
-
-                    action = cmd.get("action")
-                    text = cmd.get("text")
-                    target_id = cmd.get("id")
-
-                    try:
-                        if action == "add" and text:
-                            if not embedding_available:
-                                continue
-                            emb = await asyncio.to_thread(get_embedding, text, "search_document")
-                            remme_store.add(text, emb, category="derived", source=f"run_{run_id}")
-                            print(f"✅ Remme: Added new fact: {text}")
-                        elif action == "update" and target_id and text:
-                            if not embedding_available:
-                                continue
-                            emb = await asyncio.to_thread(get_embedding, text, "search_document")
-                            remme_store.update_text(target_id, text, emb, source=f"run_{run_id}")
-                            print(f"🔄 Remme: Updated fact {target_id}: {text}")
-                        elif action == "delete" and target_id:
-                            remme_store.delete(target_id, source=f"run_{run_id}")
-                            print(f"🗑️ Remme: Deleted fact {target_id}")
-                    except RuntimeError as e:
-                        # core.embedding raises RuntimeError when Ollama is
-                        # unreachable. Trip the breaker so we don't pay the
-                        # timeout again for the remaining commands.
-                        embedding_available = False
-                        print(f"❌ Remme Action Failed (embedding unavailable): {e}")
-                    except Exception as e:
-                        print(f"❌ Remme Action Failed: {e}")
-            
-            # Apply preferences to hubs
-            if preferences:
-                from remme.extractor import apply_preferences_to_hubs
-                apply_preferences_to_hubs(preferences)
-                print(f"✅ Remme: Processed {len(preferences)} preference updates.")
-            
-            if commands:
-                print(f"✅ Remme: Processed {len(commands)} memory updates.")
-            elif not preferences:
-                print(f"ℹ️ Remme: No new facts extracted from run {run_id}.")
-
-        except Exception as e:
-            print(f"⚠️ Remme Extraction Failed: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # 3. AUTO-SAVE REPORTS TO NOTES
-            # 3. AUTO-SAVE REPORTS TO NOTES
-        try:
-             if context and context.plan_graph:
-                import re
-                
-                notes_dir = PROJECT_ROOT / "data" / "Notes" / "Arcturus"
-                notes_dir.mkdir(parents=True, exist_ok=True)
-                
-                def sanitize_filename(title):
-                    title = re.sub(r'[\\/*?:"<>|#]', "", title)
-                    title = title.replace("\n", " ").strip()
-                    return title[:60].strip()
-
-                def extract_title(content):
-                    match = re.search(r'^#+\s+(.+)$', content, re.MULTILINE)
-                    if match:
-                        return match.group(1).strip()
-                    # Fallback to first non-empty line
-                    lines = [l.strip() for l in content.split('\n') if l.strip()]
-                    if lines:
-                        return lines[0]
-                    return "Untitled Report"
-
-                for node_id in context.plan_graph.nodes:
-                    node = context.plan_graph.nodes[node_id]
-                    agent_type = node.get("agent", "")
-                    output = node.get("output", {})
-                    if not output: continue
-
-                    # Check for Formatter output keys
-                    markdown = output.get("markdown_report")
-                    if not markdown:
-                         for k, v in output.items():
-                             if k.startswith("formatted_report") and isinstance(v, str):
-                                 markdown = v
-                                 break
-                    
-                    if markdown and len(markdown) > 100:
-                         title = extract_title(markdown)
-                         filename = sanitize_filename(title) + ".md"
-                         target_path = notes_dir / filename
-                         
-                         if target_path.exists() and len(target_path.read_text(encoding='utf-8')) >= len(markdown):
-                             continue
-
-                         with open(target_path, 'w', encoding='utf-8') as f:
-                             f.write(markdown)
-                         print(f"✅ Auto-Saved Report to Notes: {filename}")
-
-        except Exception as e:
-            print(f"⚠️ Failed to auto-save report: {e}")
-            
-        if context and context.plan_graph:
-            # Derive status from the plan graph instead of optimistically flipping
-            # to "completed". Mirrors the logic used in process_resume so a run
-            # that was cancelled or crashed mid-flight is not reported as done.
-            failed_node_id = None
-            failed_error = None
-            for node_id in context.plan_graph.nodes:
-                node = context.plan_graph.nodes[node_id]
-                if node.get("status") == "failed":
-                    failed_node_id = node_id
-                    failed_error = node.get("error")
-                    break
-            if failed_node_id is not None:
-                final_result["status"] = "failed"
-                final_result["run_id"] = run_id
-                final_result["error"] = failed_error
-            else:
-                graph_status = context.plan_graph.graph.get("status")
-                node_statuses = [
-                    context.plan_graph.nodes[n].get("status", "pending")
-                    for n in context.plan_graph.nodes
-                    if n != "ROOT"
-                ]
-                if graph_status in {"completed", "failed", "paused", "stopped"}:
-                    derived_status = graph_status
-                elif node_statuses and all(s == "completed" for s in node_statuses):
-                    derived_status = "completed"
-                else:
-                    # Partial / running / interrupted - keep as failed so the run
-                    # does not masquerade as successful.
-                    derived_status = "failed"
-                final_result["status"] = derived_status
-                final_result["run_id"] = run_id
-        
-        if context:
-             try:
-                 output_str = ""
-                 if context.plan_graph:
-                     # 1. Look for FormatterAgent output first (The Final Report)
-                     for node_id in context.plan_graph.nodes:
-                         node = context.plan_graph.nodes[node_id]
-                         node_agent = node.get("agent", "")
-                         out = node.get("output", {})
-                         
-                         if node_agent == "FormatterAgent" or "Format" in node_agent:
-                             if isinstance(out, dict):
-                                 md = out.get("markdown_report")
-                                 if not md:
-                                     # Try all keys for something that looks like a report
-                                     for k, v in out.items():
-                                         if (k.startswith("formatted_report") or k == "report") and isinstance(v, str):
-                                             md = v
-                                             break
-                                 
-                                 if md:
-                                     output_str = md
-                                     break
-                                 
-                                 # Fallback: if 'output' is a long string
-                                 if isinstance(out.get("output"), str) and len(out["output"]) > 100:
-                                     output_str = out["output"]
-                                     break
-                     
-                     # 2. Fallback: Find any node with a substantial string output
-                     if not output_str:
-                         for node_id in reversed(list(context.plan_graph.nodes)):
-                             if node_id == "ROOT": continue
-                             node = context.plan_graph.nodes[node_id]
-                             out = node.get("output", {})
-                             
-                             if isinstance(out, dict):
-                                 # Try to find the largest string value in the dict (recursive search)
-                                 def find_largest_string(d):
-                                     largest = ""
-                                     for v in d.values():
-                                         if isinstance(v, str):
-                                             if len(v) > len(largest):
-                                                 largest = v
-                                         elif isinstance(v, dict):
-                                             sub = find_largest_string(v)
-                                             if len(sub) > len(largest):
-                                                 largest = sub
-                                     return largest
-                                 
-                                 largest_str = find_largest_string(out)
-                                 if len(largest_str) > 50:
-                                     output_str = largest_str
-                                     break
-                                     
-                             elif isinstance(out, str) and len(out) > 50:
-                                 output_str = out
-                                 break
-
-                 # 3. RUTHLESS CLEANING: Remove typical JSON leakage if content is actually Markdown
-                 if output_str:
-                     import re
-                     # If the output starts and ends with {} or [], it might be a JSON dump 
-                     # that contains a markdown_report field.
-                     if (output_str.startswith("{") and output_str.endswith("}")) or (output_str.startswith("[") and output_str.endswith("]")):
-                         try:
-                             # Try to parse it and extract the report field
-                             data = json.loads(output_str)
-                             if isinstance(data, dict):
-                                 # Look for report-like keys
-                                 for k in ["markdown_report", "formatted_report", "output", "summary", "report"]:
-                                     if data.get(k) and isinstance(data[k], str) and len(data[k]) > 50:
-                                         output_str = data[k]
-                                         break
-                         except:
-                             pass
-                     
-                     # Final check: remove block delimiters if LLM wrapped them in ```markdown
-                     output_str = re.sub(r'^```(?:markdown)?\n', '', output_str)
-                     output_str = re.sub(r'\n```$', '', output_str)
-
-                 final_result["output"] = output_str.strip() if output_str else "No substantial output found."
-                 if final_result.get("status") == "failed":
-                     final_result["summary"] = f"Failed: {final_result.get('error', 'Unknown error')}"
-                 else:
-                     final_result["summary"] = output_str.strip() if output_str else "Completed."
-             except Exception as e:
-                 print(f"⚠️ Extraction Error: {e}")
-
-        try:
-            artifact = {
-                "status": final_result.get("status"),
-                "summary": final_result.get("summary"),
-                "output": final_result.get("output"),
-                "error": final_result.get("error"),
-            }
-            if skill and final_result.get("status") == "failed":
-                await run_skill_failure(skill, str(final_result.get("error") or "Run failed"))
-            else:
-                skill_result = await run_skill_success(skill, artifact)
-                if skill_result:
-                    final_result["skill"] = skill_result
-                    if skill_result.get("summary"):
-                        final_result["summary"] = skill_result["summary"]
-        except Exception as e:
-            print(f"⚠️ Skill lifecycle hook failed for run {run_id}: {e}")
-        
-        if audit_context:
-            try:
-                final_status = final_result.get("status", "failed")
-                error_code = final_result.get("error") if final_status == "failed" else None
-                await update_request_status(
-                    idempotency_key=audit_context["idempotency_key"],
-                    run_id=run_id,
-                    status=final_status,
-                    error_code=error_code,
-                )
-                await log_clinical_result(
-                    {
-                        "run_id": run_id,
-                        "request_id": audit_context.get("request_id"),
-                        "idempotency_key": audit_context["idempotency_key"],
-                        "query_type": _infer_query_type_from_canonical(canonical_request),
-                        "normalized_result": {
-                            "summary": final_result.get("summary"),
-                            "output": final_result.get("output"),
-                        },
-                        "integration_id": canonical_request.integration_id,
-                        "workflow_id": canonical_request.workflow_id,
-                        "contract_version": canonical_request.contract_version,
-                        "tenant_id": canonical_request.tenant_id,
-                        "tenant_tier": canonical_request.tenant_tier,
-                        "data_region": canonical_request.data_region,
-                        "summary": final_result.get("summary"),
-                        "triage_flag": "high" if final_status == "failed" else "normal",
-                        "status": final_status,
-                        "error_code": error_code,
-                    }
-                )
-            except Exception as e:
-                print(f"⚠️ Supabase result logging failed for run {run_id}: {e}")
-        try:
-            await _refresh_runs_index()
-        except Exception:
-            pass
-
-        await asyncio.to_thread(
-            run_store.update_status,
-            run_id,
-            _normalize_run_status(final_result.get("status")),
-            summary=final_result.get("summary"),
-            error=final_result.get("error"),
-        )
-        if resolved_skill_id:
-            await asyncio.to_thread(
-                _merge_run_metadata,
-                run_id,
-                {
-                    "skill_id": resolved_skill_id,
-                    "skill_source": skill_source,
-                    "skill_result": skill_result,
-                },
-            )
-
-        return final_result
-
-
-async def process_resume(run_id: str, audit_context: Optional[Dict[str, Any]] = None):
-    """Background task to resume a saved run from disk."""
-    final_result: Dict[str, Any] = {"status": "failed", "summary": "Run did not complete", "run_id": run_id}
-    context = None
-    results = []
-    query = ""
-    from core.loop import AgentLoop4
-
-    loop = AgentLoop4(multi_mcp=multi_mcp)
-    active_loops[run_id] = loop
-    await asyncio.to_thread(run_store.update_status, run_id, "starting")
-    mirror_stop = asyncio.Event()
-    mirror_task = asyncio.create_task(_mirror_run_status_from_events(run_id, mirror_stop))
-    try:
-        summaries_dir = PROJECT_ROOT / "memory" / "session_summaries_index"
-        found_file = _find_session_file(run_id, summaries_dir)
-        if not found_file:
-            raise FileNotFoundError(f"Run {run_id} not found")
-
-        data = await asyncio.to_thread(lambda: json.loads(found_file.read_text(encoding="utf-8", errors="ignore")))
-        query = data.get("graph", {}).get("original_query") or ""
-        memory_context = data.get("graph", {}).get("memory_context")
-        if memory_context is None and query:
-            memory_context, results = await _build_memory_context(run_id, query)
-
-        context = await loop.resume(found_file, memory_context=memory_context)
-    except Exception as e:
-        print(f"Resume {run_id} failed: {e}")
-    finally:
-        mirror_stop.set()
-        if not mirror_task.done():
-            mirror_task.cancel()
-            try:
-                await mirror_task
-            except asyncio.CancelledError:
-                pass
-        if run_id in active_loops:
-            del active_loops[run_id]
-
-        if context and context.plan_graph:
-            for node_id in context.plan_graph.nodes:
-                node = context.plan_graph.nodes[node_id]
-                if node.get("status") == "failed":
-                    final_result["status"] = "failed"
-                    final_result["error"] = node.get("error")
-                    break
-            else:
-                final_result["status"] = context.plan_graph.graph.get("status", "completed")
-
-        if audit_context:
-            try:
-                await update_request_status(
-                    idempotency_key=audit_context["idempotency_key"],
-                    run_id=run_id,
-                    status=final_result.get("status", "failed"),
-                    error_code=final_result.get("error"),
-                )
-                await log_clinical_result(
-                    {
-                        "run_id": run_id,
-                        "request_id": audit_context.get("request_id"),
-                        "idempotency_key": audit_context["idempotency_key"],
-                        "query_type": _infer_query_type(query),
-                        "normalized_result": {
-                            "summary": final_result.get("summary"),
-                            "output": final_result.get("output"),
-                        },
-                        "summary": final_result.get("summary"),
-                        "triage_flag": "high" if final_result.get("status") == "failed" else "normal",
-                        "status": final_result.get("status", "failed"),
-                        "error_code": final_result.get("error"),
-                        "event": "resume",
-                    }
-                )
-            except Exception as e:
-                print(f"⚠️ Supabase resume logging failed for run {run_id}: {e}")
-        try:
-            await _refresh_runs_index()
-        except Exception:
-            pass
-
-        await asyncio.to_thread(
-            run_store.update_status,
-            run_id,
-            _normalize_run_status(final_result.get("status")),
-            summary=final_result.get("summary"),
-            error=final_result.get("error"),
-        )
-
-        return final_result
-
-
 # === Endpoints ===
 
 @router.post("/runs")
@@ -882,8 +121,9 @@ async def create_run(
     background_tasks: BackgroundTasks,
     user: Dict[str, Any] = Depends(require_supabase_user),
 ):
-    # Millisecond precision avoids collisions when multiple runs start in the same second.
-    run_id = str(int(datetime.now().timestamp() * 1000))
+    # Epoch-ms prefix keeps ids roughly time-ordered; the random suffix makes
+    # concurrent creations unique where a bare timestamp would collide.
+    run_id = generate_run_id()
     request_payload = request.model_dump()
     tenant_context = resolve_tenant_context(
         request_payload=request_payload,
@@ -918,14 +158,37 @@ async def create_run(
     )
     request_id = f"req_{run_id}"
 
+    # Retry dedupe: only requests carrying a real idempotency signal (a
+    # client-supplied key or an external event id) may collapse onto an
+    # existing run. The lookup is tenant-scoped so identical payloads from
+    # different tenants never collide.
+    dedupe_signal = _has_idempotency_signal(canonical_request)
+    if dedupe_signal:
+        existing_run = await asyncio.to_thread(
+            run_store.get_run_by_idempotency_key,
+            idempotency_key,
+            canonical_request.tenant_id,
+        )
+        if existing_run:
+            logger.info(
+                "Deduplicated retry for tenant=%s key=%s: returning existing run %s",
+                canonical_request.tenant_id,
+                idempotency_key,
+                existing_run["id"],
+            )
+            return _deduped_run_response(adapter, existing_run, canonical_request)
+
     audit_context = {
         "request_id": request_id,
         "idempotency_key": idempotency_key,
     }
     if can_route_to_growth(tenant_context, settings.get("tenancy", {})):
-        print(
-            f"[{run_id}] Growth routing hook active for tenant={tenant_context['tenant_id']} "
-            f"tier={tenant_context['tenant_tier']} region={tenant_context['data_region']}"
+        logger.info(
+            "[%s] Growth routing hook active for tenant=%s tier=%s region=%s",
+            run_id,
+            tenant_context["tenant_id"],
+            tenant_context["tenant_tier"],
+            tenant_context["data_region"],
         )
 
     try:
@@ -952,7 +215,7 @@ async def create_run(
             }
         )
     except Exception as e:
-        print(f"⚠️ Supabase inbound logging failed for run {run_id}: {e}")
+        logger.warning("Supabase inbound logging failed for run %s: %s", run_id, e)
 
     await asyncio.to_thread(
         run_store.upsert_run,
@@ -961,7 +224,10 @@ async def create_run(
         query=canonical_request.query,
         created_at=datetime.now().isoformat(),
         request_id=request_id,
-        idempotency_key=idempotency_key,
+        # Only signal-carrying requests persist a dedupe key: the unique
+        # (idempotency_key, tenant_id) index backstops concurrent creates,
+        # while plain repeated queries must stay free to re-run.
+        idempotency_key=idempotency_key if dedupe_signal else None,
         integration_id=canonical_request.integration_id,
         workflow_id=canonical_request.workflow_id,
         tenant_id=canonical_request.tenant_id,
@@ -1034,7 +300,7 @@ async def resume_run(
             }
         )
     except Exception as e:
-        print(f"⚠️ Supabase inbound resume logging failed for run {run_id}: {e}")
+        logger.warning("Supabase inbound resume logging failed for run %s: %s", run_id, e)
 
     await asyncio.to_thread(
         run_store.update_status,
@@ -1388,11 +654,11 @@ async def test_agent(
              # Formatter-specific additions
             if agent_type == "FormatterAgent":
                 global_data = G.graph.get('globals_schema', {}).copy()
-                print(f"🕵️‍♂️ DEBUG FORMATTER: run_id={run_id}")
-                print(f"🕵️‍♂️ DEBUG FORMATTER: file={found_file}")
-                print(f"🕵️‍♂️ DEBUG FORMATTER: globals_keys={list(global_data.keys())}")
+                logger.debug("DEBUG FORMATTER: run_id=%s", run_id)
+                logger.debug("DEBUG FORMATTER: file=%s", found_file)
+                logger.debug("DEBUG FORMATTER: globals_keys=%s", list(global_data.keys()))
                 if 'formatted_report_T010' in global_data:
-                    print(f"🕵️‍♂️ DEBUG FORMATTER: FOUND STALE KEY 'formatted_report_T010'!")
+                    logger.debug("DEBUG FORMATTER: FOUND STALE KEY 'formatted_report_T010'!")
                 payload["all_globals_schema"] = global_data
             return payload
 
@@ -1412,7 +678,7 @@ async def test_agent(
         final_execution_result = None
 
         for turn in range(1, max_turns + 1):
-            print(f"🔄 Test Mode: {agent_type} Iteration {turn}/{max_turns}")
+            logger.info("Test Mode: %s Iteration %d/%d", agent_type, turn, max_turns)
             
             # Run Agent
             result = await agent_runner.run_agent(agent_type, current_input)
@@ -1435,7 +701,7 @@ async def test_agent(
                 tool_name = tool_call.get("name")
                 tool_args = tool_call.get("arguments", {})
                 
-                print(f"🛠️ Test Mode: Executing Tool: {tool_name}")
+                logger.info("Test Mode: Executing Tool: %s", tool_name)
                 
                 try:
                     # Execute tool via MultiMCP
@@ -1463,7 +729,7 @@ async def test_agent(
                     continue # Loop to next turn
 
                 except Exception as e:
-                    print(f"Test Mode: Tool Execution Failed: {e}")
+                    logger.warning("Test Mode: Tool Execution Failed: %s", e)
                     current_input = build_agent_input(
                         instruction="The tool execution failed. Try a different approach or tool.",
                         previous_output=output,
@@ -1526,8 +792,7 @@ async def test_agent(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error("Agent test execution failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1576,7 +841,7 @@ async def save_agent_test(
         # 2.5 SPECIAL HANDLING: PlannerAgent Graph Update
         # If this is a PlannerAgent (has plan_graph in output), we must REBUILD the graph structure.
         if "plan_graph" in new_output:
-            print(f"🔄 Planner Update Detected for {node_id}. Rebuilding graph...")
+            logger.info("Planner Update Detected for %s. Rebuilding graph...", node_id)
             plan_graph = new_output["plan_graph"]
             
             # 1. Keep crucial nodes (ROOT and the Planner/Query node itself)
@@ -1624,7 +889,7 @@ async def save_agent_test(
             if not G.has_edge("ROOT", node_id):
                 G.add_edge("ROOT", node_id)
                 
-            print(f"✅ Graph Rebuilt. Nodes: {len(G.nodes)}, Edges: {len(G.edges)}")
+            logger.info("Graph Rebuilt. Nodes: %d, Edges: %d", len(G.nodes), len(G.edges))
 
         node_data = G.nodes[node_id]
         writes = node_data.get("writes", [])
@@ -1695,7 +960,7 @@ async def save_agent_test(
                      if current_status in ['completed', 'failed', 'running']:
                         G.nodes[desc_id]['status'] = 'stale'
         except Exception as e:
-             print(f"Warning: Failed to invalidate downstream nodes: {e}")
+             logger.warning("Failed to invalidate downstream nodes: %s", e)
         
         # 6. Save back to file
         # Use edges="edges" to match our expected format (not default "link")
@@ -1738,10 +1003,10 @@ async def save_agent_test(
                     # Write or overwrite (Run Again means user explicitly wants new version)
                     with open(target_path, 'w', encoding='utf-8') as f:
                         f.write(markdown)
-                    print(f"✅ Auto-Saved (Run Again) to Notes: {filename}")
+                    logger.info("Auto-Saved (Run Again) to Notes: %s", filename)
                     
             except Exception as e:
-                print(f"⚠️ Failed to auto-save to Notes: {e}")
+                logger.warning("Failed to auto-save to Notes: %s", e)
         
         return {
             "status": "success",
@@ -1752,6 +1017,5 @@ async def save_agent_test(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error("Failed to save agent test results: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,5 +1,6 @@
 import subprocess
 import os
+import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Tuple
@@ -10,6 +11,8 @@ import sys
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
 from tools.ast_differ import find_affected_functions
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/git", tags=["git"])
 
@@ -137,7 +140,7 @@ async def get_git_diff_content(path: str, file_path: str, staged: bool = False, 
             modified = run_git_command(["show", f"{commit_hash}:{file_path}"], path)
             try:
                 original = run_git_command(["show", f"{commit_hash}^:{file_path}"], path)
-            except:
+            except Exception:
                 # First commit or no parent for this file
                 original = ""
         elif staged:
@@ -148,7 +151,7 @@ async def get_git_diff_content(path: str, file_path: str, staged: bool = False, 
             # Unstaged: Original is Index, Modified is Working Tree (disk)
             try:
                 original = run_git_command(["show", f":{file_path}"], path)
-            except:
+            except Exception:
                 # If file is not in index (untracked), original is empty
                 original = ""
             
@@ -205,7 +208,7 @@ async def get_git_history(path: str, limit: int = 50, branch: Optional[str] = No
                     "files": [] # No longer fetched by default
                 })
         return history
-    except Exception as e:
+    except Exception:
         return []
 
 @router.get("/commit_files")
@@ -254,7 +257,7 @@ def ensure_gitignore(path: str):
                 # Strip logical lines to check presence
                 existing_lines = {line.strip() for line in f.readlines()}
         except Exception as e:
-            print(f"Error reading .gitignore: {e}")
+            logger.warning("Error reading .gitignore: %s", e)
             
     # Determine what's missing
     missing = []
@@ -273,7 +276,7 @@ def ensure_gitignore(path: str):
                 for m in missing:
                     f.write(f"{m}\n")
         except Exception as e:
-            print(f"Error writing .gitignore: {e}")
+            logger.warning("Error writing .gitignore: %s", e)
 
 
 
@@ -485,14 +488,13 @@ async def arcturus_auto_commit(request: ArcturusCommitRequest):
         return {"success": True, "committed": False, "message": "No changes to commit"}
     
     # DEBUG: Log raw status to investigate truncation
-    print(f"[DEBUG] git status output:\n{status}")
+    logger.debug("Git status output:\n%s", status)
 
     # Parse changed files BEFORE staging
-    import re
     changed_files = []
     
     # Debug raw output again just to be sure
-    print(f"[DEBUG] Raw git status:\n{status}")
+    logger.debug("Raw git status:\n%s", status)
     
     for line in status.split("\n"):
         if not line.strip(): continue
@@ -545,7 +547,6 @@ async def arcturus_auto_commit(request: ArcturusCommitRequest):
     # After successful commit, trigger test generation for changed Python files
     # =========================================================================
     test_generation_triggered = False
-    test_generation_files = []
     
     if python_files_changed:
         # Import here to avoid circular imports
@@ -553,7 +554,6 @@ async def arcturus_auto_commit(request: ArcturusCommitRequest):
         from routers.tests import generate_tests, GenerateTestsRequest
         
         test_generation_triggered = True
-        test_generation_files = python_files_changed
         
         # Run test generation asynchronously (fire-and-forget for now)
         async def trigger_test_generation():
@@ -570,7 +570,7 @@ async def arcturus_auto_commit(request: ArcturusCommitRequest):
                     )
                     
                     if not success:
-                        print(f"⚠️ Could not get diff for {py_file}")
+                        logger.warning("Could not get diff for %s", py_file)
                         continue
                         
                     added_ranges, removed_ranges1 = parse_diff_hunks(diff_out)
@@ -583,7 +583,7 @@ async def arcturus_auto_commit(request: ArcturusCommitRequest):
                         
                         affected_functions = find_affected_functions(current_content, added_ranges)
                     except Exception as e:
-                        print(f"Error analyzing current content of {py_file}: {e}")
+                        logger.warning("Error analyzing current content of %s: %s", py_file, e)
                         affected_functions = []
                         
                     # 3. Analyze Previous Content (for Deleted functions)
@@ -597,13 +597,13 @@ async def arcturus_auto_commit(request: ArcturusCommitRequest):
                             # Note: removed_ranges align with OLD content lines
                             deleted_functions = find_affected_functions(parent_content, removed_ranges1)
                     except Exception as e:
-                        print(f"Error analyzing parent content of {py_file}: {e}")
+                        logger.warning("Error analyzing parent content of %s: %s", py_file, e)
                         deleted_functions = []
                     
                     # Log what we found
-                    print(f"[{py_file}] Diff Analysis:")
-                    print(f"  Added Ranges: {added_ranges} -> Functions: {affected_functions}")
-                    print(f"  Removed Ranges: {removed_ranges1} -> Functions: {deleted_functions}")
+                    logger.debug("[%s] Diff Analysis:", py_file)
+                    logger.debug("  Added Ranges: %s -> Functions: %s", added_ranges, affected_functions)
+                    logger.debug("  Removed Ranges: %s -> Functions: %s", removed_ranges1, deleted_functions)
                     
                     # 4. Trigger Generation/Deletion
                     # Note: We need to update generate_tests to handle deletions
@@ -626,7 +626,7 @@ async def arcturus_auto_commit(request: ArcturusCommitRequest):
                     await generate_tests(req)
                     
                 except Exception as e:
-                    print(f"⚠️ Test generation failed for {py_file}: {e}")
+                    logger.warning("Test generation failed for %s: %s", py_file, e)
         
         # Schedule async task (non-blocking)
         asyncio.create_task(trigger_test_generation())

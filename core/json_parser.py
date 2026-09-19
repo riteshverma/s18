@@ -1,6 +1,10 @@
 import json
 import re
+import logging
 from json_repair import repair_json
+
+logger = logging.getLogger(__name__)
+
 
 class JsonParsingError(Exception):
     pass
@@ -48,10 +52,10 @@ def parse_llm_json(text: str, required_keys: list[str] = None, debug: bool = Fal
         raw_json = extractor(text)
         if raw_json:
             try:
-                if debug: print(f"[DEBUG] Attempting {name} extraction...")
+                if debug: logger.debug("Attempting %s extraction...", name)
                 return _parse_and_validate(raw_json, required_keys)
             except json.JSONDecodeError:
-                if debug: print(f"[DEBUG] JSON decode failed for {name}.")
+                if debug: logger.debug("JSON decode failed for %s.", name)
                 continue
             except JsonParsingError:
                 raise  # Required key missing
@@ -60,8 +64,8 @@ def parse_llm_json(text: str, required_keys: list[str] = None, debug: bool = Fal
     raw_json = extract_json_block_balanced(text)
     if raw_json:
         try:
-            if debug: print(f"[DEBUG] Attempting auto-repair...")
-            if debug: print(f"[DEBUG] Attempting auto-repair...")
+            if debug: logger.debug("Attempting auto-repair...")
+            if debug: logger.debug("Attempting auto-repair...")
             repaired = repair_json(raw_json)
             if isinstance(repaired, (dict, list)):
                 if required_keys and isinstance(repaired, dict):
@@ -69,7 +73,7 @@ def parse_llm_json(text: str, required_keys: list[str] = None, debug: bool = Fal
                 return repaired
             return _parse_and_validate(repaired, required_keys)
         except Exception:
-            if debug: print(f"[DEBUG] Repair attempt failed.")
+            if debug: logger.debug("Repair attempt failed.")
 
     raise JsonParsingError("All attempts to parse JSON from LLM output failed.")
 

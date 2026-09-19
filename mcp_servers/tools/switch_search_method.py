@@ -1,5 +1,6 @@
 import random
 import asyncio
+import logging
 import httpx
 import os
 from typing import List
@@ -7,12 +8,8 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import urllib.parse
 from playwright.async_api import async_playwright
-import sys
 
-# MCP Protocol Safety: Redirect print to stderr
-def print(*args, **kwargs):
-    sys.stderr.write(" ".join(map(str, args)) + "\n")
-    sys.stderr.flush()
+logger = logging.getLogger(__name__)
 
 # --- Configurable timeouts and retries ---
 def _config_int(name: str, default: int) -> int:
@@ -50,7 +47,7 @@ async def _retry_search(async_func, max_retries: int = SEARCH_RETRIES, base_dela
             last_exc = e
             if attempt < max_retries:
                 delay = base_delay * (2 ** attempt)
-                print(f"⚠️ Search retry {attempt + 1}/{max_retries} after {delay:.1f}s: {e}")
+                logger.warning("Search retry %d/%d after %.1fs: %s", attempt + 1, max_retries, delay, e)
                 await asyncio.sleep(delay)
     raise last_exc
 
@@ -73,7 +70,7 @@ class RateLimiter:
         last = self.last_called.get(key)
         if last and (now - last) < self.cooldown:
             wait = (self.cooldown - (now - last)).total_seconds()
-            print(f"Rate limiting {key}, sleeping for {wait:.1f}s")
+            logger.debug("Rate limiting %s, sleeping for %.1fs", key, wait)
             await asyncio.sleep(wait)
         self.last_called[key] = now
 
@@ -118,7 +115,7 @@ async def use_duckduckgo_http(query: str) -> List[str]:
             links.append(href)
 
     if not links:
-        print("[duck_http] No links found in results")
+        logger.warning("[duck_http] No links found in results")
 
     return links
 
@@ -139,7 +136,7 @@ async def use_playwright_search(query: str, engine: str) -> List[str]:
             }
 
             search_url = f"{engine_url_map[engine]}?q={query.replace(' ', '+')}"
-            print(f"🔗 Navigating to {search_url}")
+            logger.debug("Navigating to %s", search_url)
             await page.goto(search_url)
             await asyncio.sleep(3)
 
@@ -167,12 +164,12 @@ async def use_playwright_search(query: str, engine: str) -> List[str]:
                 results = await page.query_selector_all("a.title")
 
             else:
-                print("Unknown engine")
+                logger.warning("Unknown engine")
                 return []
 
             if not results:
-                print(f"[{engine}] No URLs found — possibly blocked or CAPTCHA.")
-                print("Please solve CAPTCHA or wait for results. We'll retry in 20 seconds...")
+                logger.warning("[%s] No URLs found — possibly blocked or CAPTCHA.", engine)
+                logger.warning("Please solve CAPTCHA or wait for results. We'll retry in 20 seconds...")
                 await asyncio.sleep(5)
                 # Retry logic
                 if engine == "duck_playwright":
@@ -198,14 +195,14 @@ async def use_playwright_search(query: str, engine: str) -> List[str]:
                     if href.startswith("http") and href not in urls:
                         urls.append(href)
                 except Exception as e:
-                    print(f"Skipped a bad link: {e}")
+                    logger.debug("Skipped a bad link: %s", e)
         except Exception as e:
-            print(f"Error while processing {engine}: {e}")
+            logger.warning("Error while processing %s: %s", engine, e)
         finally:
             await browser.close()
 
     if not urls:
-        print(f"Still no URLs found for {engine} after retry.")
+        logger.warning("Still no URLs found for %s after retry.", engine)
 
     return urls
 
@@ -221,7 +218,7 @@ async def smart_search(query: str, limit: int = 5) -> List[str]:
                 results = await use_playwright_search(query, engine)
             return results[:limit] if results else None
         except Exception as e:
-            print(f"Engine {engine} failed: {e}")
+            logger.warning("Engine %s failed: %s", engine, e)
             return None
 
     # Parallel attempt for first two engines
@@ -234,15 +231,15 @@ async def smart_search(query: str, limit: int = 5) -> List[str]:
     for engine in SEARCH_ENGINES:
         if engine in first_batch:
             continue
-        print(f"Trying engine: {engine}")
+        logger.info("Trying engine: %s", engine)
         try:
             results = await _retry_search(lambda: use_playwright_search(query, engine))
             if results:
                 return results[:limit]
         except Exception as e:
-            print(f"Engine {engine} failed: {e}. Trying next...")
+            logger.warning("Engine %s failed: %s. Trying next...", engine, e)
 
-    print("All engines failed.")
+    logger.error("All engines failed.")
     return []
 
 if __name__ == "__main__":

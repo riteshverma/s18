@@ -1,11 +1,10 @@
-import os
 import json
 import importlib.util
 import inspect
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Type
-from .base import BaseSkill, SkillMetadata
+from typing import Dict, Optional, Type
+from .base import BaseSkill
 
 logger = logging.getLogger("skill_manager")
 

@@ -1,8 +1,12 @@
 from typing import List, Any, Dict
 from core.skills.base import BaseSkill, SkillMetadata
 from pathlib import Path
+import logging
 import re
 import aiohttp
+
+logger = logging.getLogger(__name__)
+
 
 class WebClipperSkill(BaseSkill):
     def get_metadata(self) -> SkillMetadata:
@@ -26,7 +30,7 @@ class WebClipperSkill(BaseSkill):
         url_match = re.search(r"https?://[^\s]+", query)
         
         if not url_match:
-            print("❌ Web Clipper: No URL found in query")
+            logger.warning("Web Clipper: No URL found in query")
             return
 
         url = url_match.group(0)
@@ -47,7 +51,7 @@ class WebClipperSkill(BaseSkill):
             target = Path(f"data/Notes/Clips/{safe_name}_{self.context.run_id}.md")
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(report)
-            print(f"✅ Web Clipper saved clone to {target}")
+            logger.info("Web Clipper saved clone to %s", target)
             
             return {
                 "file_path": str(target),
@@ -57,5 +61,5 @@ class WebClipperSkill(BaseSkill):
             }
             
         except Exception as e:
-            print(f"❌ Web Clipper failed: {e}")
+            logger.error("Web Clipper failed: %s", e)
             return {"error": str(e)}

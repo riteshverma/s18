@@ -1,6 +1,6 @@
 # web_tools_async.py
 import asyncio
-import traceback
+import logging
 import time
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
@@ -8,13 +8,10 @@ from readability import Document
 import trafilatura
 import random
 from pathlib import Path
-import sys
 import os
+import traceback
 
-# MCP Protocol Safety: Redirect print to stderr
-def print(*args, **kwargs):
-    sys.stderr.write(" ".join(map(str, args)) + "\n")
-    sys.stderr.flush()
+logger = logging.getLogger(__name__)
 
 DIFFICULT_WEBSITES_PATH = Path(__file__).parent / "difficult_websites.txt"
 

@@ -1,13 +1,15 @@
 # MCP Router - Manages Model Context Protocol servers and tools
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Dict, Any
 from pathlib import Path
 import re
-import os
+import logging
 
 # Import shared state
 from shared.state import get_multi_mcp
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["MCP"])
 
@@ -63,7 +65,7 @@ async def call_mcp_tool(request: CallToolRequest):
         return result
     except Exception as e:
         # Improve error logging
-        print(f"Error calling tool {request.tool_name} on {request.server_name}: {e}")
+        logger.error("Error calling tool %s on %s: %s", request.tool_name, request.server_name, e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/mcp/tools")
@@ -75,10 +77,10 @@ async def get_mcp_tools():
         # Ideally this should be centralized, but here we assume regular structure
         # routers/mcp.py -> parent -> mcp_servers
         server_path = (Path(__file__).parent.parent / "mcp_servers").resolve()
-        print(f"🔍 Scanning for MCP tools in: {server_path}")
-        
+        logger.info("Scanning for MCP tools in: %s", server_path)
+
         if not server_path.exists():
-            print(f"❌ server_path DOES NOT EXIST: {server_path}")
+            logger.warning("server_path DOES NOT EXIST: %s", server_path)
             return {"tools": []}
 
         # More robust regex:
@@ -95,11 +97,11 @@ async def get_mcp_tools():
         )
         
         for py_file in server_path.glob("*.py"):
-            print(f"  📄 Scanning file: {py_file.name}")
+            logger.debug("Scanning file: %s", py_file.name)
             try:
                 content = py_file.read_text()
                 matches = list(tool_pattern.finditer(content))
-                print(f"    - Found {len(matches)} tools")
+                logger.debug("Found %d tools", len(matches))
                 
                 for match in matches:
                     name = match.group(1)
@@ -112,7 +114,7 @@ async def get_mcp_tools():
                     })
 
             except Exception as ex:
-                print(f"Failed to scan {py_file}: {ex}")
+                logger.warning("Failed to scan %s: %s", py_file, ex)
                 continue
                 
         return {"tools": tools}
@@ -194,13 +196,13 @@ async def add_mcp_server(request: AddServerRequest):
                             servers.append(request.name)
                             agent_config['agents'][agent_name]['mcp_servers'] = servers
                             updated = True
-                            print(f"  🤖 Auto-assigned {request.name} to {agent_name}")
+                            logger.info("Auto-assigned %s to %s", request.name, agent_name)
                 
                 if updated:
                     with open(AGENT_CONFIG_PATH, 'w') as f:
                         yaml.dump(agent_config, f, default_flow_style=False, sort_keys=False)
         except Exception as e:
-            print(f"  ⚠️ Failed to auto-assign server to agents: {e}")
+            logger.warning("Failed to auto-assign server to agents: %s", e)
             # Don't fail the whole request, just log warning
 
         return {"status": "success", "message": f"Server {request.name} added and assigned to agents"}

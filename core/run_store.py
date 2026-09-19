@@ -1,10 +1,15 @@
 import json
+import logging
 import sqlite3
 import threading
+import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
+
+logger = logging.getLogger(__name__)
 
 RUN_STORE_PATH = Path("data/system/agent_runs.sqlite")
 _RUN_STATUSES = {
@@ -32,6 +37,25 @@ def _normalize_status(status: Optional[str]) -> str:
     if normalized not in _RUN_STATUSES:
         return "failed"
     return normalized
+
+
+def generate_run_id() -> str:
+    """Unique, roughly time-ordered run id: epoch-ms plus a random suffix.
+
+    A bare epoch-ms timestamp collides when two runs start in the same
+    millisecond, and upsert semantics would silently merge them.
+    """
+    return f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+
+
+def merge_run_metadata(run_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge updates into a run's stored metadata JSON and persist it."""
+    store = get_run_store()
+    existing = store.get_run(run_id) or {}
+    metadata = dict(existing.get("metadata") or {})
+    metadata.update(updates)
+    store.update_run(run_id, metadata=metadata)
+    return metadata
 
 
 class RunStore:
@@ -82,6 +106,24 @@ class RunStore:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status)"
                 )
+                # Backstop for concurrent creates of the same event: at most one
+                # row per (idempotency_key, tenant_id). The tenant is part of the
+                # key so identical payloads from different tenants never collide,
+                # matching the tenant-scoped lookup in create_run. Legacy
+                # databases that already hold duplicate keys simply skip the
+                # index instead of failing startup.
+                try:
+                    conn.execute(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_idempotency "
+                        "ON agent_runs(idempotency_key, tenant_id) "
+                        "WHERE idempotency_key IS NOT NULL"
+                    )
+                except sqlite3.Error as exc:
+                    logger.warning(
+                        "Skipping unique index idx_agent_runs_idempotency "
+                        "(duplicate idempotency rows?): %s",
+                        exc,
+                    )
                 conn.commit()
             finally:
                 conn.close()
@@ -236,6 +278,28 @@ class RunStore:
             conn = self._connect()
             try:
                 row = conn.execute("SELECT * FROM agent_runs WHERE run_id=?", (run_id,)).fetchone()
+            finally:
+                conn.close()
+        return self._row_to_run(row) if row else None
+
+    def get_run_by_idempotency_key(
+        self,
+        idempotency_key: str,
+        tenant_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Most recent run stored for an idempotency key, optionally tenant-scoped."""
+        if not idempotency_key:
+            return None
+        sql = "SELECT * FROM agent_runs WHERE idempotency_key = ?"
+        params: list[Any] = [idempotency_key]
+        if tenant_id:
+            sql += " AND tenant_id = ?"
+            params.append(tenant_id)
+        sql += " ORDER BY created_at DESC, rowid DESC LIMIT 1"
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(sql, params).fetchone()
             finally:
                 conn.close()
         return self._row_to_run(row) if row else None

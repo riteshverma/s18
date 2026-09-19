@@ -1,6 +1,4 @@
 import requests
-import json
-import sys
 import time
 
 BASE_URL = "http://localhost:8000"
@@ -93,7 +91,7 @@ def test_rag_availability():
         log("RAG Endpoint is reachable.", "SUCCESS")
     except requests.exceptions.ConnectionError:
         log("RAG Endpoint unreachable. Is the backend running?", "ERROR")
-    except:
+    except Exception:
         log("RAG Endpoint reachable (errors expected for empty body).", "SUCCESS")
 
 if __name__ == "__main__":

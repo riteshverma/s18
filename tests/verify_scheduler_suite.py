@@ -1,13 +1,11 @@
 import sys
 import os
 import asyncio
-import logging
-from datetime import datetime
 
 # Setup paths
 sys.path.append(os.getcwd())
 
-from core.scheduler import scheduler_service, JobDefinition
+from core.scheduler import JobDefinition
 from core.skills.manager import skill_manager
 from core.event_bus import event_bus
 

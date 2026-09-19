@@ -14,9 +14,7 @@ Usage:
 import asyncio
 import json
 import sys
-import os
 import argparse
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -161,7 +159,7 @@ async def run_benchmark(
         console.print("[red]No matching test cases found![/red]")
         return []
     
-    console.print(f"\n[bold]GAIA Benchmark Runner[/bold]")
+    console.print("\n[bold]GAIA Benchmark Runner[/bold]")
     console.print(f"Running {len(test_cases)} test(s)...\n")
     if delay_seconds > 0:
         console.print(f"[yellow]Delay between tests: {delay_seconds} seconds[/yellow]")
@@ -243,6 +241,8 @@ def print_summary(results: List[Dict]):
 
 
 def main():
+    from core.logging_setup import configure_logging
+    configure_logging()
     parser = argparse.ArgumentParser(description="GAIA Benchmark Runner")
     parser.add_argument("--id", type=str, help="Run specific test by ID")
     parser.add_argument("--category", type=str, choices=["travel", "research", "coding", "data", "reasoning"],

@@ -1,5 +1,4 @@
 import sys
-from datetime import datetime
 import asyncio
 import logging
 
@@ -37,7 +36,6 @@ async def test_scheduler():
             # apscheduler might take a split second to calculate next run
             
     # 4. Verify Persistence File
-    import json
     from pathlib import Path
     if Path("data/system/jobs.json").exists():
         print("✅ Persistence file created.")
@@ -57,6 +55,8 @@ async def test_scheduler():
     print("🎉 Scheduler Test Complete.")
 
 if __name__ == "__main__":
+    from core.logging_setup import configure_logging
+    configure_logging()
     # AsyncIOScheduler requires a running loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

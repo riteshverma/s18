@@ -1,7 +1,9 @@
 from typing import List, Any, Dict
 from core.skills.base import BaseSkill, SkillMetadata
 from pathlib import Path
-import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 class MarketAnalystSkill(BaseSkill):
     def get_metadata(self) -> SkillMetadata:
@@ -80,11 +82,11 @@ class MarketAnalystSkill(BaseSkill):
         # IMPORTANT: If the file already exists and is large, and our new content is "Completed.",
         # do NOT overwrite it!
         if target.exists() and content == "Completed." and target.stat().st_size > 100:
-            print(f"ℹ️ Skipping overwrite of {target} with placeholder info.")
+            logger.info("Skipping overwrite of %s with placeholder info.", target)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(f"# 📈 Market Briefing\n\n{content}")
-            print(f"✅ Market Analyst saved briefing to {target}")
+            logger.info("Market Analyst saved briefing to %s", target)
         
         return {
             "file_path": str(target),

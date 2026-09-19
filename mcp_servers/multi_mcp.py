@@ -1,13 +1,15 @@
 
 import asyncio
+import logging
 import sys
 import shutil
 import json
 import os
 import subprocess
-import builtins
 import contextvars
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Windows: ProactorEventLoop required for asyncio subprocess (uv run MCP server)
 if sys.platform == "win32":
@@ -16,7 +18,6 @@ from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import Tool
-from rich import print as rich_print
 from core.prometheus_metrics import MCP_TOOL_CALLS_TOTAL, MCP_TOOL_LATENCY_MS, elapsed_ms, now_ms
 from config.settings_loader import (
     get_mcp_mode,
@@ -110,7 +111,7 @@ class MultiMCP:
             try:
                 return json.loads(self.config_path.read_text())
             except Exception as e:
-                print(f"⚠️ Failed to load MCP config: {e}")
+                logger.warning("MCP failed to load MCP config: %s", e)
         return {}
 
     def _save_config(self):
@@ -118,14 +119,15 @@ class MultiMCP:
         try:
             self.config_path.write_text(json.dumps(self.server_configs, indent=2))
         except Exception as e:
-            print(f"⚠️ Failed to save MCP config: {e}")
+            logger.warning("MCP failed to save MCP config: %s", e)
 
     def _load_disabled_tools(self):
         if self.disabled_tools_path.exists():
             try:
                 data = json.loads(self.disabled_tools_path.read_text())
                 self.disabled_tools = set(data)
-            except: pass
+            except Exception as e:
+                logger.warning("MCP failed to load disabled tools: %s", e)
 
     def _save_disabled_tools(self):
         self.disabled_tools_path.write_text(json.dumps(list(self.disabled_tools)))
@@ -164,15 +166,15 @@ class MultiMCP:
                 # We can't strictly 'close' the session easily without closing the whole stack
                 # unless we manage per-session exit stacks (which would be better but complex refactor)
                 # For now, just removing it prevents further routing.
-                print(f"  🗑️ Removed server '{name}' from sessions")
+                logger.info("MCP removed server '%s' from sessions", name)
                 del self.sessions[name]
-                
+
             if name in self.tools:
                 del self.tools[name]
-                
+
             return True
         except Exception as e:
-            print(f"  ⚠️ Error removing server {name}: {e}")
+            logger.warning("MCP error removing server %s: %s", name, e)
             # Still return True if we managed to at least remove it from config? 
             # Or False? Let's return True effectively as "we tried our best to forget it"
             return True
@@ -181,7 +183,7 @@ class MultiMCP:
         """Start a single server with timeout protection"""
         # Skip if explicitly disabled
         if config.get("enabled", True) is False:
-            print(f"  ⏭️ [dim]Server '{name}' is disabled in config. Skipping.[/dim]")
+            logger.info("MCP server '%s' is disabled in config. Skipping.", name)
             self._set_server_result(name, "disabled")
             return False
 
@@ -212,7 +214,7 @@ class MultiMCP:
                 server_dir.parent.mkdir(parents=True, exist_ok=True)
                 
                 if not server_dir.exists():
-                     print(f"  ⬇️ Cloning {name} from {repo_url}...")
+                     logger.info("MCP cloning %s from %s...", name, repo_url)
                      # Use sync subprocess in a thread to avoid Windows asyncio subprocess issues
                      def _git_clone():
                          r = subprocess.run(
@@ -245,7 +247,7 @@ class MultiMCP:
                          if req_file.exists():
                              args.insert(run_idx + 3, "--with-requirements")
                              args.insert(run_idx + 4, str(req_file))
-                             print(f"  📦 Detected requirements.txt for {name}, auto-installing dependencies...")
+                             logger.info("MCP detected requirements.txt for %s, auto-installing dependencies...", name)
                          
                          # --- Smart Entry Point Detection ---
                          # The config might default to 'src/server.py', but the repo might use 'yfinance_mcp_server.py'
@@ -256,7 +258,10 @@ class MultiMCP:
                          # Construct full path to check
                          script_path = server_dir / current_script
                          if not script_path.exists():
-                             print(f"  ⚠️ Configured script '{current_script}' not found in {name}. Attempting auto-detection...")
+                             logger.warning(
+                                 "MCP configured script '%s' not found in %s. Attempting auto-detection...",
+                                 current_script, name,
+                             )
                              
                              # Search candidates
                              candidates = list(server_dir.glob("*_mcp_server.py")) + \
@@ -281,9 +286,9 @@ class MultiMCP:
                                  # Update args
                                  new_script = str(best_candidate.relative_to(server_dir))
                                  args[script_arg_idx] = new_script
-                                 print(f"  ✅ Auto-detected entry point: {new_script}")
+                                 logger.info("MCP auto-detected entry point: %s", new_script)
                              else:
-                                 print(f"  ❌ Could not auto-detect entry point for {name}")
+                                 logger.error("MCP could not auto-detect entry point for %s", name)
 
                      except ValueError:
                          pass
@@ -304,7 +309,7 @@ class MultiMCP:
                 cwd_param = str(cwd_path.resolve())
                 if not Path(cwd_param).exists():
                     detail = f"cwd does not exist: {cwd_param}"
-                    builtins.print(f"[MCP] {name} skipped: {detail}")
+                    logger.warning("[MCP] %s skipped: %s", name, detail)
                     self._set_server_result(name, "skipped", detail)
                     return False
 
@@ -315,7 +320,7 @@ class MultiMCP:
                     cmd = str(bun_exe)
                 else:
                     detail = "'bun' not found on PATH."
-                    builtins.print(f"[MCP] {name} skipped: {detail}")
+                    logger.warning("[MCP] %s skipped: %s", name, detail)
                     self._set_server_result(name, "skipped", detail)
                     return False
 
@@ -327,7 +332,7 @@ class MultiMCP:
                      # If falling back to python, we need to handle the directory/cwd manually
                      # or just hope it works?
                      # Ideally we shouldn't fallback for git repos if they rely on uv dependencies
-                     print(f"  ⚠️ 'uv' not found. Falling back to system python is risky for {name}.")
+                     logger.warning("[MCP] 'uv' not found. Falling back to system python is risky for %s.", name)
                      # Try to fix path to be absolute if we are not using uv (and not changing cwd)
                      # But we can't easily change cwd for just this process with StdioServerParameters efficiently?
                      # Actually we can just run python <full_path_to_script>
@@ -339,7 +344,7 @@ class MultiMCP:
             cmd_path = Path(cmd)
             if not cmd_path.is_absolute() and not shutil.which(cmd):
                 detail = f"command not found: {cmd}"
-                builtins.print(f"[MCP] {name} skipped: {detail}")
+                logger.warning("[MCP] %s skipped: %s", name, detail)
                 self._set_server_result(name, "skipped", detail)
                 return False
 
@@ -371,8 +376,8 @@ class MultiMCP:
                 
                 # List tools
                 if self.should_use_cached_metadata() and name in self._cached_metadata:
-                    # Use ASCII-only logging via standard print to avoid Windows console encoding issues
-                    builtins.print(f"[MCP] {name} tools loaded from cache.")
+                    # Use ASCII-only log messages to avoid Windows console encoding issues
+                    logger.info("[MCP] %s tools loaded from cache.", name)
                     cached_tools = []
                     for t_dict in self._cached_metadata[name]:
                         cached_tools.append(Tool(
@@ -386,34 +391,31 @@ class MultiMCP:
                     result = await session.list_tools()
                     self.tools[name] = result.tools
                     self._save_to_cache(name, result.tools)
-                    builtins.print(f"[MCP] {name} connected. Tools: {len(result.tools)}")
+                    logger.info("[MCP] %s connected. Tools: %s", name, len(result.tools))
                     self._set_server_result(name, "connected", "metadata_source=live")
-                
+
                 self.sessions[name] = session
 
         except TimeoutError:
-             builtins.print(f"[MCP] {name} timed out during startup.")
+             logger.error("[MCP] %s timed out during startup.", name)
              self._set_server_result(name, "timeout")
         except Exception as e:
-            import traceback
-            builtins.print(f"[MCP] {name} failed to start: {e}")
-            self._set_server_result(name, "failed", str(e))
-            traceback.print_exc()
+             logger.error("[MCP] %s failed to start: %s", name, e, exc_info=True)
+             self._set_server_result(name, "failed", str(e))
         except BaseException as e:
-            builtins.print(f"[MCP] {name} CRITICAL FAILURE: {e}")
-            self._set_server_result(name, "failed", str(e))
+             logger.critical("[MCP] %s CRITICAL FAILURE: %s", name, e)
+             self._set_server_result(name, "failed", str(e))
 
     async def start(self):
         """Start all configured servers"""
-        # Use plain ASCII to avoid Windows console encoding issues with emojis
-        builtins.print("[MCP] Starting MCP Servers...")
+        logger.info("[MCP] Starting MCP Servers...")
         self.start_results = {}
         self.start_completed = False
         for name, config in self.server_configs.items():
             if config.get("enabled", True):
                 await self._start_server(name, config)
             else:
-                builtins.print(f"[MCP] Skipping disabled server: {name}")
+                logger.info("[MCP] Skipping disabled server: %s", name)
                 self._set_server_result(name, "disabled")
         self.start_completed = True
         if self.is_strict_mode():
@@ -429,7 +431,7 @@ class MultiMCP:
 
     async def stop(self):
         """Stop all servers"""
-        builtins.print("[MCP] Stopping MCP Servers...")
+        logger.info("[MCP] Stopping MCP Servers...")
         await self.exit_stack.aclose()
 
     def get_all_tools(self) -> list:
@@ -493,11 +495,12 @@ class MultiMCP:
             raise ValueError(f"Server '{server_name}' not connected")
         trace_context = self._trace_context.get()
         if trace_context:
-            print(
-                f"[MCP trace] server={server_name} tool={tool_name} "
-                f"integration_id={trace_context.get('integration_id', 'default')} "
-                f"workflow_id={trace_context.get('workflow_id', 'generic')} "
-                f"contract_version={trace_context.get('contract_version', 'v1')}"
+            logger.debug(
+                "[MCP trace] server=%s tool=%s integration_id=%s workflow_id=%s contract_version=%s",
+                server_name, tool_name,
+                trace_context.get("integration_id", "default"),
+                trace_context.get("workflow_id", "generic"),
+                trace_context.get("contract_version", "v1"),
             )
         return await self.sessions[server_name].call_tool(tool_name, arguments)
 
@@ -548,9 +551,9 @@ class MultiMCP:
             else:
                 selected_server = sorted(matching_servers)[0]
                 if len(matching_servers) > 1:
-                    print(
-                        f"  ⚠️ Tool collision for '{tool_name}', "
-                        f"choosing '{selected_server}' from {matching_servers}"
+                    logger.warning(
+                        "MCP tool collision for '%s', choosing '%s' from %s",
+                        tool_name, selected_server, matching_servers,
                     )
 
             timeout_seconds = float(settings.get("mcp", {}).get("tool_timeout_seconds", 45))
@@ -581,7 +584,7 @@ class MultiMCP:
                 contract_version=contract_version,
             ).inc()
             raise  # Re-raise circuit errors without recording failure
-        except Exception as e:
+        except Exception:
             breaker.record_failure()
             MCP_TOOL_CALLS_TOTAL.labels(
                 tool=tool_name,
@@ -603,22 +606,20 @@ class MultiMCP:
         """Load metadata cache from file"""
         if self.cache_path.exists():
             try:
-                import json
                 return json.loads(self.cache_path.read_text())
             except Exception as e:
-                builtins.print(f"[MCP] Failed to load MCP cache: {e}")
+                logger.warning("[MCP] Failed to load MCP cache: %s", e)
         return {}
 
     def _save_to_cache(self, server_name: str, tools: list):
         """Save tool metadata to persistent cache"""
         try:
-            import json
             # Ensure directory exists
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # Load existing
             cache = self._load_cache()
-            
+
             # Update
             tool_list = []
             for t in tools:
@@ -628,17 +629,17 @@ class MultiMCP:
                     "inputSchema": t.inputSchema
                 })
             cache[server_name] = tool_list
-            
+
             # Write back
             self.cache_path.write_text(json.dumps(cache, indent=2))
-            builtins.print(f"[MCP] Cached metadata for {server_name}")
+            logger.info("[MCP] Cached metadata for %s", server_name)
         except Exception as e:
-            builtins.print(f"[MCP] Failed to save MCP cache for {server_name}: {e}")
+            logger.warning("[MCP] Failed to save MCP cache for %s: %s", server_name, e)
 
     async def refresh_server(self, server_name: str):
         """Force refresh tool metadata for a server"""
         if server_name in self.sessions:
-            builtins.print(f"[MCP] Refreshing tools for {server_name}...")
+            logger.info("[MCP] Refreshing tools for %s...", server_name)
             result = await self.sessions[server_name].list_tools()
             self.tools[server_name] = result.tools
             self._save_to_cache(server_name, result.tools)

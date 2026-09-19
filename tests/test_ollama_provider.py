@@ -19,6 +19,10 @@ def test_ollama_embedding_provider_routes_to_ollama_embed(monkeypatch):
     }
     monkeypatch.setattr(embedding_mod, "load_settings", lambda: fake_settings)
     monkeypatch.setattr(embedding_mod, "get_model", lambda _purpose: "nomic-embed-text")
+    # EMBED_MODEL is captured at import time from env-influenced settings; pin it
+    # so the test does not depend on GEMINI_API_KEY/profile vars present on the
+    # machine when core.embedding was first imported.
+    monkeypatch.setattr(embedding_mod, "EMBED_MODEL", "nomic-embed-text")
     def fake_get_ollama_url(endpoint="generate"):
         base = "http://127.0.0.1:11434"
         paths = {

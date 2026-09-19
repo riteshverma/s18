@@ -1,10 +1,13 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import json
+import logging
 import httpx
 from pathlib import Path
 from shared.state import PROJECT_ROOT
 from .browser_utils import perform_web_search, extract_url_content
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ide", tags=["IDE Agent"])
 
@@ -78,7 +81,7 @@ async def ask_ide_agent(request: Request):
                     filename = f"image_{timestamp}_{i}.{ext}"
                     (images_dir / filename).write_bytes(base64.b64decode(b64_str))
             except Exception as e:
-                print(f"Failed to save images: {e}")
+                logger.warning("Failed to save images: %s", e)
 
         # 1. Load System Prompt
         prompt_path = PROJECT_ROOT / "prompts" / "ide_agent_prompt.md"
@@ -194,6 +197,5 @@ Available Tools:
         return StreamingResponse(token_generator(), media_type="text/event-stream")
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error("IDE agent request failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

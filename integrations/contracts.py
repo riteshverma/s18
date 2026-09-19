@@ -42,6 +42,9 @@ class CanonicalRunResponse(BaseModel):
     request_id: Optional[str] = None
     idempotency_key: Optional[str] = None
     poll_timeout_seconds: Optional[int] = None
+    # True when the endpoint returned an existing run instead of accepting a
+    # new one (idempotent retry). Null for freshly accepted runs.
+    deduplicated: Optional[bool] = None
     integration_id: str = "default"
     workflow_id: str = "generic"
     contract_version: str = "v1"

@@ -26,7 +26,7 @@ for i in range(60):
             if out_str and out_str != '""':
                 try:
                     out = json.loads(out_str) if isinstance(out_str, str) else out_str
-                except:
+                except Exception:
                     out = None
                 if isinstance(out, dict):
                     c = out.get('confidence')

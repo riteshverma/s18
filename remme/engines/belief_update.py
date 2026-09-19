@@ -8,15 +8,13 @@ Manages how beliefs change over time:
 """
 
 import math
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 import json
 
 from remme.schemas.hub_schemas import (
     BeliefUpdateEngineSchema,
-    ConfidenceConfig,
-    RecencyDecayConfig,
     HubConfig,
 )
 
@@ -55,7 +53,7 @@ class BeliefUpdateEngine:
         """Save engine config to disk."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(self.config.model_dump_json(indent=2))
-        print(f"💾 Saved BeliefUpdateEngine config")
+        print("💾 Saved BeliefUpdateEngine config")
     
     def get_hub_config(self, hub_name: str) -> HubConfig:
         """Get configuration for a specific hub."""

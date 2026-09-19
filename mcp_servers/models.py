@@ -132,20 +132,11 @@ class ShellCommandInput(BaseModel):
 
 # --- RAG and Extraction Tools ---
 
-class UrlInput(BaseModel):
-    url: str
-
 class URLListOutput(BaseModel):
     result: List[str]
 
-class FilePathInput(BaseModel):
-    file_path: str
-
 class MarkdownInput(BaseModel):
     text: str
-
-class MarkdownOutput(BaseModel):
-    markdown: str
 
 class ChunkListOutput(BaseModel):
     chunks: List[str]

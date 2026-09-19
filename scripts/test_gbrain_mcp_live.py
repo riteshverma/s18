@@ -20,6 +20,8 @@ async def main() -> int:
         return 0
 
     # Import after cwd is irrelevant
+    from core.logging_setup import configure_logging
+    configure_logging()
     from mcp_servers.multi_mcp import MultiMCP
 
     mcp = MultiMCP()

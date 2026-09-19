@@ -1,8 +1,11 @@
 from typing import List, Any, Dict
 from core.skills.base import BaseSkill, SkillMetadata
+import logging
 import psutil
 import platform
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -39,7 +42,7 @@ class SystemMonitorSkill(BaseSkill):
         target = Path(f"data/Notes/System/Health_{self.context.run_id}.md")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(report)
-        print(f"✅ System Monitor saved report to {target}")
+        logger.info("System Monitor saved report to %s", target)
         
         return {
             "file_path": str(target),

@@ -1,8 +1,5 @@
-import sys
-import os
 import time
 import requests
-import json
 from pathlib import Path
 
 # Configuration
@@ -13,7 +10,7 @@ def check_health():
     try:
         r = requests.get(f"{API_BASE}/health")
         return r.status_code == 200
-    except:
+    except Exception:
         return False
 
 def run_suite():
@@ -128,7 +125,7 @@ def run_suite():
     results = []
 
     for i, job_def in enumerate(jobs, 1):
-        print(f"\n---------------------------------------------------------------")
+        print("\n---------------------------------------------------------------")
         print(f"🔄 Running Job {i}/{len(jobs)}: {job_def['name']}")
         print(f"   Query: {job_def['query']}")
         
@@ -150,7 +147,7 @@ def run_suite():
                  print(f"   🧠 Detected Skill: {job_data['skill_id']}")
             
             # 2. Trigger
-            print(f"   👉 Triggering execution...")
+            print("   👉 Triggering execution...")
             r = requests.post(f"{API_BASE}/cron/jobs/{job_id}/trigger")
             r.raise_for_status()
             
@@ -213,7 +210,7 @@ def run_suite():
                 try:
                      # requests.delete(f"{API_BASE}/cron/jobs/{job_id}")
                      print(f"   ℹ️ Job {job_id} persisted for frontend review.")
-                except:
+                except Exception:
                     pass
                     
         # Small buffer between jobs to let backend cool down

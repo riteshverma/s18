@@ -27,7 +27,7 @@ def _make_client():
 def test_runs_source_only_payload_stays_compatible():
     client = _make_client()
     with patch("routers.runs.log_inbound_request", new=AsyncMock(return_value=None)):
-        with patch("routers.runs.process_run", new=AsyncMock(return_value=None)):
+        with patch("core.run_service.process_run", new=AsyncMock(return_value=None)):
             resp = client.post(
                 "/runs",
                 json={

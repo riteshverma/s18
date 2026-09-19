@@ -1,6 +1,5 @@
 """Mock-only tests for cloud embedding providers and batching/retries."""
 
-import os
 import sys
 import types
 from pathlib import Path

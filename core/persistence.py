@@ -1,9 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any
 
-from core.scheduler import scheduler_service
 from core.event_bus import event_bus
 from shared.state import active_loops
 

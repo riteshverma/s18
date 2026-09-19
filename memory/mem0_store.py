@@ -1,11 +1,13 @@
 
-import os
-from rich import print
+import logging
+
+logger = logging.getLogger(__name__)
+
 try:
     from mem0 import Memory
 except ImportError:
     Memory = None
-    print("[yellow]⚠️ mem0 not installed. Memory features will be disabled.[/yellow]")
+    logger.warning("mem0 not installed. Memory features will be disabled.")
 
 class MemoryStore:
     def __init__(self, user_id="default_user", local_path=None):
@@ -15,9 +17,9 @@ class MemoryStore:
             config = {}
             if local_path:
                 config["db_path"] = local_path
-            
+
             self.m = Memory(config=config) if config else Memory()
-            print(f"[green] Mem0 initialized for user: {user_id}[/green]")
+            logger.info("Mem0 initialized for user: %s", user_id)
         else:
             self.m = None
 

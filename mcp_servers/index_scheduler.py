@@ -10,6 +10,7 @@ This module provides:
 
 import json
 import hashlib
+import logging
 import queue
 import threading
 import time
@@ -20,15 +21,25 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Callable
 from dataclasses import dataclass, field, asdict
 
+logger = logging.getLogger(__name__)
+# Standalone stdio server processes may have no logging configured; attach a
+# stderr handler so diagnostics remain visible without breaking JSON-RPC.
+if not logger.handlers and not logging.getLogger().handlers:
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
 
 def _log(msg: str):
     """Log to stderr to avoid breaking MCP JSON-RPC protocol."""
-    print(msg, file=sys.stderr)
+    logger.info(msg)
 
 
 try:
     from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifiedEvent, FileDeletedEvent
+    from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifiedEvent, FileDeletedEvent  # noqa: F401 -- watchdog availability probe; only FileSystemEventHandler is used here
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False

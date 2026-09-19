@@ -4,8 +4,6 @@ import uuid
 import random
 import logging
 import sys
-from datetime import datetime
-from pathlib import Path
 
 # Setup
 sys.path.append(".")
@@ -140,7 +138,7 @@ async def stress_scheduler(count: int = 50):
     if len(jobs) >= count:
         logger.info(f"✅ scheduler: Listed {len(jobs)} jobs in {duration:.4f}s")
     else:
-        logger.error(f"❌ scheduler: Job count mismatch")
+        logger.error("❌ scheduler: Job count mismatch")
         
     # Cleanup
     for jid in created_jobs:
@@ -208,4 +206,6 @@ async def main():
         traceback.print_exc()
 
 if __name__ == "__main__":
+    from core.logging_setup import configure_logging
+    configure_logging()
     asyncio.run(main())

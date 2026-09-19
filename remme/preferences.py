@@ -12,8 +12,8 @@ Based on the ChatGPT recommendations for preference systems:
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
+from dataclasses import dataclass
 
 
 # Default preferences path

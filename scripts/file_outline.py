@@ -14,7 +14,6 @@ def get_python_outline(file_path):
                 outline.append(f"CLASS: {node.name} (Line {node.lineno}-{node.end_lineno})")
             elif isinstance(node, ast.FunctionDef):
                 # Check if it's a method
-                parent = "MODULE"
                 outline.append(f"FUNC: {node.name} (Line {node.lineno}-{node.end_lineno})")
         return "\n".join(outline)
     except Exception as e:

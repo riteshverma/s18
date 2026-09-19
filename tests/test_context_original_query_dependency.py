@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -30,11 +31,11 @@ def test_get_inputs_falls_back_to_graph_original_query_when_globals_missing():
     assert inputs["original_query"] == "fallback query"
 
 
-def test_get_inputs_still_warns_for_missing_non_root_key(capsys):
+def test_get_inputs_still_warns_for_missing_non_root_key(caplog):
     ctx = _make_context("hello")
 
-    inputs = ctx.get_inputs(["patient_record"])
+    with caplog.at_level(logging.WARNING, logger="memory.context"):
+        inputs = ctx.get_inputs(["patient_record"])
 
     assert "patient_record" not in inputs
-    captured = capsys.readouterr()
-    assert "Missing dependency: 'patient_record'" in captured.out
+    assert any("Missing dependency: 'patient_record'" in record.message for record in caplog.records)

@@ -14,11 +14,13 @@ GPU indices are used in memory for search/build when configured.
 
 from __future__ import annotations
 
+import logging
 import os
-import sys
 import threading
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 _faiss: Any = None
 _gpu_resources: dict[int, Any] = {}
@@ -117,16 +119,15 @@ def _log_gpu_status_once() -> None:
         num = 0
     if faiss_use_gpu_requested():
         if num > 0:
-            print(
-                f"[faiss] GPU enabled (device {faiss_gpu_device()}, "
-                f"{num} GPU(s) visible to faiss)",
-                file=sys.stderr,
+            logger.info(
+                "[faiss] GPU enabled (device %s, %d GPU(s) visible to faiss)",
+                faiss_gpu_device(),
+                num,
             )
         else:
-            print(
+            logger.warning(
                 "[faiss] S18_FAISS_USE_GPU is set but faiss reports 0 GPUs; using CPU. "
-                "Install faiss-gpu and ensure CUDA drivers are available.",
-                file=sys.stderr,
+                "Install faiss-gpu and ensure CUDA drivers are available."
             )
 
 
@@ -166,7 +167,7 @@ def to_gpu(index: Any, *, device: Optional[int] = None) -> Any:
     try:
         return f.index_cpu_to_gpu(_gpu_resources(dev), dev, index)
     except Exception as exc:
-        print(f"[faiss] index_cpu_to_gpu failed, using CPU: {exc}", file=sys.stderr)
+        logger.warning("[faiss] index_cpu_to_gpu failed, using CPU: %s", exc)
         return index
 
 

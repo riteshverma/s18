@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Any
+from typing import Optional
 import asyncio
-import json
+import logging
 
 # Import directly from the tools used in server_browser
 try:
@@ -14,6 +14,8 @@ except ImportError:
     sys.path.append('.')
     from mcp_servers.tools.switch_search_method import smart_search
     from mcp_servers.tools.web_tools_async import smart_web_extract
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent")
 
@@ -71,7 +73,7 @@ async def agent_search(request: SearchRequest):
         }
 
     except Exception as e:
-        print(f"Agent Search Error: {e}")
+        logger.error("Agent Search Error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/read_url")

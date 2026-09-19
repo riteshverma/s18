@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException
-from typing import List, Dict, Any
+from fastapi import APIRouter
+from typing import List
 from pydantic import BaseModel
 from core.skills.manager import skill_manager
 

@@ -1,14 +1,10 @@
-import asyncio
 import networkx as nx
 from datetime import datetime
-from rich.console import Console
 from rich.text import Text
-from rich.live import Live
 from rich.tree import Tree
 from rich.layout import Layout
 from rich.panel import Panel
 from rich.align import Align
-from rich.table import Table
 
 class ExecutionVisualizer:
     def __init__(self, plan_graph):

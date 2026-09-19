@@ -3,11 +3,14 @@ Metrics Aggregator - Fleet-Level Telemetry for Dashboard Analytics
 Provides observatory-level insights across 400+ runs.
 """
 import json
+import logging
 import statistics
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from datetime import datetime
+from typing import Dict, List, Any
 from collections import defaultdict, Counter
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsAggregator:
@@ -34,7 +37,7 @@ class MetricsAggregator:
                     "data": data
                 })
             except Exception as e:
-                print(f"⚠️ Error reading {session_file}: {e}")
+                logger.warning("Error reading %s: %s", session_file, e)
         
         return sessions
 
@@ -76,8 +79,8 @@ class MetricsAggregator:
                     start = datetime.fromisoformat(created.replace("Z", "+00:00"))
                     end = datetime.fromisoformat(updated.replace("Z", "+00:00"))
                     durations.append((end - start).total_seconds())
-                except:
-                    pass
+                except Exception:
+                    logger.debug("Skipping session with unparseable created/updated timestamps")
             
             # Determine run outcome from nodes
             statuses = [n.get("status") for n in nodes]
@@ -209,8 +212,8 @@ class MetricsAggregator:
                         by_day[date_str]["successes"] += 1
                     elif status == "failed":
                         by_day[date_str]["failures"] += 1
-            except:
-                pass
+            except Exception:
+                logger.debug("Skipping node with malformed data in temporal aggregation")
         
         # Build sorted time series
         daily = []
@@ -531,8 +534,8 @@ class MetricsAggregator:
                 updated = datetime.fromisoformat(cached.get("last_updated", "2000-01-01T00:00:00"))
                 if (datetime.now() - updated).total_seconds() < 300:
                     return cached
-            except:
-                pass
+            except Exception:
+                logger.debug("Ignoring stale or unreadable dashboard cache at %s", self.cache_file)
         
         # Regenerate full telemetry
         sessions = self.scan_sessions()
@@ -562,7 +565,7 @@ class MetricsAggregator:
         """Write metrics to cache file"""
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_file.write_text(json.dumps(metrics, indent=2))
-        print(f"💾 Metrics cached to {self.cache_file}")
+        logger.debug("Metrics cached to %s", self.cache_file)
 
 
 # Singleton instance
