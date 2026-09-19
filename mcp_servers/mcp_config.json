@@ -26,6 +26,15 @@
     "type": "local-script",
     "enabled": true
   },
+  "computer": {
+    "command": "uv",
+    "args": [
+      "run",
+      "server_computer.py"
+    ],
+    "type": "local-script",
+    "enabled": true
+  },
   "yahoo_finance": {
     "type": "stdio-git",
     "source": "https://github.com/dino65-dev/Finance_mcp-server",
