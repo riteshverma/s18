@@ -1,32 +1,41 @@
+from typing import Optional
+
+from core.decisions.router import decision_flag
 from core.utils import log_step
 
 
-def is_cbc_payload_query(query: str) -> bool:
+def is_cbc_payload_query(query: str, decisions: Optional[dict] = None) -> bool:
     q = (query or "").lower()
-    return (
+    if (
         "[patient id:" in q
         and "request:" in q
         and "hemoglobin" in q
         and "wbc" in q
         and "platelets" in q
-    )
+    ):
+        return True
+    return decision_flag(decisions or {}, "is_cbc_payload")
 
 
-def is_fast_mode(query: str) -> bool:
-    return "[execution mode: fast]" in (query or "").lower()
+def is_fast_mode(query: str, decisions: Optional[dict] = None) -> bool:
+    if "[execution mode: fast]" in (query or "").lower():
+        return True
+    return decision_flag(decisions or {}, "wants_fast_mode")
 
 
-def is_mental_health_task_query(query: str) -> bool:
+def is_mental_health_task_query(query: str, decisions: Optional[dict] = None) -> bool:
     q = (query or "").lower()
-    return (
+    if (
         "[task: mental_health]" in q
         or '"task": "mental_health"' in q
         or '"task":"mental_health"' in q
-    )
+    ):
+        return True
+    return decision_flag(decisions or {}, "is_mental_health")
 
 
-def filter_memory_context_for_cbc(query: str, memory_context):
-    if not is_cbc_payload_query(query):
+def filter_memory_context_for_cbc(query: str, memory_context, decisions: Optional[dict] = None):
+    if not is_cbc_payload_query(query, decisions):
         return memory_context
     if not isinstance(memory_context, str) or not memory_context.strip():
         return memory_context
@@ -56,8 +65,8 @@ def filter_memory_context_for_cbc(query: str, memory_context):
     return filtered if filtered else None
 
 
-def filter_memory_context_for_mental_health(query: str, memory_context):
-    if not is_mental_health_task_query(query):
+def filter_memory_context_for_mental_health(query: str, memory_context, decisions: Optional[dict] = None):
+    if not is_mental_health_task_query(query, decisions):
         return memory_context
     if not isinstance(memory_context, str) or not memory_context.strip():
         return memory_context
@@ -87,8 +96,8 @@ def filter_memory_context_for_mental_health(query: str, memory_context):
     return filtered if filtered else None
 
 
-def enforce_cbc_full_mode_minimum_plan(query: str, out: dict):
-    if not is_cbc_payload_query(query) or is_fast_mode(query):
+def enforce_cbc_full_mode_minimum_plan(query: str, out: dict, decisions: Optional[dict] = None):
+    if not is_cbc_payload_query(query, decisions) or is_fast_mode(query, decisions):
         return
     if not isinstance(out, dict):
         return
@@ -126,8 +135,8 @@ def enforce_cbc_full_mode_minimum_plan(query: str, out: dict):
     log_step("Enforced CBC full-mode minimum multi-step plan")
 
 
-def enforce_mental_health_plan_guard(query: str, out: dict) -> bool:
-    if not is_mental_health_task_query(query):
+def enforce_mental_health_plan_guard(query: str, out: dict, decisions: Optional[dict] = None) -> bool:
+    if not is_mental_health_task_query(query, decisions):
         return False
     if not isinstance(out, dict):
         return False
