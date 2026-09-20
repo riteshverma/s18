@@ -35,6 +35,15 @@
     "type": "local-script",
     "enabled": true
   },
+  "browserskill": {
+    "command": "uv",
+    "args": [
+      "run",
+      "server_browserskill.py"
+    ],
+    "type": "local-script",
+    "enabled": true
+  },
   "yahoo_finance": {
     "type": "stdio-git",
     "source": "https://github.com/dino65-dev/Finance_mcp-server",
