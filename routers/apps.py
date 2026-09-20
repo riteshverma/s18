@@ -126,7 +126,7 @@ async def save_app_endpoint(request: SaveAppRequest):
         app_folder.mkdir(exist_ok=True)
         
         ui_file = app_folder / "ui.json"
-        data = request.dict()
+        data = request.model_dump()
         
         ui_file.write_text(json.dumps(data, indent=2))
         return {"status": "success", "id": request.id}

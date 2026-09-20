@@ -6,7 +6,7 @@ import ast
 import time
 import logging
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import asyncio
 from tools.sandbox import run_user_code
@@ -53,7 +53,7 @@ class ExecutionContextManager:
         self.user_input_event = asyncio.Event()
         self.user_input_value = None
 
-        self.plan_graph.graph['created_at'] = datetime.utcnow().isoformat()
+        self.plan_graph.graph['created_at'] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         self.plan_graph.graph['status'] = 'running'
         self.plan_graph.graph['globals_schema'] = {}
         self.plan_graph.graph['api_mode'] = api_mode
@@ -146,7 +146,7 @@ class ExecutionContextManager:
     def mark_running(self, step_id):
         """Mark step as running"""
         self.plan_graph.nodes[step_id]['status'] = 'running'
-        self.plan_graph.nodes[step_id]['start_time'] = datetime.utcnow().isoformat()
+        self.plan_graph.nodes[step_id]['start_time'] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         self._auto_save()
 
     def _has_executable_code(self, output):
@@ -515,7 +515,7 @@ class ExecutionContextManager:
 
         # Store results
         node_data['status'] = 'completed'
-        node_data['end_time'] = datetime.utcnow().isoformat()
+        node_data['end_time'] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         node_data['output'] = output
         node_data['cost'] = cost or 0.0
         node_data['input_tokens'] = input_tokens or 0
@@ -551,7 +551,7 @@ class ExecutionContextManager:
         """Mark step as failed"""
         node_data = self.plan_graph.nodes[step_id]
         node_data['status'] = 'failed'
-        node_data['end_time'] = datetime.utcnow().isoformat()
+        node_data['end_time'] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         node_data['error'] = str(error) if error else None
         
         if node_data['start_time']:

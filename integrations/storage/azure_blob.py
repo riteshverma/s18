@@ -161,8 +161,8 @@ class AzureBlobObjectStore(ObjectStore):
         # used when the client was built from a connection string.
         try:
             udk = client.get_user_delegation_key(
-                key_start_time=dt.datetime.utcnow() - dt.timedelta(minutes=1),
-                key_expiry_time=dt.datetime.utcnow() + dt.timedelta(seconds=ttl_seconds + 60),
+                key_start_time=dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) - dt.timedelta(minutes=1),
+                key_expiry_time=dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(seconds=ttl_seconds + 60),
             )
             sas = generate_blob_sas(
                 account_name=client.account_name,
@@ -170,7 +170,7 @@ class AzureBlobObjectStore(ObjectStore):
                 blob_name=full_key,
                 user_delegation_key=udk,
                 permission=BlobSasPermissions(read=True),
-                expiry=dt.datetime.utcnow() + dt.timedelta(seconds=ttl_seconds),
+                expiry=dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(seconds=ttl_seconds),
             )
         except Exception:
             sas = generate_blob_sas(
@@ -179,7 +179,7 @@ class AzureBlobObjectStore(ObjectStore):
                 blob_name=full_key,
                 account_key=client.credential.account_key,
                 permission=BlobSasPermissions(read=True),
-                expiry=dt.datetime.utcnow() + dt.timedelta(seconds=ttl_seconds),
+                expiry=dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(seconds=ttl_seconds),
             )
         return f"{self._uri(full_key)}?{sas}"
 

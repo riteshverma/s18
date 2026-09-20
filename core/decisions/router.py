@@ -23,7 +23,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from config.settings_loader import load_settings
 from core.circuit_breaker import get_breaker
-from core.decisions.jev_client import JevClient, JevError
+from core.decisions.jev_client import JevClient
 from core.utils import log_step
 
 _ENV_ENABLE = "S18_DECISIONS_ENABLED"

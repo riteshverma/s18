@@ -73,7 +73,7 @@ class SchedulerService:
 
     def save_jobs(self):
         """Persist jobs to JSON."""
-        data = [job.dict() for job in self.jobs.values()]
+        data = [job.model_dump() for job in self.jobs.values()]
         JOBS_FILE.write_text(json.dumps(data, indent=2))
 
     async def save_jobs_async(self):

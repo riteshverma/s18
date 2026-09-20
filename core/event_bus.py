@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import deque
 import weakref
 import time
@@ -32,7 +32,7 @@ class EventBus:
 
     async def publish(self, event_type: str, source: str, data: Dict[str, Any]):
         event = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             "type": event_type,
             "source": source,
             "data": data,

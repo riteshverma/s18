@@ -172,12 +172,12 @@ def _load_index_manifest(index_cache: Path) -> Optional[dict]:
 
 
 def _save_index_manifest(index_cache: Path, dim: int) -> None:
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     payload = {
         "version": INDEX_MANIFEST_VERSION,
         "embedding": _current_embedding_signature(dim=dim),
-        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
     }
     _manifest_path(index_cache).write_text(json.dumps(payload, indent=2))
 
@@ -2047,11 +2047,11 @@ def _process_documents_unlocked(target_path: str = None, specific_files: list[Pa
                                 "Run force reindex to rebuild vectors for the current embedding model."
                             )
                             mcp_log("ERROR", mismatch_msg)
-                            from datetime import datetime
+                            from datetime import datetime, timezone
                             ledger_data["files"][rel_path] = {
                                 "hash": fhash,
                                 "status": "error",
-                                "indexed_at": datetime.utcnow().isoformat() + "Z",
+                                "indexed_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
                                 "chunk_count": 0,
                                 "error": mismatch_msg
                             }
@@ -2069,11 +2069,11 @@ def _process_documents_unlocked(target_path: str = None, specific_files: list[Pa
                         CACHE_META[rel_path] = fhash # Update cache
                         
                         # Update ledger with new format
-                        from datetime import datetime
+                        from datetime import datetime, timezone
                         ledger_data["files"][rel_path] = {
                             "hash": fhash,
                             "status": "complete",
-                            "indexed_at": datetime.utcnow().isoformat() + "Z",
+                            "indexed_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
                             "chunk_count": len(new_embs),
                             "error": None
                         }

@@ -96,3 +96,30 @@ docs/S18_POSITIONING_PLAYBOOK.md
 
 # Clinical reference PDFs (copyright; keep locally — copy from partner docs if needed)
 data/wise/**/*.pdf
+
+# Ingest job ledger (runtime state; see integrations/ingest/jobs.py)
+data/ingest/_jobs/
+
+# Skill and pipeline outputs written at runtime
+data/Notes/
+data/judiciary/review_queue/
+
+# LLM usage ledger (runtime, append-only)
+memory/usage_ledger/
+
+# Benchmark runs: generated workspaces and intermediate result files.
+# Curated results are committed deliberately with `git add -f`.
+benchmarks/clawbench/results/
+
+# LaTeX build artifacts (paper sources are tracked; these are generated)
+docs/research/*.aux
+docs/research/*.out
+docs/research/*.toc
+docs/research/*.bbl
+docs/research/*.blg
+docs/research/*.fls
+docs/research/*.fdb_latexmk
+docs/research/*.synctex.gz
+
+# Editor and config backups
+*.bak

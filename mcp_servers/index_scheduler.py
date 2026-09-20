@@ -17,7 +17,7 @@ import time
 import os
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Callable
 from dataclasses import dataclass, field, asdict
 
@@ -118,7 +118,7 @@ class IndexLedger:
                 self._data["files"][rel_path] = FileEntry(
                     hash=file_hash,
                     status="complete",
-                    indexed_at=datetime.utcnow().isoformat() + "Z",
+                    indexed_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
                     chunk_count=0  # Unknown from old format
                 ).to_dict()
             self._save()
@@ -173,7 +173,7 @@ class IndexLedger:
             self._data["files"][rel_path] = FileEntry(
                 hash=file_hash,
                 status="complete",
-                indexed_at=datetime.utcnow().isoformat() + "Z",
+                indexed_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
                 chunk_count=chunk_count,
                 error=None
             ).to_dict()
@@ -208,7 +208,7 @@ class IndexLedger:
     def update_reconcile_time(self):
         """Update the last reconciliation timestamp."""
         with self.lock:
-            self._data["last_reconcile"] = datetime.utcnow().isoformat() + "Z"
+            self._data["last_reconcile"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
             self._save()
     
     def all_files(self) -> Dict[str, FileEntry]:

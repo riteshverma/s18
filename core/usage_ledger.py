@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -12,7 +12,7 @@ LEDGER_FILE = LEDGER_DIR / "llm_usage.jsonl"
 def append_usage_event(event: Dict[str, Any]) -> None:
     LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         **(event or {}),
     }
     with open(LEDGER_FILE, "a", encoding="utf-8") as fh:

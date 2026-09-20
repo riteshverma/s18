@@ -34,7 +34,7 @@ from integrations.policies.workflow_guards import (
 from core.verification_gate import evaluate_verification_gate
 from ui.visualizer import ExecutionVisualizer
 from rich.console import Console
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # ===== EXPONENTIAL BACKOFF FOR TRANSIENT FAILURES =====
@@ -685,7 +685,7 @@ class AgentLoop4:
                 # ✅ Mark Query/Planner as Done
                 self.context.plan_graph.nodes["Query"]["output"] = plan_result["output"]
                 self.context.plan_graph.nodes["Query"]["status"] = "completed"
-                self.context.plan_graph.nodes["Query"]["end_time"] = datetime.utcnow().isoformat()
+                self.context.plan_graph.nodes["Query"]["end_time"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                 
                 # 🟢 PHASE 3: EXPAND GRAPH
                 # Merge the new plan into our existing context
